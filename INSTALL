@@ -1,0 +1,9 @@
+to install type:
+   "./configure"
+
+followed by:
+	 "make"
+
+Clann will then be located in this directory
+
+the use of "make install" may not work depending on write privilages
