@@ -3,7 +3,7 @@
  *  
  *
  *  Created by Chris Creevey on Sat Oct 04 2003.
- *  Copyright (c) 2003 - 2010 Chris Creevey. All rights reserved.
+ *  Copyright (c) 2003 - 2016 Chris Creevey. All rights reserved.
  *
  */
 
