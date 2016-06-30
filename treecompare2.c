@@ -13,6 +13,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <stddef.h>
 #include <time.h>
 #include <math.h>
 #include <signal.h>
@@ -102,7 +103,7 @@ int tree_build (int c, char *treestring, struct taxon *parent, int fromfile, int
 void prune_tree(struct taxon * super_pos, int fund_num);
 int treeToInt(char *array);
 int shrink_tree (struct taxon * position);
-int print_pruned_tree(struct taxon * position, int count, char *pruned_tree);
+int print_pruned_tree(struct taxon * position, int count, char *pruned_tree, int fullname);
 void reset_tree(struct	taxon * position);
 int count_taxa(struct taxon * position, int count);
 void check_tree(struct taxon * position, int tag_id, FILE *reconstructionfile);
@@ -224,8 +225,14 @@ void get_taxa(struct taxon *position, int *presence);
 void check_treeisok(struct taxon *position);
 void pathmetric_internals(char *string, struct taxon * species_tree, int **scores);
 void calculate_withins(struct taxon *position, int **within, int *presence);
+long extract_length(char * fullname);
+long list_taxa_in_clade(struct taxon * position, int * foundtaxa, struct taxon * longest, long seqlength); /* descend through the tree finding what taxa are there (and putting result into an array) and also identifying the longest sequence (the first number in the <<full>> name of the sequence, after the first "." and before the first "|") */
+void identify_species_specific_clades(struct taxon * position);
+void prune_monophylies(char *fund_tree);
 
 int spr_new(struct taxon * master, int maxswaps, int numspectries, int numgenetries);
+
+
 
 
 void controlc1(int signal);
@@ -817,7 +824,24 @@ int main(int argc, char *argv[])
 																															}
 																														}
 																													else
-																														printf("Error: command not known.\n\tType help at the prompt to get a list of available commands.\n");
+                                                                                                                        {
+                                                                                                                        if(strcmp(parsed_command[0], "prunemonophylies") == 0)
+                                                                                                                            {
+                                                                                                                            if(num_commands == 2 && parsed_command[1][0] == '?')
+                                                                                                                                print_commands(23);
+                                                                                                                            else
+                                                                                                                                {
+                                                                                                                                if(number_of_taxa > 0)
+                                                                                                                                    {
+                                                                                                                                    prune_monophylies();
+                                                                                                                                    }
+                                                                                                                                else
+                                                                                                                                    printf("Error: You need to load source trees before using this command\n"); 
+                                                                                                                                }
+                                                                                                                            }
+                                                                                                                        else   
+																														  printf("Error: command not known.\n\tType help at the prompt to get a list of available commands.\n");
+                                                                                                                        }
 																													}
 																												}
 																											}
@@ -4158,7 +4182,7 @@ float compare_trees(int spr)
 				shrink_tree(tree_top);    /* Shrink the pruned tree by switching off any internal nodes that are not needed */
 				
 				pruned_tree[0] = '\0'; /* initialise the string */
-				if(print_pruned_tree(tree_top, 0, pruned_tree) >1)
+				if(print_pruned_tree(tree_top, 0, pruned_tree, FALSE) >1)
 					{
 					tmp[0] = '\0';
 					strcpy(tmp, "(");
@@ -4574,12 +4598,12 @@ int shrink_tree (struct taxon * position)
 	
 
 /* This function is only used to print the pruned supertree */
-int print_pruned_tree(struct taxon * position, int count, char *pruned_tree)
+int print_pruned_tree(struct taxon * position, int count, char *pruned_tree, int fullname)
     {
     char *name ='\0', temper[100];
     int i=0;
     
-    name = malloc(30*sizeof(char));
+    name = malloc(1000000*sizeof(char));
     if(!name) memory_error(33);
     
     while(position != '\0')
@@ -4594,12 +4618,12 @@ int print_pruned_tree(struct taxon * position, int count, char *pruned_tree)
                     } 
                 strcat(pruned_tree, "(");
                 count++;
-                print_pruned_tree(position->daughter, 0, pruned_tree);
+                print_pruned_tree(position->daughter, 0, pruned_tree, fullname);
                 strcat(pruned_tree, ")");
 				}
             else
                 {
-                count = print_pruned_tree(position->daughter, count, pruned_tree);
+                count = print_pruned_tree(position->daughter, count, pruned_tree, fullname);
                 }
             }
         else
@@ -4611,8 +4635,17 @@ int print_pruned_tree(struct taxon * position, int count, char *pruned_tree)
                     strcat(pruned_tree, ",");
                     }
 
-                for(i=0; i<30; i++) name[i] = '\0';
-                totext(position->name, name);
+                name[0] = '\0';
+               /* totext(position->name, name); */ /* depreciated CC - June 2016*/ 
+
+                if(fullname == FALSE)
+                    {
+                    sprintf(name, "%d", position->name);
+                    }
+                else
+                    {
+                    strcpy(name, position->fullname);
+                    }  
                 strcat(pruned_tree, name);
                 count++;
                 }
@@ -10928,7 +10961,7 @@ void generatetrees(void)
 							shrink_tree(tree_top);    /* Shrink the pruned tree by switching off any internal nodes that are not needed */
 							for(j=0; j<1000; j++) pruned_tree[j] = '\0';
 							pruned_tree[0] = '\0'; /* initialise the string */
-							if(print_pruned_tree(tree_top, 0, pruned_tree) >1)
+							if(print_pruned_tree(tree_top, 0, pruned_tree, FALSE) >1)
 								{
 								tmp[0] = '\0';
 								strcpy(tmp, "(");
@@ -13731,7 +13764,7 @@ void exclude_taxa(int do_all)
 						pruned_tree[j] = '\0'; /* initialise the string */
 						tmp[j] = '\0';
 						}
-					if(print_pruned_tree(tree_top, 0, pruned_tree) >1)
+					if(print_pruned_tree(tree_top, 0, pruned_tree, FALSE) >1)
 						{
 						tmp[0] = '\0';
 						strcpy(tmp, "(");
@@ -14035,7 +14068,7 @@ void spr_dist(void)
 					shrink_tree(tree_top);    /* Shrink the pruned tree by switching off any internal nodes that are not needed */
 					for(j=0; j<1000; j++) pruned_tree[j] = '\0';
 					pruned_tree[0] = '\0'; /* initialise the string */
-					if(print_pruned_tree(tree_top, 0, pruned_tree) >1)
+					if(print_pruned_tree(tree_top, 0, pruned_tree, FALSE) >1)
 						{
 						tmp[0] = '\0';
 						strcpy(tmp, "(");
@@ -14392,7 +14425,7 @@ int string_SPR(char * string)
 		shrink_tree(tree_top);
 		temptree[0] = '\0';
 		/** printf the result **/
-		if(print_pruned_tree(tree_top, 0, temptree) >1)
+		if(print_pruned_tree(tree_top, 0, temptree, FALSE) >1)
 			{
 			tmp[0] = '\0';
 			strcpy(tmp, "(");
@@ -14760,7 +14793,7 @@ int exhaustive_SPR(char * string)
 			pruned_tree[0] = '\0';
 			
 			/** print the result **/
-			if(print_pruned_tree(tree_top, 0, pruned_tree) >1)
+			if(print_pruned_tree(tree_top, 0, pruned_tree, FALSE) >1)
 				{
 				tmp[0] = '\0';
 				strcpy(tmp, "(");
@@ -18847,5 +18880,147 @@ void check_treeisok(struct taxon *position)
 		}
 	}
 
-		
+
+
+/* function for Karen to automatically collapse clades that have all of the same taxa in them, keeping only the one with the longest sequence (found in the full name) */
+
+void prune_monophylies(char *fund_tree)
+    {
+    int i=0, j=0;
+    char *pruned_tree = NULL;
+    FILE *pm_outfile = NULL;
+    rp_outfile = fopen("prunedtrees.txt", "w");
+    
+    pruned_tree = malloc(10000000*sizeof(char));
+    pruned_tree[0] = '\0';
+
+    for(j=0; j<Total_fund_trees; j++)
+        {
+  
+        if(tree_top != NULL) dismantle_tree(tree_top);  /* Dismantle any trees already in memory */
+        tree_top = NULL;
+        
+        temp_top = NULL;
+        tree_build(1, fundamentals[j], tree_top, 0, -1); /* build the tree passed to the function */
+        tree_top = temp_top;
+        temp_top = NULL;
+        
+        identify_species_specific_clades(tree_top);  /* Call recursive function to travel down the tree looking for species-specific clades */
+        shrink_tree(tree_top);    /* Shrink the pruned tree by switching off any internal nodes that are not needed */
+        
+        pruned_tree[0] = '\0'; /* initialise the string */
+        if(print_pruned_tree(tree_top, 0, pruned_tree, TRUE) >1)
+            {
+            tmp[0] = '\0';
+            strcpy(tmp, "(");
+            strcat(tmp, pruned_tree);
+            strcat(tmp, ")");
+            strcpy(pruned_tree, tmp);
+            }
+        strcat(pruned_tree, ";");
+
+        fprintf(pm_outfile, "%s\n", pruned_tree);
+        }
+    
+    fclose(pm_outfile);
+    }
+
+
+void identify_species_specific_clades(struct taxon * position)
+    {
+    float total = 0;
+    int count = 0, taxa_count = 0, all_same_taxon = -1, *foundtaxa = NULL;
+    long seqlength = 0;
+    struct taxon * starting = position, *longest=NULL;
+    foundtaxa = malloc(number_of_taxa*sizeof(int));
+
+    /* identify if all descendant nodes are from the same species */
+    
+    for(i=0; i<number_of_taxa; i++) foundtaxa[i] = FALSE;  /* array to keep track of taxa to delete */
+    seqlength= list_taxa_in_clade(position, foundtaxa, longest, seqlength);
+    for(i=0; i<number_of_taxa; i++) {
+        if(foundtaxa[i] == TRUE) count++;  /* count the number of different taxa we found here */
+        }
+
+    if(count > 1)
+        {
+        reset_tree(position->daughter); /* if there was more than one species in this clade, then undo all the tagging from the previous */
+            /* no point going further down this clade if we already know they are all the same species */
+        while(position != NULL)
+            {
+            if(position->daughter != NULL)
+                identify_species_specific_clades(position->daughter); /* if this node has a daughter, then call new instance of the function on the daughter */
+            position = position->next_sibling;
+            }
+        }
+
+    free(foundtaxa);
+
+    }
+
+
+
+long list_taxa_in_clade(struct taxon * position, int * foundtaxa, struct taxon * longest, long seqlength) /* descend through the tree finding what taxa are there (and putting result into an array) and also identifying the longest sequence (the first number in the <<full>> name of the sequence, after the first "." and before the first "|") */
+    {
+
+    long newseqlength=0;
+    
+    while(position != NULL)
+        {
+        if(position->daughter != NULL)
+            {
+            seqlength = list_taxa_in_clade(position->daughter);
+            }
+        else
+            {
+            if(position->name != -1)
+                {
+                foundtaxa[position->name]=TRUE;
+                if((newseqlength = extract_length(position->fullname)) > seqlength) /* if this taxa has a longer length than the previously found longest */
+                    {
+                    seqlength = newseqlength;
+                    longest->tag = FALSE; /* mark the previously found largest for pruning */
+                    longest = position;
+                    }
+                else
+                    {
+                    position->tag=FALSE;    
+                    }
+                }           
+            }
+        position = position->next_sibling;
+        }
+    return(seqlength);
+    } 
+
+
+
+long extract_length(char * fullname)
+    {
+    /* this function assumes that the length of the sequence is embedded in the full name of the taxa in the form "SPECIESNAME.SEQLEN|BLAHBLAHBLAH"
+        the seperators can be a "." or a "|"
+    */
+
+    long seqlength = 0;
+    char name[100000];
+    char *eptr;
+
+    name[0] = '\0';
+    strcpy(name, fullname);
+
+    const char s[3] = ".|";
+    char *token;
+
+    token=strtok(name, s); /* get first token (in this case the species name) */
+    token = strtok(NULL, s); /* Get second token ( inthi case the squence length) */
+
+    seqlength = strtol(token, &eptr, 10); /* extract string version of number as long int */
+
+    return(seqlength);
+    }
+
+
+
+    
+
 		
