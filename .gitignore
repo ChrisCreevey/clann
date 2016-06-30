@@ -36,3 +36,23 @@ examples/supertree.ps
 examples/trees.ps
 
 Makefile
+
+dev_examples/RAxML_bestTree.renamed_p_cc101
+
+dev_examples/RAxML_bestTree.renamed_p_cc111
+
+dev_examples/Clann_source_trees.ph
+
+dev_examples/prunedtrees.txt
+
+dev_examples/RAxML_bestTree.renamed_p_cc101.ph
+
+config.h
+
+config.log
+
+config.log
+
+config.status
+
+Makefile

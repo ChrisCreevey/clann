@@ -17,6 +17,7 @@
 #include <time.h>
 #include <math.h>
 #include <signal.h>
+#include <unistd.h>
 
 #ifdef HAVE_READLINE /* from config.h */
 #include <readline/readline.h>
@@ -30,9 +31,9 @@
 /****** Define  ********/
 
 #define FUNDAMENTAL_NUM 1000
-#define TREE_LENGTH 1000
-#define TAXA_NUM 50
-#define NAME_LENGTH 50
+#define TREE_LENGTH 1000000
+#define TAXA_NUM 1000
+#define NAME_LENGTH 1000
 
 
 
@@ -140,7 +141,7 @@ void reset_spr (struct taxon *position);
 int remaining_spr (struct taxon *position);
 int spr(struct taxon * position, int maxswaps, int numspectries, int numgenetries);
 int regraft(struct taxon * position, struct taxon * newbie, struct taxon * last, int steps, int maxswaps,int numspectries,int numgenetries);
-int get_lengths(struct taxon *position);
+void get_lengths(struct taxon *position);
 int xposition1 (struct taxon *position, int count);
 float middle_number(struct taxon *position);
 void xposition2(struct taxon *position);
@@ -203,7 +204,7 @@ void reset_tag2(struct taxon * position);
 int assign_tag2(struct taxon * position, int num);
 void assign_before_after(struct taxon *position, int *previous, int *before, int *after, int num, int found);
 struct taxon * find_remaining(struct taxon * position);
-int exhaustive_SPR(char * string);
+void exhaustive_SPR(char * string);
 void print_tree_labels(struct taxon *position, int **results, int treenum, struct taxon *species_tree);
 int count_internal_branches(struct taxon *position, int count);
 float get_recon_score(char *giventree, int numspectries, int numgenetries);
@@ -213,6 +214,10 @@ void resolve_tricotomies(struct taxon *position, struct taxon *species_tree);
 void gene_content_parsimony(struct taxon * position, int * array);
 struct taxon * do_resolve_tricotomies(struct taxon * gene_tree, struct taxon * species_tree, int basescore);
 int presence_of_trichotomies(struct taxon * position);
+int are_siblings(struct taxon *position, int first, int second);
+int isit_onetoone(struct taxon *position, int onetoone);
+void print_onetoone_names(struct taxon *position, int onetoone);
+int get_best_node(struct taxon * position, int *presence, int num);
 
 void random_prune(char *fund_tree);
 void collapse_clades(struct taxon * position, float user_limit, int * to_delete, FILE *rp_outfile);
@@ -228,7 +233,7 @@ void calculate_withins(struct taxon *position, int **within, int *presence);
 long extract_length(char * fullname);
 long list_taxa_in_clade(struct taxon * position, int * foundtaxa, struct taxon * longest, long seqlength); /* descend through the tree finding what taxa are there (and putting result into an array) and also identifying the longest sequence (the first number in the <<full>> name of the sequence, after the first "." and before the first "|") */
 void identify_species_specific_clades(struct taxon * position);
-void prune_monophylies(char *fund_tree);
+void prune_monophylies();
 
 int spr_new(struct taxon * master, int maxswaps, int numspectries, int numgenetries);
 
@@ -242,18 +247,18 @@ void controlc4(int signal);
 void controlc5(int signal);
 
 /****************** Global variable definitions ****************/
-FILE * infile = '\0', *BR_file = '\0', *psfile = '\0', *logfile = '\0', *distributionreconfile = '\0', *onetoonefile = '\0', *strictonetoonefile = '\0';
-char **taxa_names = '\0', ***fulltaxanames = '\0', **parsed_command = '\0', **fundamentals = '\0', **stored_funds = '\0', **retained_supers = '\0', **stored_commands = '\0', *tempsuper = '\0', **best_topology = '\0', **tree_names = '\0';
-int  *numtaxaintrees = '\0', fullnamesnum = 0, fullnamesassignments = 1, fundamental_assignments = 0, tree_length_assignments = 1, parsed_command_assignments = 1, name_assignments = 0, *taxa_incidence = '\0', number_of_taxa = 0, Total_fund_trees = 0, *same_tree = '\0', **Cooccurrance = '\0', NUMSWAPS = 0;
-int ***fund_scores = '\0', ***stored_fund_scores = '\0', **super_scores = '\0', *number_of_comparisons = '\0', *stored_num_comparisons = '\0', **presence_of_taxa = '\0', **stored_presence_of_taxa = '\0', *presenceof_SPRtaxa = '\0';
-int num_commands = 0, number_retained_supers = 10, number_of_steps = 3, largest_tree = 0, smallest_tree = 1000000, criterion = 0, parts = 0, **total_coding = '\0', total_nodes = 0, quartet_normalising = 3, splits_weight = 2, dweight =1, *from_tree = '\0', method = 2, tried_regrafts = 0, hsprint = TRUE, max_name_length = NAME_LENGTH, got_weights = FALSE, num_excluded_trees = 0, num_excluded_taxa = 0, calculated_fund_scores = FALSE;
-struct taxon *tree_top = '\0', *temp_top = '\0', *temp_top2 = '\0', *branchpointer = '\0';
-float *scores_retained_supers = '\0', *partition_number = '\0', num_partitions = 0, total_partitions = 0, sprscore = -1, *best_topology_scores = '\0', **weighted_scores = '\0', *sourcetree_scores = '\0', *tree_weights = '\0';
-float *score_of_bootstraps = '\0', *yaptp_results = '\0', largest_length = 0, dup_weight = 1, loss_weight = 1, hgt_weight = 1, BESTSCORE = -1;
+FILE * infile = NULL, *BR_file = NULL, *psfile = NULL, *logfile = NULL, *distributionreconfile = NULL, *onetoonefile = NULL, *strictonetoonefile = NULL;
+char **taxa_names = NULL, ***fulltaxanames = NULL, **parsed_command = NULL, **fundamentals = NULL, **stored_funds = NULL, **retained_supers = NULL, **stored_commands = NULL, *tempsuper = NULL, **best_topology = NULL, **tree_names = NULL;
+int  *numtaxaintrees = NULL, fullnamesnum = 0, fullnamesassignments = 1, fundamental_assignments = 0, tree_length_assignments = 1, parsed_command_assignments = 1, name_assignments = 0, *taxa_incidence = NULL, number_of_taxa = 0, Total_fund_trees = 0, *same_tree = NULL, **Cooccurrance = NULL, NUMSWAPS = 0;
+int ***fund_scores = NULL, ***stored_fund_scores = NULL, **super_scores = NULL, *number_of_comparisons = NULL, *stored_num_comparisons = NULL, **presence_of_taxa = NULL, **stored_presence_of_taxa = NULL, *presenceof_SPRtaxa = NULL;
+int num_commands = 0, number_retained_supers = 10, number_of_steps = 3, largest_tree = 0, smallest_tree = 1000000, criterion = 0, parts = 0, **total_coding = NULL, total_nodes = 0, quartet_normalising = 3, splits_weight = 2, dweight =1, *from_tree = NULL, method = 2, tried_regrafts = 0, hsprint = TRUE, max_name_length = NAME_LENGTH, got_weights = FALSE, num_excluded_trees = 0, num_excluded_taxa = 0, calculated_fund_scores = FALSE;
+struct taxon *tree_top = NULL, *temp_top = NULL, *temp_top2 = NULL, *branchpointer = NULL;
+float *scores_retained_supers = NULL, *partition_number = NULL, num_partitions = 0, total_partitions = 0, sprscore = -1, *best_topology_scores = NULL, **weighted_scores = NULL, *sourcetree_scores = NULL, *tree_weights = NULL;
+float *score_of_bootstraps = NULL, *yaptp_results = NULL, largest_length = 0, dup_weight = 1, loss_weight = 1, hgt_weight = 1, BESTSCORE = -1;
 time_t interval1, interval2;
 double sup=1;
 char saved_supertree[400000],  *test_array, inputfilename[100];
-int trees_in_memory = 0, *sourcetreetag = '\0', remainingtrees = 0, GC, user_break = FALSE, delimiter = FALSE, print_log = FALSE, num_gene_nodes, testarraypos = 0, taxaorder=0;
+int trees_in_memory = 0, *sourcetreetag = NULL, remainingtrees = 0, GC, user_break = FALSE, delimiter = FALSE, print_log = FALSE, num_gene_nodes, testarraypos = 0, taxaorder=0;
 int malloc_check =0, count_now = FALSE, another_check =0;
 
 
@@ -261,10 +266,10 @@ int main(int argc, char *argv[])
     {
 	
     int i = 0, j=0, k=0, l=0, m=0, error=FALSE, x, doexecute_command = FALSE, command_line = FALSE;
-    char *command = '\0', HOME[100], PATH[200], exefilename[1000];
+    char *command = NULL, HOME[100], PATH[200], exefilename[1000];
     time_t time1, time2;
     double diff=0;    
-    FILE *tmpclann = '\0';
+    FILE *tmpclann = NULL;
 	
 	exefilename[0] = '\0';
 	inputfilename[0] = '\0';
@@ -359,10 +364,10 @@ int main(int argc, char *argv[])
     printf("\n\t\t*                                                 *");
     printf("\n\t\t*                 Clann  4.0                      *");
     printf("\n\t\t*                                                 *");
-    printf("\n\t\t* web:   http://bioinf.may.ie/software/clann      *");
+    printf("\n\t\t* web:   http://www.creeveylab.org                *");
     printf("\n\t\t* email: chris.creevey@gmail.com                  *");
     printf("\n\t\t*                                                 *");
-    printf("\n\t\t*   Copyright Chris Creevey 2003-2009             *");
+    printf("\n\t\t*   Copyright Chris Creevey 2003-2016             *");
     printf("\n\t\t*                                                 *");
     printf("\n\t\t***************************************************\n\n");
 
@@ -440,7 +445,7 @@ int main(int argc, char *argv[])
 										{
 										remove("clanntmp.chr");
 										remove("clanntree.chr");
-										pars("coding.nex", "clanntmp.chr");
+										/*pars("coding.nex", "clanntmp.chr"); */
 										remove("clanntmp.chr");
 										remove("clanntree.chr");
 										}
@@ -774,7 +779,7 @@ int main(int argc, char *argv[])
 																														{
 																														remove("clanntmp.chr");
 																														remove("clanntree.chr");
-																														pars();
+																														/*pars();*/
 																														remove("clanntmp.chr");
 																														remove("clanntree.chr");
 																														
@@ -926,7 +931,7 @@ int main(int argc, char *argv[])
                 strcat(command, ";");  
             
 			#ifdef HAVE_READLINE
-            if(strcmp(command, ";") != 0 && !command_line == TRUE)   /* if the command is not just a blank line */
+            if(strcmp(command, ";") != 0 && command_line == TRUE)   /* if the command is not just a blank line */
                 {
 /******/                add_history(command);
                 }
@@ -956,7 +961,7 @@ int main(int argc, char *argv[])
     free(command);
     free(tempsuper);
 	#ifdef HAVE_READLINE
-/****/ if(!command_line == TRUE) write_history(PATH);  /* write the history of commands to file */
+/****/ if(command_line == TRUE) write_history(PATH);  /* write the history of commands to file */
 	#endif
 /*	printf("malloc_check = %d x (%d)\n", malloc_check, sizeof(taxon_type));
  */   
@@ -1466,24 +1471,24 @@ void execute_command(char *commandline, int do_all)
 		if(yaptp_results != '\0')
 			{
 			free(yaptp_results);
-			yaptp_results = '\0';
+			yaptp_results = NULL;
 			}
 		num_excluded_trees = 0;
 		num_excluded_taxa = 0;
 		trees_in_memory = 0;
             /************************ Assign the dynamic arrays *************************/
         newbietree = malloc(500000*sizeof(char));
-		if(newbietree == '\0') memory_error(110);
+		if(newbietree == NULL) memory_error(110);
 		newbietree[0] = '\0';
-		if(weighted_scores != '\0')
+		if(weighted_scores != NULL)
 			{
 			for(i=0; i<number_of_taxa; i++)
 				free(weighted_scores[i]);
 			free(weighted_scores);
-			weighted_scores = '\0';
+			weighted_scores = NULL;
 			}
 		
-        if(fundamentals != '\0')  /* if we have assigned the fundamental array earlier */ 
+        if(fundamentals != NULL)  /* if we have assigned the fundamental array earlier */ 
             {
             for(i=0; i<fundamental_assignments*FUNDAMENTAL_NUM; i++)
                 {
@@ -1491,20 +1496,20 @@ void execute_command(char *commandline, int do_all)
                 }
             free(fundamentals);
 			
-            fundamentals = '\0';
+            fundamentals = NULL;
             }
 
         
 		
 		
-        if(presence_of_taxa != '\0')  /* if we have already assigned presence_of_taxa */
+        if(presence_of_taxa != NULL)  /* if we have already assigned presence_of_taxa */
             {
             for(i=0; i<fundamental_assignments*FUNDAMENTAL_NUM; i++)
                 {
                 free(presence_of_taxa[i]);
                 }
             free(presence_of_taxa);
-            presence_of_taxa = '\0';
+            presence_of_taxa = NULL;
             }
     
     
@@ -1513,25 +1518,25 @@ void execute_command(char *commandline, int do_all)
         tree_length_assignments = 1;   
 		
 
-		if(fulltaxanames != '\0')
+		if(fulltaxanames != NULL)
 			{
 			for(i=0; i<fundamental_assignments*FUNDAMENTAL_NUM; i++)
 				{
-				if(fulltaxanames[i] != '\0')
+				if(fulltaxanames[i] != NULL)
 					{
 					for(j=0; j<numtaxaintrees[i]; j++)
 						{
-						if(fulltaxanames[i][j] != '\0')
+						if(fulltaxanames[i][j] != NULL)
 							free(fulltaxanames[i][j]);
 						}
 					free(fulltaxanames[i]);
 					}
 				}
 			free(fulltaxanames);
-			fulltaxanames = '\0';
+			fulltaxanames = NULL;
 			}
 		
-		if(numtaxaintrees != '\0')
+		if(numtaxaintrees != NULL)
 			free(numtaxaintrees);		
 		fulltaxanames = malloc((fundamental_assignments*FUNDAMENTAL_NUM)*sizeof(char **));
 		if(!fulltaxanames) memory_error(106);
@@ -1546,13 +1551,13 @@ void execute_command(char *commandline, int do_all)
         for(i=0; i<fundamental_assignments*FUNDAMENTAL_NUM; i++)
             {
 			
-			fulltaxanames[i] = '\0';
+			fulltaxanames[i] = NULL;
 
 			tree_names[i] = malloc(100*sizeof(char));
 			if(!tree_names) memory_error(108);
 			tree_names[i][0] = '\0';
 			tree_weights[i] = 1;
-			fundamentals[i] = '\0';
+			fundamentals[i] = NULL;
          /*   fundamentals[i] = malloc((tree_length_assignments*TREE_LENGTH)*sizeof(char));
             if(!fundamentals[i]) memory_error(2);
                 
@@ -1560,7 +1565,7 @@ void execute_command(char *commandline, int do_all)
            */ }
     
     
-        if(fund_scores != '\0')  /* if we have already assigned fund_scores */
+        if(fund_scores != NULL)  /* if we have already assigned fund_scores */
             {
             for(i=0; i<Total_fund_trees; i++)
                 {
@@ -1571,11 +1576,11 @@ void execute_command(char *commandline, int do_all)
                 free(fund_scores[i]);
                 }
             free(fund_scores);
-            fund_scores = '\0';
+            fund_scores = NULL;
             }
 
     
-        if(taxa_names != '\0') /* if we have assigned taxa names earlier */
+        if(taxa_names != NULL) /* if we have assigned taxa names earlier */
             {
             for(i=0; i<TAXA_NUM*name_assignments; i++)
                 {
@@ -1583,10 +1588,10 @@ void execute_command(char *commandline, int do_all)
                 }
             free(taxa_names);
             free(taxa_incidence);
-            taxa_names = '\0';
+            taxa_names = NULL;
             }
     
-        if(Cooccurrance != '\0') /* if we have assigned taxa names earlier */
+        if(Cooccurrance != NULL) /* if we have assigned taxa names earlier */
             {
             for(i=0; i<TAXA_NUM*name_assignments; i++)
                 {
@@ -1594,8 +1599,8 @@ void execute_command(char *commandline, int do_all)
                 }
             free(Cooccurrance);
             free(same_tree);
-            Cooccurrance = '\0';
-            same_tree = '\0';
+            Cooccurrance = NULL;
+            same_tree = NULL;
             }
             
         name_assignments = 1;
@@ -1653,10 +1658,10 @@ void execute_command(char *commandline, int do_all)
             taxa_incidence[j] = 0;
     
         
-        if(number_of_comparisons != '\0')
+        if(number_of_comparisons != NULL)
             {
             free(number_of_comparisons);
-            number_of_comparisons = '\0';
+            number_of_comparisons = NULL;
             }
         
         number_of_comparisons = malloc((fundamental_assignments*FUNDAMENTAL_NUM)*sizeof(int));
@@ -1760,9 +1765,9 @@ void execute_command(char *commandline, int do_all)
                 }
             } /* end reading Phylip format trees */
 	fclose(infile); 
-	infile = '\0';
+	infile = NULL;
 	remainingtrees = Total_fund_trees;
-		if(sourcetreetag != '\0') free(sourcetreetag);
+		if(sourcetreetag != NULL) free(sourcetreetag);
 		sourcetreetag = malloc(Total_fund_trees*sizeof(int));
 		for(i=0; i<Total_fund_trees; i++) sourcetreetag[i] = TRUE;		
 		if(presenceof_SPRtaxa) free(presenceof_SPRtaxa);
@@ -1788,18 +1793,18 @@ void execute_command(char *commandline, int do_all)
 		for(i=0; i<Total_fund_trees; i++) sourcetree_scores[i] = -1;
 
         fund_scores = malloc(Total_fund_trees*sizeof(int**));
-        if(fund_scores == '\0') memory_error(35);
+        if(fund_scores == NULL) memory_error(35);
             
         for(i=0; i<Total_fund_trees; i++)
             {
             fund_scores[i] = malloc((number_of_taxa)*sizeof(int*));
-            if(fund_scores[i] == '\0') memory_error(36);
+            if(fund_scores[i] == NULL) memory_error(36);
             else
                 {
                 for(j=0; j<(number_of_taxa); j++)
                     {
                     fund_scores[i][j] = malloc((number_of_taxa)*sizeof(int));
-                    if(fund_scores[i][j] == '\0') memory_error(37);
+                    if(fund_scores[i][j] == NULL) memory_error(37);
                     else
                         {
                         for(k=0; k<(number_of_taxa); k++)
@@ -1822,8 +1827,8 @@ void execute_command(char *commandline, int do_all)
 void input_fund_tree(char *intree, int fundnum)
 	{
 	int i=0,j=0, k=0, r=0, tree_length = 0, taxaposition = 0, tottaxaintree = 0;
-	char temp[NAME_LENGTH], **temp_tree_names = '\0';
-	float *temp_tree_weights = '\0';
+	char temp[NAME_LENGTH], **temp_tree_names = NULL;
+	float *temp_tree_weights = NULL;
 	
 	/* count the number of commas in the tree string to figure out the number of taxa in the tree */
 	i=0;
@@ -1835,7 +1840,7 @@ void input_fund_tree(char *intree, int fundnum)
 	tottaxaintree++;
 
 	fulltaxanames[fundnum] = malloc(tottaxaintree*sizeof(char *)); 
-	for(i=0; i<tottaxaintree; i++) fulltaxanames[fundnum][i] = '\0';
+	for(i=0; i<tottaxaintree; i++) fulltaxanames[fundnum][i] = NULL;
 	numtaxaintrees[fundnum]=tottaxaintree;
 	tree_length = strlen(intree);
 	fundamentals[Total_fund_trees] = malloc((tree_length+100)*sizeof(char));
@@ -1891,7 +1896,7 @@ void input_fund_tree(char *intree, int fundnum)
 					}
 				temp[j] = '\0'; 
 				fulltaxanames[fundnum][taxaposition] = malloc((strlen(temp)+10)*sizeof(char));
-				if(fulltaxanames[fundnum][taxaposition] == '\0') memory_error(444);
+				if(fulltaxanames[fundnum][taxaposition] == NULL) memory_error(444);
 				fulltaxanames[fundnum][taxaposition][0] = '\0';
 				strcpy(fulltaxanames[fundnum][taxaposition], temp);
 				taxaposition++;
@@ -1953,14 +1958,14 @@ void input_fund_tree(char *intree, int fundnum)
 			}
 		
 		free(tree_names);
-		tree_names = '\0';
+		tree_names = NULL;
 		tree_names = malloc((fundamental_assignments*FUNDAMENTAL_NUM)*sizeof(char *));
 		if(!tree_names) memory_error(102);
 		temp_tree_weights = malloc(((fundamental_assignments-1)*FUNDAMENTAL_NUM)*sizeof(float));
 		for(i=0; i<((fundamental_assignments-1)*FUNDAMENTAL_NUM); i++)
 			temp_tree_weights[i] = tree_weights[i];
 		free(tree_weights);
-		tree_weights = '\0';
+		tree_weights = NULL;
 		
 		tree_weights = malloc((fundamental_assignments*FUNDAMENTAL_NUM)*sizeof(float));
 		if(!tree_weights) memory_error(103);
@@ -1978,21 +1983,21 @@ void input_fund_tree(char *intree, int fundnum)
 				}
 			}
 		free(temp_tree_names);
-		temp_tree_names = '\0';
+		temp_tree_names = NULL;
 		free(temp_tree_weights);
-		temp_tree_weights = '\0';
+		temp_tree_weights = NULL;
 		number_of_comparisons = realloc(number_of_comparisons, (fundamental_assignments*FUNDAMENTAL_NUM)*sizeof(int));
 		if(!number_of_comparisons) memory_error(105);
 		for(i=((fundamental_assignments-1)*FUNDAMENTAL_NUM); i<(fundamental_assignments*FUNDAMENTAL_NUM); i++)
 			number_of_comparisons[i] = 0;
 				
 		 /* store the contents of the fundamentals so far */
-		stored_funds = '\0';
+		stored_funds = NULL;
 		stored_funds = malloc((((fundamental_assignments-1)*FUNDAMENTAL_NUM)-2)*sizeof(char *));
 		if(!stored_funds) memory_error(43);
 		for(i=0; i<((fundamental_assignments-1)*FUNDAMENTAL_NUM)-2; i++)
 			{
-			stored_funds[i] = '\0';
+			stored_funds[i] = NULL;
 			j = (int)strlen(fundamentals[i]);
 			stored_funds[i] = malloc(j+100*sizeof(char));
 			if(!stored_funds[i]) memory_error(44);
@@ -2004,15 +2009,15 @@ void input_fund_tree(char *intree, int fundnum)
 		for(i=0; i<((fundamental_assignments-1)*FUNDAMENTAL_NUM); i++)
 			{
 			
-			if(fundamentals[i] != '\0')free(fundamentals[i]);
+			if(fundamentals[i] != NULL)free(fundamentals[i]);
 			}
 				free(fundamentals);
-		fundamentals = '\0';
+		fundamentals = NULL;
 		
 		/***** allocate the new size of fundamentals ********/
 		fulltaxanames = realloc(fulltaxanames, (fundamental_assignments*FUNDAMENTAL_NUM)*sizeof(char **));
 		for(i=(fundamental_assignments-1)*FUNDAMENTAL_NUM; i<fundamental_assignments*FUNDAMENTAL_NUM; i++)
-			fulltaxanames[i] = '\0';
+			fulltaxanames[i] = NULL;
 		
 		numtaxaintrees =realloc(numtaxaintrees, (fundamental_assignments*FUNDAMENTAL_NUM)*sizeof(int));
 		fundamentals = malloc((fundamental_assignments*FUNDAMENTAL_NUM)*sizeof(char *));
@@ -2020,7 +2025,7 @@ void input_fund_tree(char *intree, int fundnum)
 		
 		for(i=0; i< fundamental_assignments*FUNDAMENTAL_NUM; i++)
 			{
-			fundamentals[i] = '\0';
+			fundamentals[i] = NULL;
 			if(i<((fundamental_assignments-1)*FUNDAMENTAL_NUM)-2)
 				fundamentals[i] = malloc((strlen(stored_funds[i])+100)*sizeof(char));
 			else
@@ -2035,14 +2040,14 @@ void input_fund_tree(char *intree, int fundnum)
 		for(i=0; i<((fundamental_assignments-1)*FUNDAMENTAL_NUM)-2; i++)
 			free(stored_funds[i]);
 		free(stored_funds);
-		stored_funds = '\0';
+		stored_funds = NULL;
 				/***** now do the same for presence_of_taxa *********/
 		/*** store the present settings for presence_of_taxa ******/
 		
 		stored_presence_of_taxa = malloc(((fundamental_assignments-1)*FUNDAMENTAL_NUM)*sizeof(int *));
 		for(i=0; i<((fundamental_assignments-1)*FUNDAMENTAL_NUM)-2; i++)
 			{
-			stored_presence_of_taxa[i] = '\0';
+			stored_presence_of_taxa[i] = NULL;
 			stored_presence_of_taxa[i] = malloc((TAXA_NUM*name_assignments)*sizeof(int));
 			for(j=0; j<TAXA_NUM*name_assignments; j++)
 				stored_presence_of_taxa[i][j] = presence_of_taxa[i][j];
@@ -2052,7 +2057,7 @@ void input_fund_tree(char *intree, int fundnum)
 		for(i=0; i<((fundamental_assignments-1)*FUNDAMENTAL_NUM); i++)
 			free(presence_of_taxa[i]);
 		free(presence_of_taxa);
-		presence_of_taxa = '\0';
+		presence_of_taxa = NULL;
 		/*** create the new sized array for presence_of_taxa ******/
 		presence_of_taxa = malloc((fundamental_assignments*FUNDAMENTAL_NUM)*sizeof(int *));
 	   if(!presence_of_taxa) memory_error(14);
@@ -2075,7 +2080,7 @@ void input_fund_tree(char *intree, int fundnum)
 			free(stored_presence_of_taxa[i]);
 			}
 		free(stored_presence_of_taxa);
-		stored_presence_of_taxa = '\0';
+		stored_presence_of_taxa = NULL;
 				}
 	}
 
@@ -2099,17 +2104,17 @@ int nexusparser(FILE *nexusfile)
 	{
 	char c, begin[6] = {'b', 'e', 'g', 'i', 'n', '\0'}, translate[10] = {'t','r','a','n','s','l','a','t','e','\0'}, tree[5] = {'t','r','e','e','\0'};
 	int error = FALSE, i, j, k, l, translated = FALSE, num_taxa = 1000, num_trees = 0, found = FALSE, numtranslatedtaxa = 0;
-	char *string = '\0', ***names = '\0', *newtree, single[1000];
+	char *string = NULL, ***names = NULL, *newtree, single[1000];
 	
 	newtree = malloc(400000*sizeof(char));
 	newtree[0] = '\0';
 	string = malloc(400000*sizeof(char));
 	string[0] = '\0';
-	while((c = getc(nexusfile)) == ' ' || c == '\t' || c == '\n' || c == '\r' && !feof(nexusfile));
+	while(((c = getc(nexusfile)) == ' ' || c == '\t' || c == '\n' || c == '\r') && !feof(nexusfile));
 
 	while(!feof(nexusfile) && !error)
 		{
-		while((c = getc(nexusfile)) == ' ' || c == '\t' || c == '\n' || c == '\r' && !feof(nexusfile));
+		while(((c = getc(nexusfile)) == ' ' || c == '\t' || c == '\n' || c == '\r') && !feof(nexusfile));
 		switch(tolower(c))
 			{
 			case '[':
@@ -2122,7 +2127,7 @@ int nexusparser(FILE *nexusfile)
 					if((c = tolower(getc(nexusfile))) != begin[i]) error = TRUE;
 				if(!error)
 					{
-					while((c = getc(nexusfile)) == ' ' || c == '\t' || c == '\n' || c == '\r' && !feof(nexusfile));
+					while(((c = getc(nexusfile)) == ' ' || c == '\t' || c == '\n' || c == '\r') && !feof(nexusfile));
 					i = 0;
 					do {	/* find the type of block it is **/
 						string[i] = tolower(c);
@@ -2135,16 +2140,16 @@ int nexusparser(FILE *nexusfile)
 						while(strcmp(string, "end;") != 0 && strcmp(string, "endblock;") != 0 && !feof(nexusfile) && !error)
 							{
 							/*** read in the trees ***/
-							while((c = getc(nexusfile)) == ' ' || c == '\t' || c == '\n' || c == '\r' && !feof(nexusfile));
+							while(((c = getc(nexusfile)) == ' ' || c == '\t' || c == '\n' || c == '\r') && !feof(nexusfile));
 							while(c == '[')
 								{
 								comment(nexusfile);
-								while((c = getc(nexusfile)) == ' ' || c == '\t' || c == '\n' || c == '\r' && !feof(nexusfile));
+								while(((c = getc(nexusfile)) == ' ' || c == '\t' || c == '\n' || c == '\r') && !feof(nexusfile));
 								}
 							strcpy(string, "");
 							i=1;
 							string[0] = tolower(c);
-							while((c = getc(nexusfile)) != ' ' && c != '\n' && c != '\r' && !feof(nexusfile))
+							while(((c = getc(nexusfile)) != ' ' && c != '\n' && c != '\r') && !feof(nexusfile))
 								{
 								string[i] = tolower(c);
 								i++;
@@ -2154,10 +2159,10 @@ int nexusparser(FILE *nexusfile)
 								{
 								/** read in trees **/
 								/** read in the name of the tree **/
-								while((c = getc(nexusfile)) == ' ' || c == '\t' || c == '\n' || c == '\r' && !feof(nexusfile));
+								while(((c = getc(nexusfile)) == ' ' || c == '\t' || c == '\n' || c == '\r') && !feof(nexusfile));
 								i=1;
 								string[0] = c;
-								while((c = getc(nexusfile)) != ' ' && c != '\n' && c != '\r' && !feof(nexusfile))
+								while(((c = getc(nexusfile)) != ' ' && c != '\n' && c != '\r') && !feof(nexusfile))
 									{
 									string[i] = c;
 									i++;
@@ -2166,14 +2171,14 @@ int nexusparser(FILE *nexusfile)
 								strcpy(tree_names[Total_fund_trees], string);
 								
 								/*** look out for any weights **/
-								while((c = getc(nexusfile)) == ' ' || c == '\t' || c == '=' || c == '\n' || c == '\r' && !feof(nexusfile));
+								while(((c = getc(nexusfile)) == ' ' || c == '\t' || c == '=' || c == '\n' || c == '\r') && !feof(nexusfile));
 								while(c == '[')
 									{
 									if((c = getc(nexusfile)) == '&')
 										{
 										if((c = tolower(getc(nexusfile))) == 'w')
 											{
-											while((c = getc(nexusfile)) == ' ' || c == '\t' || c == '\n' || c == '\r' && !feof(nexusfile));
+											while(((c = getc(nexusfile)) == ' ' || c == '\t' || c == '\n' || c == '\r') && !feof(nexusfile));
 											i=1;
 											string[0] = c;
 											while((c = getc(nexusfile)) != ']' &&!feof(nexusfile))
@@ -2189,10 +2194,10 @@ int nexusparser(FILE *nexusfile)
 										}
 									else
 										while((c = getc(nexusfile)) != ']' &&!feof(nexusfile));
-									while((c = getc(nexusfile)) == ' ' || c == '\t' || c == '\n' || c == '\r' && !feof(nexusfile));
+									while(((c = getc(nexusfile)) == ' ' || c == '\t' || c == '\n' || c == '\r') && !feof(nexusfile));
 									}
 								
-								
+								 
 								/*** read in the tree **/
 								if(!translated)
 									{
@@ -2404,7 +2409,7 @@ int nexusparser(FILE *nexusfile)
 void input_file_summary(int do_all)
     {
     int i=0, j=0, k=0, l=0, limit, previous_limit, limit_reached;
-    float *size_of_trees = '\0';
+    float *size_of_trees = NULL;
 	
 	size_of_trees = malloc((Total_fund_trees-num_excluded_trees)*sizeof(float));
 	for(i=0; i<Total_fund_trees-num_excluded_trees; i++)
@@ -2492,7 +2497,7 @@ void input_file_summary(int do_all)
 			}
 		}
 			
-	draw_histogram('\0', (largest_tree-smallest_tree)+1, size_of_trees, Total_fund_trees-num_excluded_trees);
+	draw_histogram(NULL, (largest_tree-smallest_tree)+1, size_of_trees, Total_fund_trees-num_excluded_trees);
 	
 	
     printf("\t----------------------------------------------------\n");
@@ -2505,7 +2510,7 @@ void input_file_summary(int do_all)
 int assign_taxa_name(char *name,int fund)
 	{
 	int i =0, j=0, k=0, answer = -1, taxa_on_tree = 0;
-	char *delim = '\0';
+	char *delim = NULL;
 	
 	delim = malloc(10*sizeof(char));
 	delim[0] = '.';
@@ -2613,7 +2618,7 @@ int assign_taxa_name(char *name,int fund)
                 same_tree[i]++;
                 taxa_on_tree++;
                 number_of_taxa++;
-                if(fund = TRUE)
+                if(fund == TRUE)
                     {
                     presence_of_taxa[Total_fund_trees][i]++;
                     }
@@ -2629,7 +2634,7 @@ int assign_taxa_name(char *name,int fund)
 */
 char *xgets(char *s)
 	{
-	char ch, *p = '\0';
+	char ch, *p = NULL;
 	int t = 0;
         
         for(t=0; t<80; t++)
@@ -2665,20 +2670,20 @@ char *xgets(char *s)
 void clean_exit(int error)
     {
     int i=0, j=0;
-	if(weighted_scores != '\0')
+	if(weighted_scores != NULL)
 		{
 		for(i=0; i<number_of_taxa; i++)
 			free(weighted_scores[i]);
 		free(weighted_scores);
 		}
-	weighted_scores = '\0';
-	if(yaptp_results != '\0') free(yaptp_results);
-    if(stored_commands[i] != '\0')
+	weighted_scores = NULL;
+	if(yaptp_results != NULL) free(yaptp_results);
+    if(stored_commands[i] != NULL)
 		{
 		for(i=0; i<100; i++) free(stored_commands[i]);
 		free(stored_commands);
 		}
-	if(parsed_command != '\0')
+	if(parsed_command != NULL)
         {
         for(i=0; i<1000; i++)
 			{
@@ -2686,51 +2691,51 @@ void clean_exit(int error)
 			}
         free(parsed_command);
         }
-    if(retained_supers != '\0')
+    if(retained_supers != NULL)
         {
         for(i=0; i<number_retained_supers; i++)
             free(retained_supers[i]);
         free(retained_supers);
         }
-	if(fulltaxanames != '\0')
+	if(fulltaxanames != NULL)
 		{
 		for(i=0; i<fundamental_assignments*FUNDAMENTAL_NUM; i++)
 			{
-			if(fulltaxanames[i] != '\0')
+			if(fulltaxanames[i] != NULL)
 				{
 				for(j=0; j<numtaxaintrees[i]; j++)
 					{
-					if(fulltaxanames[i][j] != '\0')
+					if(fulltaxanames[i][j] != NULL)
 						free(fulltaxanames[i][j]);
 					}
 				free(fulltaxanames[i]);
 				}
 			}
 		free(fulltaxanames);
-		fulltaxanames = '\0';
+		fulltaxanames = NULL;
 		}
-	if(numtaxaintrees != '\0')
+	if(numtaxaintrees != NULL)
 		free(numtaxaintrees);		
 
-    if(fundamentals != '\0')  /* if we have assigned the fundamental array earlier */ 
+    if(fundamentals != NULL)  /* if we have assigned the fundamental array earlier */ 
         {
         for(i=0; i<fundamental_assignments*FUNDAMENTAL_NUM; i++)
             {
             free(fundamentals[i]);
             }
         free(fundamentals);
-        fundamentals = '\0';
+        fundamentals = NULL;
         }
-    if(presence_of_taxa != '\0')  /* if we have already assigned presence_of_taxa */
+    if(presence_of_taxa != NULL)  /* if we have already assigned presence_of_taxa */
         {
         for(i=0; i<fundamental_assignments*FUNDAMENTAL_NUM; i++)
             {
             free(presence_of_taxa[i]);
             }
         free(presence_of_taxa);
-        presence_of_taxa = '\0';
+        presence_of_taxa = NULL;
         }
-    if(fund_scores != '\0')  /* if we have already assigned fund_scores */
+    if(fund_scores != NULL)  /* if we have already assigned fund_scores */
         {
         for(i=0; i<Total_fund_trees; i++)
             {
@@ -2741,9 +2746,9 @@ void clean_exit(int error)
             free(fund_scores[i]);
             }
         free(fund_scores);
-        fund_scores = '\0';
+        fund_scores = NULL;
         }
-    if(taxa_names != '\0') /* if we have assigned taxa names earlier */
+    if(taxa_names != NULL) /* if we have assigned taxa names earlier */
         {
         for(i=0; i<TAXA_NUM*name_assignments; i++)
             {
@@ -2751,9 +2756,9 @@ void clean_exit(int error)
             }
         free(taxa_names);
         free(taxa_incidence);
-        taxa_names = '\0';
+        taxa_names = NULL;
         }
-    if(Cooccurrance != '\0') /* if we have assigned taxa names earlier */
+    if(Cooccurrance != NULL) /* if we have assigned taxa names earlier */
         {
         for(i=0; i<TAXA_NUM*name_assignments; i++)
             {
@@ -2761,34 +2766,34 @@ void clean_exit(int error)
             }
         free(Cooccurrance);
         free(same_tree);
-        Cooccurrance = '\0';
-        same_tree = '\0';
+        Cooccurrance = NULL;
+        same_tree = NULL;
         }
-    if(number_of_comparisons != '\0')
+    if(number_of_comparisons != NULL)
         {
         free(number_of_comparisons);
-        number_of_comparisons = '\0';
+        number_of_comparisons = NULL;
         }
-    if(tree_top != '\0')
+    if(tree_top != NULL)
         {
         dismantle_tree(tree_top);
-        tree_top = '\0';
+        tree_top = NULL;
         }
-    temp_top = '\0';
-    if(total_coding != '\0')
+    temp_top = NULL;
+    if(total_coding != NULL)
         {
         for(i=0; i<total_nodes; i++)
             free(total_coding[i]);
         free(total_coding);
-        total_coding = '\0';
+        total_coding = NULL;
         }
-    if(partition_number != '\0') free(partition_number);
-    if(from_tree != '\0') free(from_tree);
+    if(partition_number != NULL) free(partition_number);
+    if(from_tree != NULL) free(from_tree);
 
-    if(sourcetree_scores != '\0') free(sourcetree_scores);
+    if(sourcetree_scores != NULL) free(sourcetree_scores);
 	if(presenceof_SPRtaxa) free(presenceof_SPRtaxa);
 	
-	if(sourcetreetag != '\0') free(sourcetreetag);
+	if(sourcetreetag != NULL) free(sourcetreetag);
     if(error)
 		exit(1);
     else
@@ -2800,7 +2805,7 @@ void clean_exit(int error)
 void cal_fund_scores(int printfundscores)
     {
     int i =0, j=0, k=0;
-    FILE *dists = '\0';
+    FILE *dists = NULL;
         
 	calculated_fund_scores = TRUE;
     if(printfundscores)
@@ -2843,7 +2848,7 @@ void cal_fund_scores(int printfundscores)
         
         
         }
-    if(dists != '\0') fclose(dists);
+    if(dists != NULL) fclose(dists);
     }
 
 
@@ -2852,7 +2857,7 @@ void cal_fund_scores(int printfundscores)
     
 void pathmetric(char *string, int **scores)
     {
-    int i=0, j=0, charactercount = -1, **closeP = '\0', variable = 0; 
+    int i=0, j=0, charactercount = -1, **closeP = NULL, variable = 0; 
     char number[30];
 
 
@@ -2939,12 +2944,12 @@ void pathmetric(char *string, int **scores)
     for(i=0; i<number_of_taxa; i++)
         free(closeP[i]);
     free(closeP);
-    closeP = '\0';
+    closeP = NULL;
     }
     
 void pathmetric_internals(char *string, struct taxon * species_tree, int **scores)
     {
-    int i=0, j=0, charactercount = -1, **closeP = '\0', variable = 0, **within = '\0', *presence = '\0'; 
+    int i=0, j=0, charactercount = -1, **closeP = NULL, variable = 0, **within = NULL, *presence = NULL; 
     char number[30];
 
 	/* WE need a matrix telling us which taxa anf branches are within other branches */
@@ -3080,14 +3085,14 @@ void pathmetric_internals(char *string, struct taxon * species_tree, int **score
 	free(within);
 	free(presence);
 	free(closeP);
-    closeP = '\0';
+    closeP = NULL;
     }
 
 
 void calculate_withins(struct taxon *position, int **within, int *presence)
 	{
 	int i=0;
-	while(position != '\0')
+	while(position != NULL)
 		{
 		for(i=0; i<2*number_of_taxa; i++)
 			{
@@ -3097,7 +3102,7 @@ void calculate_withins(struct taxon *position, int **within, int *presence)
 				within[position->tag][i] = TRUE;
 				}
 			}
-		if(position->daughter != '\0')
+		if(position->daughter != NULL)
 			{
 			presence[position->tag] = TRUE;
 			calculate_withins(position->daughter, within, presence);
@@ -3111,7 +3116,7 @@ void weighted_pathmetric(char *string, float **scores, int fund_num)
     {
     int i=0, j=0, k=0, charactercount = -1, variable = 0, node_number = -1, open = 0; 
     char number[30];
-    float *taxa_weights = '\0', *node_weights = '\0',  **closeP = '\0';
+    float *taxa_weights = NULL, *node_weights = NULL,  **closeP = NULL;
 
      
     /* The array characters is used to keep track, for each taxa, the open and closed brackets that has followed each */
@@ -3255,7 +3260,7 @@ void weighted_pathmetric(char *string, float **scores, int fund_num)
     for(i=0; i<number_of_taxa; i++)
         free(closeP[i]);
     free(closeP);
-    closeP = '\0';
+    closeP = NULL;
 	free(taxa_weights);
 	free(node_weights);
 
@@ -3522,8 +3527,8 @@ int treeToInt(char *array)
 void intTotree(int tree_num, char *array, int num_taxa)
     {
     int  i = 0, j=0, k=0, l=0, exit = 0, bracket_count = 0;
-    char tmparray[400000], *string= '\0';
-	double supers = 1, max = 1, min = 0, oldmin = 0, *path = '\0';
+    char tmparray[400000], *string= NULL;
+	double supers = 1, max = 1, min = 0, oldmin = 0, *path = NULL;
 	
 	for(i=4; i<=num_taxa; i++) supers*=((2*i)-5);
 
@@ -3740,9 +3745,9 @@ float tofloat(char *number)
 void alltrees_search(int user)
     {
     int i = 0, j=0, all = TRUE, start = 0, end = 0, error = FALSE, keep = 0;
-    char *tree = '\0', *best_tree = '\0', outfilename[100];
+    char *tree = NULL, *best_tree = NULL, outfilename[100];
     float score = 0, best_score = 0, worst = 0;
-    FILE *treesfile = '\0', *userfile = '\0';
+    FILE *treesfile = NULL, *userfile = NULL;
     
     
     outfilename[0] = '\0';
@@ -3783,7 +3788,7 @@ void alltrees_search(int user)
                 }
             if(strcmp(parsed_command[i], "savetrees") == 0 && criterion != 1)
              {
-                if((userfile = fopen(parsed_command[i+1], "w")) == '\0')
+                if((userfile = fopen(parsed_command[i+1], "w")) == NULL)
                  {
                     printf("Error opening file named %s\n", parsed_command[i+1]);
                     error = TRUE;
@@ -3797,7 +3802,7 @@ void alltrees_search(int user)
             
             if(strcmp(parsed_command[i], "create") == 0)
                 {
-                if((treesfile = fopen("alltrees.ph", "w")) == '\0') 
+                if((treesfile = fopen("alltrees.ph", "w")) == NULL) 
                     {
                     printf("Error opening file named 'alltrees.ph'\n");
                     error = TRUE;
@@ -3866,9 +3871,9 @@ void alltrees_search(int user)
         }
     if(!error)
         {
-        if(userfile == '\0')
+        if(userfile == NULL)
             {
-            if((userfile = fopen("top_alltrees.txt", "w")) == '\0') 
+            if((userfile = fopen("top_alltrees.txt", "w")) == NULL) 
                 {
                 printf("Error opening file named 'alltrees.ph'\n");
                 error = TRUE;
@@ -3886,7 +3891,7 @@ void alltrees_search(int user)
             }
             
         printf("\n\nAlltrees (exhaustive search) settings:\n\trange: tree numbers %d to %d inclusive\n\tOutput file: %s\n\tCreate all trees? ", start, end, outfilename );
-        if(treesfile != '\0') printf("Yes\n");
+        if(treesfile != NULL) printf("Yes\n");
         else printf("No\n");
         printf("\tWeighting Scheme = ");
         if(criterion==0)
@@ -3931,7 +3936,7 @@ void alltrees_search(int user)
     
         /* this hold the distances calculated with the pathmetric on the supertree */
         
-        if(super_scores == '\0')
+        if(super_scores == NULL)
             {
             super_scores = malloc(number_of_taxa*sizeof(int *));
             if(!super_scores)  memory_error(27);
@@ -4002,15 +4007,15 @@ void alltrees_search(int user)
             if(criterion == 0)  /* if we are using mssa */
                 {
                 /****** We now need to build the Supertree in memory *******/
-                if(tree_top != '\0')
+                if(tree_top != NULL)
                     {
                     dismantle_tree(tree_top);
-                    tree_top = '\0';
+                    tree_top = NULL;
                     }
-                temp_top = '\0';
+                temp_top = NULL;
                 tree_build(1, tree, tree_top, FALSE, -1);
                 tree_top = temp_top;
-                temp_top = '\0';
+                temp_top = NULL;
                 score = compare_trees(FALSE);
                 }
             if(criterion == 2)  /* if we are using MRC */
@@ -4024,7 +4029,7 @@ void alltrees_search(int user)
                 score = (float)quartet_compatibility(tree);
                 }
                 
-            if(treesfile != '\0')  /* if the create option was selected */
+            if(treesfile != NULL)  /* if the create option was selected */
                 {
                 strcpy(best_tree, "");
                 print_named_tree(tree_top, best_tree);
@@ -4092,21 +4097,21 @@ void alltrees_search(int user)
             
             while(scores_retained_supers[i] != -1)
                 {
-                if(tree_top != '\0')
+                if(tree_top != NULL)
                     {
                     dismantle_tree(tree_top);
-                    tree_top = '\0';
+                    tree_top = NULL;
                     }
-                temp_top = '\0';
+                temp_top = NULL;
                 tree_build(1, retained_supers[i], tree_top, FALSE, -1);
                 tree_top = temp_top;
-                temp_top = '\0';
+                temp_top = NULL;
             
                 strcpy(best_tree, "");
             
                 print_named_tree(tree_top, best_tree);
                 
-                if(userfile != '\0') fprintf(userfile, "%s;\t[%f]\n", best_tree, scores_retained_supers[i] );
+                if(userfile != NULL) fprintf(userfile, "%s;\t[%f]\n", best_tree, scores_retained_supers[i] );
 
                 tree_coordinates(best_tree, FALSE, TRUE, FALSE, -1);
                 printf("\nSupertree %d of %d score = %f\n", i+1, j, scores_retained_supers[i] );
@@ -4124,9 +4129,9 @@ void alltrees_search(int user)
             }
         free(tree);
         free(best_tree);
-        if(treesfile != '\0')
+        if(treesfile != NULL)
             fclose(treesfile);
-        treesfile = '\0';
+        treesfile = NULL;
         fclose(psfile);
         
         fclose(userfile);
@@ -4255,7 +4260,7 @@ int tree_build (int c, char *treestring, struct taxon *parent, int fromfile, int
 	{
 	
 	char temp[NAME_LENGTH], tmptag[100];
-	struct taxon *position = '\0', *extra = '\0';
+	struct taxon *position = NULL, *extra = NULL;
 	int i = 0, j =0, end = FALSE, out = FALSE, onlylength = FALSE;
 	position = make_taxon();  /* make a new instance of the taxon for this level */
 
@@ -4263,7 +4268,7 @@ int tree_build (int c, char *treestring, struct taxon *parent, int fromfile, int
 	for(i=0; i<NAME_LENGTH; i++)
 		temp[i] = '\0';
 	
-	if(parent == '\0') temp_top = position;  /* assign the pointer in the array to the top of this tree */
+	if(parent == NULL) temp_top = position;  /* assign the pointer in the array to the top of this tree */
 	else
 		{
 		position->parent = parent;
@@ -4278,7 +4283,7 @@ int tree_build (int c, char *treestring, struct taxon *parent, int fromfile, int
 			{
 			case '(':
 				/* If we assigned this taxon before */
-				if(position->daughter != '\0' || position->name != -1)
+				if(position->daughter != NULL || position->name != -1)
 					{
 					/* make a new taxon */
 					extra = make_taxon();
@@ -4324,7 +4329,7 @@ int tree_build (int c, char *treestring, struct taxon *parent, int fromfile, int
 			default:
 					
 				/* If we assigned this taxon before */
-				if(position->daughter != '\0' || position->name != -1)
+				if(position->daughter != NULL || position->name != -1)
 					{
 					/* make a new taxon */
 					extra = make_taxon();
@@ -4381,7 +4386,7 @@ int tree_build (int c, char *treestring, struct taxon *parent, int fromfile, int
 /* This makes the taxon structure when we need it so I don't have to keep typing the assignments all the time */
 struct taxon * make_taxon(void)
 	{
-	struct taxon *position = '\0';
+	struct taxon *position = NULL;
 	
 	if(count_now)malloc_check++;
 	
@@ -4389,11 +4394,11 @@ struct taxon * make_taxon(void)
 	if(!position)  memory_error(34);
 		
 	position->name = -1;
-	position->fullname = '\0';
-	position->daughter = '\0';
-	position->parent = '\0';
-	position->prev_sibling = '\0';
-	position->next_sibling = '\0';
+	position->fullname = NULL;
+	position->daughter = NULL;
+	position->parent = NULL;
+	position->prev_sibling = NULL;
+	position->next_sibling = NULL;
 	position->tag = TRUE;
 	position->tag2 = FALSE;
         position->xpos = 0;
@@ -4402,7 +4407,7 @@ struct taxon * make_taxon(void)
 		position->weight[0] = '\0';
 	position->loss = 0;
 	position->length = 0;
-	position->donor = '\0';
+	position->donor = NULL;
 	return(position);
 	}
 
@@ -4411,13 +4416,13 @@ void gene_content_parsimony(struct taxon * position, int * array)
 	/* Go to the last internal nodes on the tree that are still tagged, then calculate the possible number of copies for this node */
 	struct taxon *start = position;
 	
-	while(position != '\0')
+	while(position != NULL)
 		{
-		if(position->daughter != '\0' && position->tag > 0) gene_content_parsimony(position->daughter, array);
+		if(position->daughter != NULL && position->tag > 0) gene_content_parsimony(position->daughter, array);
 		position = position->next_sibling;		
 		}
 	position = start;
-	while(position != '\0')
+	while(position != NULL)
 		{
 		
 		
@@ -4430,16 +4435,16 @@ void prune_tree_from_array(struct taxon * super_pos, int * array)
 	int i=0, found = FALSE;
 	struct taxon *start = super_pos;
 	
-	while(super_pos != '\0')
+	while(super_pos != NULL)
 		{
 		super_pos->tag2 = super_pos->tag;
 		super_pos = super_pos->next_sibling;
 		}
 	super_pos = start;
-	while(super_pos != '\0')
+	while(super_pos != NULL)
 		{
 		found = FALSE;
-		if(super_pos->daughter != '\0')
+		if(super_pos->daughter != NULL)
 			{
 			prune_tree_from_array(super_pos->daughter, array);  /* If this is pointer sibling, move down the tree */
 			}
@@ -4459,10 +4464,10 @@ void prune_tree_from_array(struct taxon * super_pos, int * array)
 void add_internals_from_array(struct taxon * super_pos, int *array)
 	{
 	int i=0, found = FALSE;
-	while(super_pos != '\0')
+	while(super_pos != NULL)
 		{
 		found = FALSE;
-		if(super_pos->daughter != '\0')
+		if(super_pos->daughter != NULL)
 			{
 			if(array[super_pos->tag2] > 0)  	
 				{  /* if it's there */
@@ -4486,10 +4491,10 @@ void prune_tree(struct taxon * super_pos, int fund_num)
 	
 	/* Traverse the supertree, visiting every taxa and checking if that taxa is on the fundamental tree */
 	
-	while(super_pos != '\0')
+	while(super_pos != NULL)
 		{
 		
-		if(super_pos->daughter != '\0') prune_tree(super_pos->daughter, fund_num);  /* If this is pointer sibling, move down the tree */
+		if(super_pos->daughter != NULL) prune_tree(super_pos->daughter, fund_num);  /* If this is pointer sibling, move down the tree */
 	
 		if(super_pos->name != -1) /* If there is an actual taxa on this sibling */
 			{	
@@ -4521,13 +4526,13 @@ int shrink_tree (struct taxon * position)
 	int count = 0, tot = 0, i, j, k, l, havelabel = FALSE;
 	float one, two;
 	char tempstr[100] , tmplabel[100];
-	struct taxon *tmppos = '\0';
+	struct taxon *tmppos = NULL;
 	
 	tmplabel[0] = '\0';
 	
-	while(position != '\0')
+	while(position != NULL)
 		{
-		if(position->daughter != '\0') 
+		if(position->daughter != NULL) 
 			{
 			tot = shrink_tree(position->daughter);  /* tot will be equal to the number of daughters that this pointer has */
 		
@@ -4552,7 +4557,7 @@ int shrink_tree (struct taxon * position)
 						one = atof(tempstr);
 						tempstr[0] = '\0'; i=1; j=0;
 						tmppos = find_remaining(position->daughter);
-						if(tmppos != '\0')  /* if we haven't deleted everything in this clade */
+						if(tmppos != NULL)  /* if we haven't deleted everything in this clade */
 							{
 							k=0;
 							while( k < strlen(tmppos->weight) && tmppos->weight[k] != ':') k++;
@@ -4600,15 +4605,15 @@ int shrink_tree (struct taxon * position)
 /* This function is only used to print the pruned supertree */
 int print_pruned_tree(struct taxon * position, int count, char *pruned_tree, int fullname)
     {
-    char *name ='\0', temper[100];
+    char *name =NULL, temper[100];
     int i=0;
     
     name = malloc(1000000*sizeof(char));
     if(!name) memory_error(33);
     
-    while(position != '\0')
+    while(position != NULL)
         {
-        if(position->daughter != '\0')
+        if(position->daughter != NULL)
             {
             if(position->tag != FALSE)
                 {
@@ -4732,10 +4737,10 @@ char inttotext(int c)
 void reset_tree(struct	taxon * position)
 	{
 	
-	while(position != '\0')
+	while(position != NULL)
 		{
 		position->tag = TRUE;
-		if(position->daughter != '\0') reset_tree(position->daughter);
+		if(position->daughter != NULL) reset_tree(position->daughter);
 		position = position->next_sibling;
 		}
 	
@@ -4746,9 +4751,9 @@ int count_taxa(struct taxon * position, int count)
 	struct taxon * start = position;
 	int i =0;
 	
-	while(position != '\0')
+	while(position != NULL)
 		{
-		if(position->daughter != '\0')
+		if(position->daughter != NULL)
 			{
 			count = count_taxa(position->daughter, count);
 			}
@@ -4766,9 +4771,9 @@ int find_taxa(struct taxon * position, char *query)
 	struct taxon * start = position;
 	int i =0, found = FALSE;
 	
-	while(position != '\0')
+	while(position != NULL)
 		{
-		if(position->daughter != '\0')
+		if(position->daughter != NULL)
                     {
 					if(found == FALSE)
 						found = find_taxa(position->daughter, query);
@@ -4777,7 +4782,7 @@ int find_taxa(struct taxon * position, char *query)
                     {
                     if(position->name != -1)
 						{
-						if(strstr(taxa_names[position->name], query) != '\0')
+						if(strstr(taxa_names[position->name], query) != NULL)
 							found = TRUE;
 						}
                     }
@@ -4791,14 +4796,14 @@ int number_tree(struct taxon * position, int num)
 	struct taxon * start = position;
 	int i =0;
 	
-	while(position != '\0')
+	while(position != NULL)
 		{
-		if(position->daughter != '\0')
+		if(position->daughter != NULL)
 			num = number_tree(position->daughter, num);
 		position = position->next_sibling;
 		}
 	position = start;
-	while(position != '\0')
+	while(position != NULL)
 		{
 		position->tag = num;
 		num++;
@@ -4814,9 +4819,9 @@ void check_tree(struct taxon * position, int tag_id, FILE *reconstructionfile)
 	int i =0, found = FALSE;
 	
 	
-	while(position != '\0' && !found)
+	while(position != NULL && !found)
 		{
-		if(position->daughter != '\0')
+		if(position->daughter != NULL)
 			{
 			if(!found)check_tree(position->daughter, tag_id, reconstructionfile);
 			if(tag_id == position->tag)
@@ -4844,9 +4849,9 @@ void check_tree(struct taxon * position, int tag_id, FILE *reconstructionfile)
 int count_internal_branches(struct taxon *position, int count)
 	{
 	
-	while(position != '\0')
+	while(position != NULL)
 		{
-		if(position->daughter != '\0')
+		if(position->daughter != NULL)
 			{
 			count++;
 			count = count_internal_branches(position->daughter, count);
@@ -4859,9 +4864,9 @@ int count_internal_branches(struct taxon *position, int count)
 /* this identifies the taxa in a subtree passed to it */
 void identify_taxa(struct taxon * position, int *name_array)
 	{
-	while(position != '\0')
+	while(position != NULL)
 		{
-		if(position->daughter != '\0')
+		if(position->daughter != NULL)
 			{
 			identify_taxa(position->daughter, name_array);
 			}
@@ -4879,9 +4884,9 @@ int check_taxa(struct taxon * position)
 	struct taxon * start = position;
 	int i =0, number = 0;
 	
-	while(position != '\0')
+	while(position != NULL)
 		{
-		if(position->daughter != '\0')
+		if(position->daughter != NULL)
                     {
                     number += check_taxa(position->daughter);
                     }
@@ -4900,25 +4905,25 @@ void dismantle_tree(struct taxon * position)
 	struct taxon * start = position;
 	
 	/* first scan through this level and go down any pointer there are here */
-	while(position != '\0')
+	while(position != NULL)
 		{
-		if(position->daughter != '\0')
+		if(position->daughter != NULL)
 			dismantle_tree(position->daughter);
 			
 		position = position->next_sibling;
 		}
 	position = start;
-	while(position->next_sibling != '\0') position= position->next_sibling;
+	while(position->next_sibling != NULL) position= position->next_sibling;
 	
 	/* now remove every thing at this level */
-	while(position != '\0')
+	while(position != NULL)
 		{
 		
 		if(count_now)malloc_check--;
 		start = position;
 		position = position->prev_sibling;
-		if(start->donor != '\0') free(start->donor);
-		if(start->fullname != '\0') free(start->fullname);
+		if(start->donor != NULL) free(start->donor);
+		if(start->fullname != NULL) free(start->fullname);
 		free(start);
 		}	
 	}		
@@ -4926,10 +4931,10 @@ void dismantle_tree(struct taxon * position)
 
 void bootstrap_search(void)
     {
-    int i=0, j=0, k=0, l=0, random_num = 0, error = FALSE, *taxa_present = '\0', missing_method = 1;
+    int i=0, j=0, k=0, l=0, random_num = 0, error = FALSE, *taxa_present = NULL, missing_method = 1;
     int Nreps = 100, search = 1, allpresent = TRUE, num_results = 0;
-    char filename[1000], best_tree[1000], **bootstrap_results = '\0', consensusfilename[1000];
-    FILE *bootfile = '\0', *temp = '\0', *consensusfile = '\0';
+    char filename[1000], best_tree[1000], **bootstrap_results = NULL, consensusfilename[1000];
+    FILE *bootfile = NULL, *temp = NULL, *consensusfile = NULL;
 	float percentage = .5;
 
 	consensusfilename[0] = '\0';
@@ -5052,7 +5057,7 @@ void bootstrap_search(void)
 		if(percentage < 0.5)
 			printf("\tMajority rule with minor components ");
 		if(percentage > 0.5 && percentage != 1)
-			printf("%f cut-off ");
+			printf("%f cut-off ", percentage);
 		printf("consensus tree is to be constructed\n");
 		printf("\tConsensus file name = %s\n\n\n", consensusfilename);
 		
@@ -5073,19 +5078,19 @@ void bootstrap_search(void)
         for(i=0; i<Total_fund_trees; i++) stored_num_comparisons[i] = number_of_comparisons[i];
         
         stored_fund_scores = malloc(Total_fund_trees*sizeof(int**));
-        if(stored_fund_scores == '\0') memory_error(38);
+        if(stored_fund_scores == NULL) memory_error(38);
             
         for(i=0; i<Total_fund_trees; i++)
             {
             stored_fund_scores[i] = malloc((number_of_taxa)*sizeof(int*));
-            if(stored_fund_scores[i] == '\0') memory_error(39);
+            if(stored_fund_scores[i] == NULL) memory_error(39);
                 
             else
                 {
                 for(j=0; j<(number_of_taxa); j++)
                     {
                     stored_fund_scores[i][j] = malloc((number_of_taxa)*sizeof(int));
-                    if(stored_fund_scores[i][j] == '\0') memory_error(40);
+                    if(stored_fund_scores[i][j] == NULL) memory_error(40);
                         
                     else
                         {
@@ -5234,15 +5239,15 @@ void bootstrap_search(void)
 							{
 							if(search ==0)
 								{
-								if(tree_top != '\0')
+								if(tree_top != NULL)
 									{
 									dismantle_tree(tree_top);
-									tree_top = '\0';
+									tree_top = NULL;
 									}
-								temp_top = '\0';
+								temp_top = NULL;
 								tree_build(1, retained_supers[k], tree_top, FALSE, -1);
 								tree_top = temp_top;
-								temp_top = '\0';
+								temp_top = NULL;
 							
 								strcpy(best_tree, "");
 								print_named_tree(tree_top, best_tree);
@@ -5430,7 +5435,7 @@ void bootstrap_search(void)
 			{
 			/***** Do a consensus of the results ******/
 			consensusfile = fopen(consensusfilename, "w");
-			consensus(num_results, bootstrap_results, Nreps, percentage, consensusfile, '\0'); 
+			consensus(num_results, bootstrap_results, Nreps, percentage, consensusfile, NULL); 
 			fclose(consensusfile);
 			}
 			
@@ -5501,19 +5506,20 @@ void print_named_tree(struct taxon * position, char *tree)
 	{
 	struct taxon *place = position;
 	int count = 0, j=0;
-        char *name = '\0';
+        char *name = NULL;
 	strcat(tree, "(");
         
 	name = malloc(30*sizeof(char));
 	name[0] = '\0';
-	while(position != '\0')
+	while(position != NULL)
 		{
 		if(count >0) strcat(tree, ",");
-		if(position->daughter != '\0')
+		if(position->daughter != NULL)
 			{
 			print_named_tree(position->daughter, tree);
 		/*	sprintf(name, "%d", position->tag);
-			strcat(tree, name);   /* This is here for the development of the gene tree mapping */
+			strcat(tree, name);  */ /* This is here for the development of the gene tree mapping */
+
 			}
 		else
 			{
@@ -5532,15 +5538,15 @@ void print_tree(struct taxon * position, char *tree)
 	{
 	struct taxon *place = position;
 	int count = 0, j=0;
-        char *name = '\0';
+        char *name = NULL;
 	strcat(tree, "(");
         
 	name = malloc(30*sizeof(char));
 	name[0] = '\0';
-	while(position != '\0')
+	while(position != NULL)
 		{
 		if(count >0) strcat(tree, ",");
-		if(position->daughter != '\0')
+		if(position->daughter != NULL)
 			{
 			print_tree(position->daughter, tree);
 			}
@@ -5562,16 +5568,16 @@ void print_tree_withinternals(struct taxon * position, char *tree)
 	{
 	struct taxon *place = position;
 	int count = 0, j=0;
-        char *name = '\0';
+        char *name = NULL;
 	strcat(tree, "(");
 	/*printf("(\n");*/
         
 	name = malloc(30*sizeof(char));
 	name[0] = '\0';
-	while(position != '\0')
+	while(position != NULL)
 		{
 		if(count >0) strcat(tree, ",");
-		if(position->daughter != '\0')
+		if(position->daughter != NULL)
 			{
 			print_tree_withinternals(position->daughter, tree);
 			}
@@ -5587,7 +5593,7 @@ void print_tree_withinternals(struct taxon * position, char *tree)
 		}
 	strcat(tree, ")");	
 	/*printf(")\n");*/
-	if(place->parent != '\0')
+	if(place->parent != NULL)
 		{
 		strcpy(name, "");
 		totext((place->parent)->tag, name);
@@ -5630,12 +5636,12 @@ void reallocate_retained_supers(void)
 
 void usertrees_search(void)
     {
-    FILE *userfile = '\0', *outfile = '\0', *sourcescoresfile = '\0';
+    FILE *userfile = NULL, *outfile = NULL, *sourcescoresfile = NULL;
     int keep = 0, nbest = 0, error = FALSE, i=0, tree_number = 0, j=0, k=0, prev = 0, print_source_scores = FALSE;
-    char *user_super = '\0', c = '\0', best_tree[400000], *temp = '\0';
+    char *user_super = NULL, c = '\0', best_tree[400000], *temp = NULL;
     float score = 0, best_score = 0;
     
-    if((userfile = fopen(parsed_command[1], "r")) == '\0')
+    if((userfile = fopen(parsed_command[1], "r")) == NULL)
         {
         printf("Error opening file named %s\n", parsed_command[1]);
         error = TRUE;
@@ -5714,7 +5720,7 @@ void usertrees_search(void)
 
             if(strcmp(parsed_command[i], "outfile") == 0)
                 {
-                if((outfile = fopen(parsed_command[i+1], "w")) == '\0')
+                if((outfile = fopen(parsed_command[i+1], "w")) == NULL)
                     {
                     printf("Error opening output file named: %s\n", parsed_command[i+1]);
                     error = TRUE;
@@ -5722,9 +5728,9 @@ void usertrees_search(void)
                 }
 
             }
-        if(outfile == '\0')
+        if(outfile == NULL)
             {
-            if((outfile = fopen("Usertrees_result.txt", "w")) == '\0')
+            if((outfile = fopen("Usertrees_result.txt", "w")) == NULL)
                 {
                 printf("Error opening output file  Usertrees_result.txt\n");
                 error = TRUE;
@@ -5816,7 +5822,7 @@ void usertrees_search(void)
 			}
 		for(i=0; i<number_of_taxa; i++)presenceof_SPRtaxa[i] = -1;
 		
-        if(super_scores == '\0')
+        if(super_scores == NULL)
             {
             super_scores = malloc(number_of_taxa*sizeof(int *));
             if(!super_scores)  memory_error(27);
@@ -5872,7 +5878,7 @@ void usertrees_search(void)
             {
             if(c == '[')
                 {
-                while(c = getc(userfile) != ']' && !feof(userfile));
+                while((c = getc(userfile)) != ']' && !feof(userfile));
                 }
             c = getc(userfile);
             }
@@ -5893,15 +5899,15 @@ void usertrees_search(void)
 			/* next score this tree */
 			/****** We now need to build the Supertree in memory *******/
 			
-			if(tree_top != '\0')
+			if(tree_top != NULL)
 				{
 				dismantle_tree(tree_top);
-				tree_top = '\0';
+				tree_top = NULL;
 				}
-			temp_top = '\0';
+			temp_top = NULL;
 			tree_build(1, user_super, tree_top, TRUE, -1);
 			tree_top = temp_top;
-			temp_top = '\0';
+			temp_top = NULL;
 			/*check_tree(tree_top); */
 			if(criterion == 0) score = compare_trees(FALSE);
 			if(criterion == 2)  /* calculate the distance using the MRC criterion */
@@ -5928,7 +5934,7 @@ void usertrees_search(void)
 				{
 				if(c == '[')
 					{
-					while(c = getc(userfile) != ']' && !feof(userfile));
+					while((c = getc(userfile)) != ']' && !feof(userfile));
 					}
 				c = getc(userfile);
 				}
@@ -5990,17 +5996,17 @@ void usertrees_search(void)
 				if(print_source_scores && criterion==0)
 					{
 					fprintf(sourcescoresfile, "Scores of sources trees compared to best User Supertree %d\n\n", i+1);
-					if(tree_top != '\0')
+					if(tree_top != NULL)
 						{
 						dismantle_tree(tree_top);
-						tree_top = '\0';
+						tree_top = NULL;
 						}
-					temp_top = '\0';
+					temp_top = NULL;
 
-					temp_top = '\0';
+					temp_top = NULL;
 					tree_build(1, retained_supers[i], tree_top, TRUE, -1);
 					tree_top = temp_top;
-					temp_top = '\0';
+					temp_top = NULL;
 					/*check_tree(tree_top); */
 					if(criterion == 0) score = compare_trees(FALSE);
 					for(k=0; k<Total_fund_trees; k++)
@@ -6013,7 +6019,7 @@ void usertrees_search(void)
 						}
 					}
 				
-				if(outfile != '\0') fprintf(outfile, "%s\t[%f]\n", retained_supers[i], scores_retained_supers[i] );
+				if(outfile != NULL) fprintf(outfile, "%s\t[%f]\n", retained_supers[i], scores_retained_supers[i] );
 				tree_coordinates(retained_supers[i], FALSE, TRUE, FALSE, -1);
 				printf("\nSupertree %d of %d score = %f\n", i+1, j, scores_retained_supers[i] );
 				i++;
@@ -6023,24 +6029,24 @@ void usertrees_search(void)
 		
         
             fclose(userfile);
-            if(outfile != '\0') fclose(outfile);
+            if(outfile != NULL) fclose(outfile);
             free(temp);
             free(user_super);
             fclose(psfile);
 			}
-	if(sourcescoresfile != '\0') fclose(sourcescoresfile);
+	if(sourcescoresfile != NULL) fclose(sourcescoresfile);
     }
         
 void controlc1(int signal)
 	{
-	char *c = '\0';
+	char *c = NULL;
 	
 	printf("\n\nCompleted %d random samples before CTRL-C was caught\nDo you want to stop the random sampling and start the heuristuc searches now? (Y/N): \n", GC);
 	c = malloc(10000*sizeof(char));
 	xgets(c);
 	while(strcmp(c, "Y") != 0 && strcmp(c, "y") != 0 && strcmp(c, "N") != 0 && strcmp(c, "n") != 0)
 		{
-		printf("Error '%c' is not a valid response, please respond Y or N\n", c);
+		printf("Error '%s' is not a valid response, please respond Y or N\n", c);
 		xgets(c);
 		}
 	
@@ -6059,7 +6065,7 @@ void controlc1(int signal)
 
 void controlc2(int signal)
 	{
-	char *c = '\0';
+	char *c = NULL;
 	
 	c = malloc(10000*sizeof(char));
 	
@@ -6067,7 +6073,7 @@ void controlc2(int signal)
 	xgets(c);
 	while(strcmp(c, "Y") != 0 && strcmp(c, "y") != 0 && strcmp(c, "N") != 0 && strcmp(c, "n") != 0)
 		{
-		printf("Error '%c' is not a valid response, please respond Y or N\n", c);
+		printf("Error '%s' is not a valid response, please respond Y or N\n", c);
 		xgets(c);
 		}
 	
@@ -6086,15 +6092,15 @@ void controlc2(int signal)
 
 void controlc3(int signal)
 	{
-	char *c = '\0';
+	char *c = NULL;
 	
 	c = malloc(10000*sizeof(char));
 	
-	printf("\n\nDo you want to stop the generation of trees now? (Y/N): ", GC);
+	printf("\n\nDo you want to stop the generation of trees now? (Y/N): ");
 	xgets(c);
 	while(strcmp(c, "Y") != 0 && strcmp(c, "y") != 0 && strcmp(c, "N") != 0 && strcmp(c, "n") != 0)
 		{
-		printf("Error '%c' is not a valid response, please respond Y or N\n", c);
+		printf("Error '%s' is not a valid response, please respond Y or N\n", c);
 		xgets(c);
 		}
 	
@@ -6113,15 +6119,15 @@ void controlc3(int signal)
 
 void controlc4(int signal)
 	{
-	char *c = '\0';
+	char *c = NULL;
 	
 	c = malloc(10000*sizeof(char));
 	
-	printf("\n\nDo you really wish to quit? (Y/N): ", GC);
+	printf("\n\nDo you really wish to quit? (Y/N): ");
 	xgets(c);
 	while(strcmp(c, "Y") != 0 && strcmp(c, "y") != 0 && strcmp(c, "N") != 0 && strcmp(c, "n") != 0)
 		{
-		printf("Error '%c' is not a valid response, please respond Y or N\n", c);
+		printf("Error '%s' is not a valid response, please respond Y or N\n", c);
 		xgets(c);
 		}
 	
@@ -6137,15 +6143,15 @@ void controlc4(int signal)
 
 void controlc5(int signal)
 	{
-	char *c = '\0';
+	char *c = NULL;
 	
 	c = malloc(10000*sizeof(char));
 	
-	printf("\n\nDo you want to stop the exhaustive searches now? (Y/N): ", GC);
+	printf("\n\nDo you want to stop the exhaustive searches now? (Y/N): ");
 	xgets(c);
 	while(strcmp(c, "Y") != 0 && strcmp(c, "y") != 0 && strcmp(c, "N") != 0 && strcmp(c, "n") != 0)
 		{
-		printf("Error '%c' is not a valid response, please respond Y or N\n", c);
+		printf("Error '%s' is not a valid response, please respond Y or N\n", c);
 		xgets(c);
 		}
 	if(strcmp(c, "Y") == 0 || strcmp(c, "y") == 0)
@@ -6164,10 +6170,10 @@ void controlc5(int signal)
 
 void heuristic_search(int user, int print, int sample, int nreps)
     {
-    int i=0, j=0, k=0, l=0, swaps = 0, keep = 0, nbest = 0, start = 2, error = FALSE, numswaps = 1000000, different=TRUE, do_histogram = FALSE, here = FALSE, **taxa_comp = '\0', bins = 20, found = FALSE, missing_method = 1, random_num, numspectries = 2, numgenetries = 2;
-    char *tree = '\0', c = '\0', *best_tree = '\0', *temptree = '\0', **starths = '\0', userfilename[10000], useroutfile[10000], histogramfile_name[10000];
-    FILE *userfile = '\0', *outfile = '\0', *paupfile = '\0', *histogram_file = '\0';
-    float distance=0, number=0, *startscores = '\0', used_weights = 0;
+    int i=0, j=0, k=0, l=0, swaps = 0, keep = 0, nbest = 0, start = 2, error = FALSE, numswaps = 1000000, different=TRUE, do_histogram = FALSE, here = FALSE, **taxa_comp = NULL, bins = 20, found = FALSE, missing_method = 1, random_num, numspectries = 2, numgenetries = 2;
+    char *tree = NULL, c = '\0', *best_tree = NULL, *temptree = NULL, **starths = NULL, userfilename[10000], useroutfile[10000], histogramfile_name[10000];
+    FILE *userfile = NULL, *outfile = NULL, *paupfile = NULL, *histogram_file = NULL;
+    float distance=0, number=0, *startscores = NULL, used_weights = 0;
     
 	
 	for(i=0; i<number_of_taxa; i++) presenceof_SPRtaxa[i] = -1;
@@ -6186,7 +6192,7 @@ void heuristic_search(int user, int print, int sample, int nreps)
 	strcpy(histogramfile_name, "Heuristic_histogram.txt");
     strcpy(useroutfile, "Heuristic_result.txt");
 	
-	/*if(criterion == 5) start = 0;  /* use random starting trees by default for the recon criterion */
+	/*if(criterion == 5) start = 0; */ /* use random starting trees by default for the recon criterion */
 	
     /* this hold the distances calculated with the pathmetric on the supertree */
 	if(criterion != 5)
@@ -6362,7 +6368,7 @@ void heuristic_search(int user, int print, int sample, int nreps)
             {
             if(criterion != 4)
                 {
-                if((outfile = fopen(parsed_command[i+1], "w")) == '\0')
+                if((outfile = fopen(parsed_command[i+1], "w")) == NULL)
                     {
                     printf("Error opening file named %s\n", parsed_command[i+1]);
                     error = TRUE;
@@ -6389,7 +6395,7 @@ void heuristic_search(int user, int print, int sample, int nreps)
                         dweight = 1;
                     else
                         {
-                        printf("Error: weight option '%s' is unknown\n");
+                        printf("Error: weight option '%s' is unknown\n", parsed_command[i+1] );
                         error = TRUE;
                         }
                     }
@@ -6411,7 +6417,7 @@ void heuristic_search(int user, int print, int sample, int nreps)
                             quartet_normalising = 3;
                         else
                             {
-                            printf("Error: weight option '%s' is unknown\n");
+                            printf("Error: weight option '%s' is unknown\n", parsed_command[i+1] );
                             error = TRUE;
                             }
                         }
@@ -6431,7 +6437,7 @@ void heuristic_search(int user, int print, int sample, int nreps)
                         splits_weight = 2;
                     else
                         {
-                        printf("Error: weight option '%s' is unknown\n");
+                        printf("Error: weight option '%s' is unknown\n", parsed_command[i+1]);
                         error = TRUE;
                         }
                     }
@@ -6456,7 +6462,7 @@ void heuristic_search(int user, int print, int sample, int nreps)
 				else
 					{
 					start = 1;
-					if((userfile = fopen(parsed_command[i+1], "r")) == '\0')
+					if((userfile = fopen(parsed_command[i+1], "r")) == NULL)
 						{
 						
 						printf("Error opening file named %s\n", parsed_command[i+1]);
@@ -6621,7 +6627,7 @@ void heuristic_search(int user, int print, int sample, int nreps)
 					{
 					remove("clanntmp.chr");
 					remove("clanntree.chr");
-					pars("coding.nex", "clanntmp.chr");
+					/*pars("coding.nex", "clanntmp.chr"); */
 					printf("\n");
 					}
 
@@ -6658,11 +6664,11 @@ void heuristic_search(int user, int print, int sample, int nreps)
                 if(criterion==2) condense_coding();
                 }
             
-            if(outfile == '\0' && print)
+            if(outfile == NULL && print)
                 {
-                if(outfile == '\0')
+                if(outfile == NULL)
                     {
-                    if((outfile = fopen("Heuristic_result.txt", "w")) == '\0')
+                    if((outfile = fopen("Heuristic_result.txt", "w")) == NULL)
                         {
                         printf("Error opening file named Heuristic_result.txt\n");
                         error = TRUE;
@@ -6678,7 +6684,7 @@ void heuristic_search(int user, int print, int sample, int nreps)
                 }
 			
 
-            if(super_scores == '\0')
+            if(super_scores == NULL)
                 {
                 super_scores = malloc(number_of_taxa*sizeof(int *));
                 if(!super_scores)  memory_error(54);
@@ -6753,17 +6759,17 @@ void heuristic_search(int user, int print, int sample, int nreps)
                     
                     strcpy(tree, "");
                     random_star_decom(tree);  /* create a random starting tree */
-					/*average_consensus(0, missing_method, '\0', '\0');
+					/*average_consensus(0, missing_method, NULL, NULL);
 					neighbor_joining(FALSE, tree, TRUE); */
-                    if(tree_top != '\0')
+                    if(tree_top != NULL)
                         {
                         dismantle_tree(tree_top);
-                        tree_top = '\0';
+                        tree_top = NULL;
                         }
-                    temp_top = '\0';
+                    temp_top = NULL;
                     tree_build(1, tree, tree_top, TRUE, -1);
                     tree_top = temp_top;
-                    temp_top = '\0';
+                    temp_top = NULL;
             
                     strcpy(best_tree, "");
                     print_named_tree(tree_top, best_tree);
@@ -6853,7 +6859,7 @@ void heuristic_search(int user, int print, int sample, int nreps)
                 {
 				if(start == 2)
 					{
-					average_consensus(0, missing_method, '\0', '\0');
+					average_consensus(0, missing_method, NULL, NULL);
 					neighbor_joining(FALSE, temptree, FALSE);
 					if(signal(SIGINT, controlc2) == SIG_ERR)
 						{
@@ -6882,7 +6888,7 @@ void heuristic_search(int user, int print, int sample, int nreps)
 						{
 						if(c == '[')
 							{
-							while(c = getc(userfile) != ']' && !feof(userfile));
+							while((c = getc(userfile)) != ']' && !feof(userfile));
 							}
 						c = getc(userfile);
 						}
@@ -6906,15 +6912,15 @@ void heuristic_search(int user, int print, int sample, int nreps)
 
 						/* Score the input tree BEFORE doing any swaps !*/
 						/****** We now need to build the Supertree in memory *******/
-						if(tree_top != '\0')
+						if(tree_top != NULL)
 							{
 							dismantle_tree(tree_top);
-							tree_top = '\0';
+							tree_top = NULL;
 							}
-						temp_top = '\0';
+						temp_top = NULL;
 						tree_build(1, tree, tree_top, user, -1);
 						tree_top = temp_top;
-						temp_top = '\0';
+						temp_top = NULL;
 						
 									
 						strcpy(best_tree, "");
@@ -7014,7 +7020,7 @@ void heuristic_search(int user, int print, int sample, int nreps)
 							{
 							if(c == '[')
 								{
-								while(c = getc(userfile) != ']' && !feof(userfile));
+								while((c = getc(userfile)) != ']' && !feof(userfile));
 								}
 							c = getc(userfile);
 							}
@@ -7041,7 +7047,7 @@ void heuristic_search(int user, int print, int sample, int nreps)
 					
                     while(scores_retained_supers[i] != -1)
                         {
-                        if(outfile != '\0') fprintf(outfile, "%s\t[%f]\n", retained_supers[i], scores_retained_supers[i] );
+                        if(outfile != NULL) fprintf(outfile, "%s\t[%f]\n", retained_supers[i], scores_retained_supers[i] );
                         tree_coordinates(retained_supers[i], FALSE, TRUE, FALSE, -1);
                         printf("\nSupertree %d of %d score = %f\n", i+1, j, scores_retained_supers[i] );
 						
@@ -7049,16 +7055,16 @@ void heuristic_search(int user, int print, int sample, int nreps)
 
 						if(do_histogram && criterion == 0)  /* If we are going to draw a histogram of the scores of the source trees when compared to the best supertree */
 							{		/* right now we can only do this for mssa (dfit) */
-							if(tree_top != '\0')
+							if(tree_top != NULL)
 								{
 								dismantle_tree(tree_top);
-								tree_top = '\0';
+								tree_top = NULL;
 								}
-							temp_top = '\0';
+							temp_top = NULL;
 							
 							tree_build(1, retained_supers[i], tree_top, TRUE, -1);
 							tree_top = temp_top;
-							temp_top = '\0';
+							temp_top = NULL;
 							
 							/**** evaluate its fit to the source trees in memory *****/
 							temptree[0] = '\0';
@@ -7076,8 +7082,8 @@ void heuristic_search(int user, int print, int sample, int nreps)
                     }
 				
                 if(do_histogram && criterion == 0) fclose(histogram_file);
-                if(outfile != '\0') fclose(outfile);
-                if(userfile != '\0') fclose(userfile);
+                if(outfile != NULL) fclose(outfile);
+                if(userfile != NULL) fclose(userfile);
                 fclose(psfile);
                 free(tree);
              }
@@ -7090,9 +7096,9 @@ void heuristic_search(int user, int print, int sample, int nreps)
 
 int average_consensus(int nrep, int missing_method, char * useroutfile, FILE *paupfile)
 	{
-	int **taxa_comp = '\0', i, j, k, l, found = FALSE, here = FALSE, error = FALSE;
+	int **taxa_comp = NULL, i, j, k, l, found = FALSE, here = FALSE, error = FALSE;
 	float used_weights = 0;
-	char *temptree = '\0';
+	char *temptree = NULL;
 	
 	
 	temptree = malloc(400000*sizeof(char));
@@ -7228,7 +7234,7 @@ int average_consensus(int nrep, int missing_method, char * useroutfile, FILE *pa
 		}
 	else
 		{
-		if(paupfile != '\0')
+		if(paupfile != NULL)
 			{
 			if(nrep == 0 || nrep == 1) fprintf(paupfile,"#nexus\n");
 			fprintf(paupfile, "\n\nbegin distances;\ndimensions ntax = %d;\nformat nodiagonal;\nmatrix\n", number_of_taxa);
@@ -7266,15 +7272,15 @@ int do_search(char *tree, int user, int print, int maxswaps, FILE *outfile, int 
 	temporary_tree[0] = '\0';
     unroottree(tree);
         /****** We now need to build the Supertree in memory *******/
-        if(tree_top != '\0')
+        if(tree_top != NULL)
             {
             dismantle_tree(tree_top);
-            tree_top = '\0';
+            tree_top = NULL;
             }
-        temp_top = '\0';
+        temp_top = NULL;
         tree_build(1, tree, tree_top, user, -1);
         tree_top = temp_top;
-        temp_top = '\0';
+        temp_top = NULL;
 /*		print_tree(tree_top, temporary_tree);
 		printf("built tree = %s\n", temporary_tree);
   */      if(method == 1)
@@ -7291,7 +7297,7 @@ int do_search(char *tree, int user, int print, int maxswaps, FILE *outfile, int 
                 {
                 do
                     {
-                    branchpointer = '\0';
+                    branchpointer = NULL;
                     better_score = spr(tree_top, maxswaps, numspectries, numgenetries);
                     }while(better_score == FALSE && remaining_spr(tree_top) > 0 && tried_regrafts < maxswaps && !user_break);
 					printf("better_score = %d\t, remaining_spr = %d\ttried_regrafts = %d\tuserbreak = %d\n", better_score, remaining_spr(tree_top), tried_regrafts, user_break);
@@ -7303,7 +7309,7 @@ int do_search(char *tree, int user, int print, int maxswaps, FILE *outfile, int 
 
 			do/* for a single rep */
 				{
-				branchpointer = '\0';
+				branchpointer = NULL;
 				better_score = spr_new(tree_top, maxswaps, numspectries, numgenetries);
 				}while(better_score == TRUE && tried_regrafts < maxswaps && !user_break);
 				
@@ -7319,9 +7325,9 @@ int remaining_spr(struct taxon *position)
     {
     int count = 0;
     
-    while(position != '\0')
+    while(position != NULL)
         {
-        if(position->daughter != '\0')
+        if(position->daughter != NULL)
             {
             if(!position->spr)
                 count++;
@@ -7362,14 +7368,14 @@ int branchswap(int number_of_swaps, float score, int numspectries, int numgenetr
             last_number = number;
             i+= find_swaps(&number, tree_top, number_of_swaps, numspectries, numgenetries);
             last = i;
-            if(last_number == number && branchpointer != '\0')
+            if(last_number == number && branchpointer != NULL)
                     {
-                    branchpointer = '\0'; 
+                    branchpointer = NULL; 
                     }
             else
                 {
                 
-                if(last_number == number && branchpointer == '\0')
+                if(last_number == number && branchpointer == NULL)
                     {
                     last = i;
                     i = number_of_swaps;
@@ -7385,16 +7391,16 @@ int branchswap(int number_of_swaps, float score, int numspectries, int numgenetr
 /* part 2 */				
 int find_swaps(float * number, struct taxon * position, int number_of_swaps, int numspectries, int numgenetries)
 	{
-	struct taxon *start1 = position, *start2 = '\0', *first_swap = '\0', *second_swap = '\0', *tmp = '\0';
-	int swaps = 0, better_score = FALSE, *siblings = '\0', i=0, j=0, k=0, count =0;
+	struct taxon *start1 = position, *start2 = NULL, *first_swap = NULL, *second_swap = NULL, *tmp = NULL;
+	int swaps = 0, better_score = FALSE, *siblings = NULL, i=0, j=0, k=0, count =0;
 	float distance = *number;
 
 
         /** count how many pointer siblings there are on this level */
         i=0;
-        while(position != '\0' && !user_break)
+        while(position != NULL && !user_break)
             {
-            if(position->daughter != '\0') i++;
+            if(position->daughter != NULL) i++;
             position = position->next_sibling;
             }
 
@@ -7415,7 +7421,7 @@ int find_swaps(float * number, struct taxon * position, int number_of_swaps, int
                 k=-1;
                 while(k != j)
                     {
-                    if(position->daughter != '\0') k++;
+                    if(position->daughter != NULL) k++;
                     if(k != j)
                         position = position->next_sibling;
                     }
@@ -7435,7 +7441,7 @@ int find_swaps(float * number, struct taxon * position, int number_of_swaps, int
 		/* The pointer second_swap will point to the sibling at the previous level we want to swap */
 		/* This means we have to go up one level and rewind to the start of the list */
 	
-		if(start1->parent != '\0' && !user_break)  /* As long as we are not at the top of the tree */
+		if(start1->parent != NULL && !user_break)  /* As long as we are not at the top of the tree */
 			{
 			
 			/** call swapper  **/
@@ -7456,7 +7462,7 @@ int find_swaps(float * number, struct taxon * position, int number_of_swaps, int
 /* Part 3 */	
 void do_swap(struct taxon * first, struct taxon * second)
 	{
-	struct taxon *next = '\0', *prev = '\0', *parent = '\0', *tmp = '\0';
+	struct taxon *next = NULL, *prev = NULL, *parent = NULL, *tmp = NULL;
 	
         interval2 = time(NULL);
         if(difftime(interval2, interval1) > 5) /* every 5 seconds print a dot to the screen */
@@ -7467,22 +7473,22 @@ void do_swap(struct taxon * first, struct taxon * second)
             }
             
 	/* Change everything pointing to the two being swapped */
-	if(first->parent != '\0')
+	if(first->parent != NULL)
 		(first->parent)->daughter = second;	
 		
-	if(second->parent != '\0')
+	if(second->parent != NULL)
 		(second->parent)->daughter = first;
 		
-	if(first->prev_sibling != '\0')
+	if(first->prev_sibling != NULL)
 		(first->prev_sibling)->next_sibling = second;
 		
-	if(second->prev_sibling != '\0')
+	if(second->prev_sibling != NULL)
 		(second->prev_sibling)->next_sibling = first;
 		
-	if(first->next_sibling != '\0')
+	if(first->next_sibling != NULL)
 		(first->next_sibling)->prev_sibling = second;
 		
-	if(second->next_sibling != '\0')
+	if(second->next_sibling != NULL)
 		(second->next_sibling)->prev_sibling = first;
 		
 	
@@ -7524,8 +7530,8 @@ int swapper(struct taxon * position,struct taxon * prev_pos, int stepstaken, str
 	
   	float  distance = *number;
 	int better_score = FALSE, i=0, j=0, different = TRUE;
-	struct taxon *start2 = '\0', *start1 = '\0';
-        char *best_tree = '\0', *temptree = '\0';
+	struct taxon *start2 = NULL, *start1 = NULL;
+        char *best_tree = NULL, *temptree = NULL;
         
         temptree = malloc(400000*sizeof(char));
         if(!temptree) memory_error(66);
@@ -7534,17 +7540,17 @@ int swapper(struct taxon * position,struct taxon * prev_pos, int stepstaken, str
         if(!best_tree) memory_error(52);
         best_tree[0] = '\0';
 	
-	while(position->prev_sibling != '\0') position = position->prev_sibling;  /* rewind to start of this level */
+	while(position->prev_sibling != NULL) position = position->prev_sibling;  /* rewind to start of this level */
 	second_swap = position;
 
 	/* travel up one if it exists */
-	if(stepstaken < number_of_steps && position->parent != '\0' && position->parent != prev_pos && !user_break) better_score = swapper(position->parent, position, stepstaken+1, first_swap, second_swap, number, swaps, number_of_swaps, numspectries, numgenetries);
+	if(stepstaken < number_of_steps && position->parent != NULL && position->parent != prev_pos && !user_break) better_score = swapper(position->parent, position, stepstaken+1, first_swap, second_swap, number, swaps, number_of_swaps, numspectries, numgenetries);
 
 	
 	/*   if we aren't the required number steps away, then call another instance of the program    */
-	while(stepstaken < number_of_steps && position != '\0' && !better_score && !user_break)
+	while(stepstaken < number_of_steps && position != NULL && !better_score && !user_break)
 		{
-		if(position->daughter != '\0' && position->daughter != prev_pos)
+		if(position->daughter != NULL && position->daughter != prev_pos)
 			{
 			better_score = swapper(position->daughter, position, stepstaken+1, first_swap, second_swap, number, swaps, number_of_swaps, numspectries, numgenetries);
 			}
@@ -7557,16 +7563,16 @@ int swapper(struct taxon * position,struct taxon * prev_pos, int stepstaken, str
 
 		start1 = first_swap;
 			
-		if(second_swap == '\0') printf("second_swap is null!\n");
-		while(second_swap->prev_sibling != '\0') second_swap = second_swap->prev_sibling;  /* rewinding */
+		if(second_swap == NULL) printf("second_swap is null!\n");
+		while(second_swap->prev_sibling != NULL) second_swap = second_swap->prev_sibling;  /* rewinding */
 		
 		start2 = second_swap; /* start2 now points to the start levle to be swapped against */
 	
                 /* now first_swap is at the first sibling at this level, and second_swap is at the first sibling at the other level */
                 /* The next step is to swap every sibling at this level with every sibling at the level above */
-		while(first_swap != '\0' && *swaps < number_of_swaps && !better_score && !user_break)
+		while(first_swap != NULL && *swaps < number_of_swaps && !better_score && !user_break)
 			{
-			while(second_swap != '\0' && *swaps < number_of_swaps && !better_score && !user_break)
+			while(second_swap != NULL && *swaps < number_of_swaps && !better_score && !user_break)
 				{
 				if(second_swap->daughter != prev_pos )   /* As long as the sibling at the previous level is not the one that defines the clade we are in */
 					{
@@ -7574,8 +7580,8 @@ int swapper(struct taxon * position,struct taxon * prev_pos, int stepstaken, str
 
                                         if(check_taxa(tree_top) == number_of_taxa)
                                             {
-											*swaps++;
-                                           /* *swaps = *swaps + 1;  /* count the number of swaps done */
+											(*swaps)++;
+                                           /* *swaps = *swaps + 1; */ /* count the number of swaps done */
 											NUMSWAPS++;
                                             strcpy(best_tree, "");
                                             print_named_tree(tree_top, best_tree);
@@ -7710,7 +7716,7 @@ void yaptp_search(void)
     int i=0, j=0, k=0, l=0, random_num = 0, error = FALSE, yaptp_method = 1;
     int Nreps = 100, search = 1;
     char filename[1000], best_tree[1000];
-    FILE *yaptpfile = '\0';
+    FILE *yaptpfile = NULL;
 
     filename[0] = '\0';
     strcpy(filename, "yaptp.txt");
@@ -7798,7 +7804,7 @@ void yaptp_search(void)
 			}
 		
 		
-		if(yaptp_results != '\0') free(yaptp_results);
+		if(yaptp_results != NULL) free(yaptp_results);
         yaptp_results = malloc((Nreps+1)*sizeof(float));
 		for(i=0; i<Nreps+1; i++)
 			yaptp_results[i] = 0;
@@ -7830,19 +7836,19 @@ void yaptp_search(void)
             /********* initalise the array to store the arrays *********/
             
             stored_fund_scores = malloc(Total_fund_trees*sizeof(int**));
-            if(stored_fund_scores == '\0') memory_error(38);
+            if(stored_fund_scores == NULL) memory_error(38);
                 
             for(i=0; i<Total_fund_trees; i++)
                 {
                 stored_fund_scores[i] = malloc((number_of_taxa)*sizeof(int*));
-                if(stored_fund_scores[i] == '\0') memory_error(39);
+                if(stored_fund_scores[i] == NULL) memory_error(39);
                     
                 else
                     {
                     for(j=0; j<(number_of_taxa); j++)
                         {
                         stored_fund_scores[i][j] = malloc((number_of_taxa)*sizeof(int));
-                        if(stored_fund_scores[i][j] == '\0') memory_error(40);
+                        if(stored_fund_scores[i][j] == NULL) memory_error(40);
                             
                         else
                             {
@@ -7923,15 +7929,15 @@ void yaptp_search(void)
 						{
 						if(search ==0)
 							{
-							if(tree_top != '\0')
+							if(tree_top != NULL)
 								{
 								dismantle_tree(tree_top);
-								tree_top = '\0';
+								tree_top = NULL;
 								}
-							temp_top = '\0';
+							temp_top = NULL;
 							tree_build(1, retained_supers[k], tree_top, FALSE, -1);
 							tree_top = temp_top;
-							temp_top = '\0';
+							temp_top = NULL;
 						
 							strcpy(best_tree, "");
 							print_named_tree(tree_top, best_tree);
@@ -8005,7 +8011,7 @@ void yaptp_search(void)
 void randomise_tree(char *tree)
     {
     int i=0, j=0, k=0, l=0, x=0, y=0, treecount = 0, random=0, supers = 0, actual_num = 0;
-    char **array = '\0', temptree[400000], *newtree = '\0', *tmp;
+    char **array = NULL, temptree[400000], *newtree = NULL, *tmp;
     /** allocate the array **/
     array = malloc(number_of_taxa*sizeof(char *));
     if(!array) memory_error(56);
@@ -8108,19 +8114,19 @@ void randomise_tree(char *tree)
     for(i=0; i<number_of_taxa; i++)
         {
         free(array[i]);
-        array[i] = '\0';
+        array[i] = NULL;
         }
     free(array);
-    array = '\0';
+    array = NULL;
     free(newtree);
-    newtree = '\0';
+    newtree = NULL;
     free(tmp);
     }
 
 void randomise_taxa(char *tree)
     {
     int i=0, j=0, k=0, l=0, x=0, y=0, treecount = 0, random=0, tottax;
-    char **array = '\0', temptree[400000];
+    char **array = NULL, temptree[400000];
     
 
     /* Start by counting the number of taxa in the tree (there may be more then the variable "number_of_taxa" because of the recon criterion */
@@ -8228,16 +8234,16 @@ void randomise_taxa(char *tree)
     for(i=0; i<tottax; i++)
         {
         free(array[i]);
-        array[i] = '\0';
+        array[i] = NULL;
         }
     free(array);
-    array = '\0';
+    array = NULL;
     }
 
 
 void random_star_decom(char *tree)
     {
-    char **treearray = '\0', *tempchar = '\0';
+    char **treearray = NULL, *tempchar = NULL;
     int i=0, j=0, k=0, l=0, nodes = number_of_taxa, random1 = 0, random2 = 0;
     
     tempchar = malloc((100*number_of_taxa)*sizeof(char));
@@ -8246,7 +8252,7 @@ void random_star_decom(char *tree)
     if(!treearray) memory_error(58);
     for(i=0; i<number_of_taxa; i++)
         {
-		treearray[i] = '\0';
+		treearray[i] = NULL;
         treearray[i] = malloc(1000*sizeof(char));
         if(!treearray[i]) memory_error(59);
         treearray[i][0] = '\0';
@@ -8312,12 +8318,12 @@ void random_star_decom(char *tree)
     for(i=0; i<number_of_taxa; i++)
         {
         free(treearray[i]);
-        treearray[i] = '\0';
+        treearray[i] = NULL;
         }
     free(treearray);
-    treearray = '\0';
+    treearray = NULL;
     free(tempchar);
-    tempchar = '\0';
+    tempchar = NULL;
     
     }
     
@@ -8327,8 +8333,8 @@ void random_star_decom(char *tree)
 int check_if_diff_tree(char *tree)
     {
     int i=0, j=0, k=0, l=0, intname = -1, different = TRUE;
-    int **scores1 = '\0', **scores2 = '\0', temp = 0;
-    char tree1[400000], tree2[400000], *name = '\0';
+    int **scores1 = NULL, **scores2 = NULL, temp = 0;
+    char tree1[400000], tree2[400000], *name = NULL;
     
     scores1 = malloc(number_of_taxa*sizeof(int *));
     if(!scores1) memory_error(62);
@@ -8477,9 +8483,9 @@ int check_if_diff_tree(char *tree)
 /* Next is the code needed for the Baum/ragan coding scheme */
 int coding(int nrep, int search, int ptpreps)
     {
-    int i=0, j=0, k=0, nreps=10,  parenthesis = 0, count =0, *tracking = '\0', total = 0, **BR_coding = '\0', nodecount = 0, position = 0, split_count = 0, calculate_inhouse = FALSE;
-    char number[100], string[400000], filename[1000], **temptrees = '\0';
-    int x=0, one_in_this = FALSE, zero_in_this = FALSE, swap=3, addseq=4, error=FALSE, *num_fund_taxa = '\0', njbuild = FALSE, weighted = FALSE;
+    int i=0, j=0, k=0, nreps=10,  parenthesis = 0, count =0, *tracking = NULL, total = 0, **BR_coding = NULL, nodecount = 0, position = 0, split_count = 0, calculate_inhouse = FALSE;
+    char number[100], string[400000], filename[1000], **temptrees = NULL;
+    int x=0, one_in_this = FALSE, zero_in_this = FALSE, swap=3, addseq=4, error=FALSE, *num_fund_taxa = NULL, njbuild = FALSE, weighted = FALSE;
 
     filename[0] = '\0';
     printf("in\n");
@@ -8517,7 +8523,7 @@ int coding(int nrep, int search, int ptpreps)
                     njbuild = TRUE;
                 else
                     {
-                    printf("Error: option %s not valid analysis\n");
+                    printf("Error: option %s not valid analysis\n", parsed_command[i+1]);
                     error = TRUE;
                     }
                 }
@@ -8720,7 +8726,7 @@ int coding(int nrep, int search, int ptpreps)
 				}
 			}
         
-        if(num_fund_taxa != '\0') free(num_fund_taxa);
+        if(num_fund_taxa != NULL) free(num_fund_taxa);
         }
 	fflush(BR_file);
 	/*if(calculate_inhouse == FALSE) error = 3; */
@@ -8730,20 +8736,20 @@ int coding(int nrep, int search, int ptpreps)
 
 int MRP_matrix(char **trees, int num_trees, int consensus)
 	{
-	int i=0, j=0, k=0, count =0, x=0, *tracking = '\0', total = 0, **BR_coding = '\0', nodecount = 0, position = 0, split_count = 0;
+	int i=0, j=0, k=0, count =0, x=0, *tracking = NULL, total = 0, **BR_coding = NULL, nodecount = 0, position = 0, split_count = 0;
     char number[100], string[400000];
-	int *num_fund_taxa = '\0', one_in_this = FALSE, zero_in_this = FALSE;
+	int *num_fund_taxa = NULL, one_in_this = FALSE, zero_in_this = FALSE;
 	
 	num_fund_taxa = malloc(num_trees*sizeof(int));
 	if(!num_fund_taxa) memory_error(68);
 	for(i=0; i<num_trees; i++) num_fund_taxa[i] = 0;
 	
-	if(total_coding != '\0')
+	if(total_coding != NULL)
 		{
 		for(i=0; i<total_nodes; i++)
 			free(total_coding[i]);
 		free(total_coding);
-		total_coding = '\0';
+		total_coding = NULL;
 		}
 	/* Calculated the number of nodes in all the fundamental trees */
 	total_nodes= num_trees*(number_of_taxa - 2);
@@ -8759,12 +8765,12 @@ int MRP_matrix(char **trees, int num_trees, int consensus)
 			for(j=0; j<number_of_taxa; j++)
 				total_coding[i][j] =0;
 	/* for this we need a new array that holds the number of times that any partition is repeated in the array */
-	if(partition_number != '\0') free(partition_number);
+	if(partition_number != NULL) free(partition_number);
 	partition_number = malloc(total_nodes*sizeof(float));
 	if(!partition_number) memory_error(67);
 	for(i=0; i<total_nodes; i++) partition_number[i] = 1;   /* the score of 1 gives each partition the same weight, it means that larger trees will have more say, in the quartet sense it will be very biased, so will have to be modified for this case. **/
 	/* for this we need a new array that records which source tree each partition comes from (so we don't include the same quartet from any tree more than once ) */
-	if(from_tree != '\0') free(from_tree);
+	if(from_tree != NULL) free(from_tree);
 	from_tree = malloc(total_nodes*sizeof(int));
 	if(!from_tree) memory_error(69);
 	for(i=0; i<total_nodes; i++) from_tree[i] = 0;   
@@ -8783,7 +8789,7 @@ int MRP_matrix(char **trees, int num_trees, int consensus)
 			}
 		
 		/* dynamically allocate the array to hold the resulting Baum-ragan coding scheme */
-		BR_coding = '\0';
+		BR_coding = NULL;
 		BR_coding = malloc((nodecount)*sizeof(int *));
 		if(!BR_coding) memory_error(77);
 		for(i=0; i<nodecount; i++)
@@ -8944,9 +8950,9 @@ int MRP_matrix(char **trees, int num_trees, int consensus)
 			free(BR_coding[i]);
 			}
 		free(BR_coding);
-		BR_coding = '\0';
+		BR_coding = NULL;
 		free(tracking);
-		tracking = '\0';
+		tracking = NULL;
 		
 		}
 	return(position);	
@@ -9019,7 +9025,7 @@ int MRP_matrix(char **trees, int num_trees, int consensus)
 /* This is analogous to a clique analysis */
 float MRC(char *supertree)
     {
-    int i=0, j=0, k=0, **super_matrix = '\0', count = 0, *tracking = '\0', parenthesis = 0, total=0, allsame1 = TRUE, allsame2 = TRUE;
+    int i=0, j=0, k=0, **super_matrix = NULL, count = 0, *tracking = NULL, parenthesis = 0, total=0, allsame1 = TRUE, allsame2 = TRUE;
      char number[100];
     float score = 0;
 
@@ -9132,9 +9138,9 @@ float MRC(char *supertree)
         free(super_matrix[i]);
         }
     free(super_matrix);
-    super_matrix = '\0';
+    super_matrix = NULL;
     free(tracking);
-    tracking = '\0';
+    tracking = NULL;
     return(total_partitions-score);
     }
                          
@@ -9144,10 +9150,10 @@ float MRC(char *supertree)
 /* This is analogous to a clique analysis */
 float quartet_compatibility(char * supertree)
     {
-    int i=0, j=0, k=0,w=0, x=0, y=0, z=0, **super_matrix = '\0', count = 0, *tracking = '\0', parenthesis = 0, total=0,  allsame1 = TRUE, allsame2 = TRUE;
+    int i=0, j=0, k=0,w=0, x=0, y=0, z=0, **super_matrix = NULL, count = 0, *tracking = NULL, parenthesis = 0, total=0,  allsame1 = TRUE, allsame2 = TRUE;
     char number[100];
     float score = 0, num_quartets = 0;
-    int zerocount = 0, onecount = 0, *done_tree = '\0';
+    int zerocount = 0, onecount = 0, *done_tree = NULL;
      
     /* assign the array super_matrix */
     super_matrix = malloc(number_of_taxa*sizeof(int *));
@@ -9276,10 +9282,10 @@ float quartet_compatibility(char * supertree)
         free(super_matrix[i]);
         }
     free(super_matrix);
-    super_matrix = '\0';
+    super_matrix = NULL;
     free(tracking);
-    if(done_tree != '\0') free(done_tree);
-    tracking = '\0';
+    if(done_tree != NULL) free(done_tree);
+    tracking = NULL;
     return(num_quartets-score);
     }
 
@@ -9388,9 +9394,9 @@ void condense_coding(void)
 
 int spr_new(struct taxon * master, int maxswaps, int numspectries, int numgenetries)
 	{
-	struct taxon * start = '\0', * newbie = '\0', *newbie_backup = '\0', * latest = '\0', * tmp = '\0', *copy = '\0', *temper = '\0', *temper1 = '\0', *master_copy = '\0', *position = '\0';
+	struct taxon * start = NULL, * newbie = NULL, *newbie_backup = NULL, * latest = NULL, * tmp = NULL, *copy = NULL, *temper = NULL, *temper1 = NULL, *master_copy = NULL, *position = NULL;
 	int better_score = FALSE, lastinline = FALSE, numofsiblings = 0, donenextlevel = FALSE, i=0, j=0, x=0, y=0, q=0, r=0;
-	char *debugtree = '\0';
+	char *debugtree = NULL;
 	
 	debugtree = malloc(40000*sizeof(char));
 	debugtree[0] = '\0';
@@ -9406,10 +9412,10 @@ int spr_new(struct taxon * master, int maxswaps, int numspectries, int numgenetr
 	
 	/* 1) First make a copy of the master tree passed to the application, called master_copy */
 	
-	temp_top = '\0';
-	duplicate_tree(master, '\0'); /* make a copy of the tree */
+	temp_top = NULL;
+	duplicate_tree(master, NULL); /* make a copy of the tree */
 	master_copy = temp_top;
-	temp_top = '\0';
+	temp_top = NULL;
 	/* end 1) */
 	/* 2) count the number of nodes that it is possible to break this tree (internal and external branches) */
 	
@@ -9423,28 +9429,28 @@ int spr_new(struct taxon * master, int maxswaps, int numspectries, int numgenetr
 	for(x=0; x<y; x++) /* for each branch of the master tree, create an instance where it is bisected at this point */
 		{
 		/* create a new instance of "master" from master_copy */
-		if(master != '\0')
+		if(master != NULL)
 			dismantle_tree(master);
-		master = '\0';
-		temp_top = '\0';
-		duplicate_tree(master_copy, '\0'); /* make a copy of the tree */
+		master = NULL;
+		temp_top = NULL;
+		duplicate_tree(master_copy, NULL); /* make a copy of the tree */
 		master = temp_top;
 		tree_top = master;
-		temp_top = '\0';
+		temp_top = NULL;
 		number_tree(master, 0); 
 		
 		
 		/* find the branch named "j" */
-		position = '\0';
+		position = NULL;
 		position = get_branch(master, x);
 		
 		/* count number ofsiblings */
 		/* rewind to start */
 		tmp = position;
-		while(tmp->prev_sibling != '\0') tmp = tmp->prev_sibling;
+		while(tmp->prev_sibling != NULL) tmp = tmp->prev_sibling;
 		/* count number of sibligs */
 		numofsiblings = 0;
-		while(tmp != '\0') 
+		while(tmp != NULL) 
 			{
 			numofsiblings++;
 			tmp = tmp->next_sibling;
@@ -9455,28 +9461,28 @@ int spr_new(struct taxon * master, int maxswaps, int numspectries, int numgenetr
 			/* 3) break the tree at this point and create "newbie" */
 
 			/* move position to be a daughter of newbie */
-			if(position->next_sibling != '\0') latest = position->next_sibling;
+			if(position->next_sibling != NULL) latest = position->next_sibling;
 			else
 				{ 
 				latest = position->prev_sibling;
 				lastinline = TRUE;
 				}
 
-			if(position->prev_sibling != '\0') (position->prev_sibling)->next_sibling = position->next_sibling;
-			if(position->next_sibling != '\0') (position->next_sibling)->prev_sibling = position->prev_sibling;
-			if(position->parent != '\0')
+			if(position->prev_sibling != NULL) (position->prev_sibling)->next_sibling = position->next_sibling;
+			if(position->next_sibling != NULL) (position->next_sibling)->prev_sibling = position->prev_sibling;
+			if(position->parent != NULL)
 				{
 				(position->parent)->daughter = position->next_sibling;
 				(position->next_sibling)->parent = position->parent;
 				}
-			position->next_sibling = '\0';
-			position->prev_sibling = '\0';
+			position->next_sibling = NULL;
+			position->prev_sibling = NULL;
 			
-			if(numofsiblings == 2 && latest->parent != '\0')  /* put the other sibling on the previous level instead of the pointer sibling that points to this level */
+			if(numofsiblings == 2 && latest->parent != NULL)  /* put the other sibling on the previous level instead of the pointer sibling that points to this level */
 				{
-				if((latest->parent)->prev_sibling != '\0') ((latest->parent)->prev_sibling)->next_sibling = latest;
-				if((latest->parent)->next_sibling != '\0') ((latest->parent)->next_sibling)->prev_sibling = latest;
-				if((latest->parent)->parent != '\0') ((latest->parent)->parent)->daughter = latest;
+				if((latest->parent)->prev_sibling != NULL) ((latest->parent)->prev_sibling)->next_sibling = latest;
+				if((latest->parent)->next_sibling != NULL) ((latest->parent)->next_sibling)->prev_sibling = latest;
+				if((latest->parent)->parent != NULL) ((latest->parent)->parent)->daughter = latest;
 				latest->prev_sibling = (latest->parent)->prev_sibling;
 				latest->next_sibling = (latest->parent)->next_sibling;
 				tmp = latest->parent;
@@ -9486,10 +9492,10 @@ int spr_new(struct taxon * master, int maxswaps, int numspectries, int numgenetr
 				 master = latest;
 				 tree_top = master;
 				 }
-				tmp->next_sibling = '\0';
-				tmp->prev_sibling = '\0';
-				tmp->daughter = '\0';
-				tmp->parent = '\0';
+				tmp->next_sibling = NULL;
+				tmp->prev_sibling = NULL;
+				tmp->daughter = NULL;
+				tmp->parent = NULL;
 				free(tmp);
 				}
 			newbie = position;
@@ -9497,7 +9503,7 @@ int spr_new(struct taxon * master, int maxswaps, int numspectries, int numgenetr
 				debugtree[0] = '\0';
 			
 			tmp = latest;
-			while(tmp->prev_sibling != '\0') tmp = tmp->prev_sibling;  /* rewinding */
+			while(tmp->prev_sibling != NULL) tmp = tmp->prev_sibling;  /* rewinding */
 			/**** Now that we have the subtree that we want to regraft, identify the taxa in that subtree for the purposes of speeding up the calculations */
 			for(i=0; i<number_of_taxa; i++)presenceof_SPRtaxa[i] = FALSE;
 			identify_taxa(newbie, presenceof_SPRtaxa);
@@ -9505,9 +9511,9 @@ int spr_new(struct taxon * master, int maxswaps, int numspectries, int numgenetr
 			/* end 3) */
 			
 
-			/* At this point there are two paths that can be taken.
-			/* If we are doing a spr search, then we use the "regraft" function to find all possible positions to regraft the subtree onto the original tree
-			/* If we are doing a TBR search we need to reroot the subtree "newbie" at all rootings and for each, use "regraft" to try all positions of the rerooted subtree on the original tree
+			/* At this point there are two paths that can be taken. */
+			/* If we are doing a spr search, then we use the "regraft" function to find all possible positions to regraft the subtree onto the original tree */
+			/* If we are doing a TBR search we need to reroot the subtree "newbie" at all rootings and for each, use "regraft" to try all positions of the rerooted subtree on the original tree */
 			/* This makes the search longer, but allows the better penetration of treespace */
 			if(method == 2) /* spr method */
 				{
@@ -9515,13 +9521,13 @@ int spr_new(struct taxon * master, int maxswaps, int numspectries, int numgenetr
 				temper->daughter = newbie; 
 				newbie->parent = temper;
 				newbie = temper;
-				temper= '\0';
+				temper= NULL;
 				newbie->spr = TRUE;
 				
 				print_tree(newbie, debugtree);
 				debugtree[0] = '\0';
 				
-				better_score = regraft(latest, newbie, '\0', 1, maxswaps, numspectries, numgenetries);
+				better_score = regraft(latest, newbie, NULL, 1, maxswaps, numspectries, numgenetries);
 				
 				}
 			if(method == 3) /*tbr method */
@@ -9532,31 +9538,31 @@ int spr_new(struct taxon * master, int maxswaps, int numspectries, int numgenetr
 				if(i > 4) /* no point rerooting a clade with only 2 taxa or a single taxa */
 					{
 					temper = newbie->daughter;
-					temper->parent = '\0';
+					temper->parent = NULL;
 					free(newbie);
 					newbie = temper;
-					temper = '\0';
+					temper = NULL;
 
 					print_tree(newbie, debugtree);
 					strcat(debugtree, ";");
 					unroottree(debugtree);
 					
 					dismantle_tree(newbie);
-					newbie = '\0';
-					temp_top = '\0';
+					newbie = NULL;
+					temp_top = NULL;
 					tree_build(1, debugtree, newbie, FALSE, -1);
 					newbie = temp_top;
-					temp_top = '\0';
+					temp_top = NULL;
 					
 					debugtree[0] = '\0';
 					print_tree(newbie, debugtree);
 					debugtree[0] = '\0';	
 					
 					r = number_tree(newbie, 0); /* count the parts of newbie */
-					temp_top = '\0';
-					duplicate_tree(newbie, '\0'); /* make a copy of the subtree */
+					temp_top = NULL;
+					duplicate_tree(newbie, NULL); /* make a copy of the subtree */
 					copy = temp_top;
-					temp_top = '\0';
+					temp_top = NULL;
 					
 					print_tree_withinternals(copy, debugtree);
 					debugtree[0] = '\0';
@@ -9578,30 +9584,30 @@ int spr_new(struct taxon * master, int maxswaps, int numspectries, int numgenetr
 						temper->daughter = newbie; 
 						newbie->parent = temper;
 						newbie = temper;
-						temper= '\0';
+						temper= NULL;
 						newbie->spr = TRUE;
 
 
-						better_score = regraft(tmp, newbie, '\0', 1, maxswaps, numspectries, numgenetries);
+						better_score = regraft(tmp, newbie, NULL, 1, maxswaps, numspectries, numgenetries);
 						
 
 						if(better_score || user_break) q = r;
 						else
 							{
 							dismantle_tree(newbie);
-							newbie = '\0';
-							temp_top = '\0';
+							newbie = NULL;
+							temp_top = NULL;
 
-							duplicate_tree(copy, '\0'); /* make a copy of the subtree */
+							duplicate_tree(copy, NULL); /* make a copy of the subtree */
 							newbie = temp_top;
-							temp_top = '\0';
+							temp_top = NULL;
 							number_tree(newbie, 0);
 							newbie->spr = TRUE;
 							}
 						}
-					if(copy != '\0')dismantle_tree(copy);
+					if(copy != NULL)dismantle_tree(copy);
 					
-					copy = '\0';
+					copy = NULL;
 					}
 				else
 					{
@@ -9609,17 +9615,17 @@ int spr_new(struct taxon * master, int maxswaps, int numspectries, int numgenetr
 					temper->daughter = newbie; 
 					newbie->parent = temper;
 					newbie = temper;
-					temper= '\0';
+					temper= NULL;
 					newbie->spr = TRUE;
 					
 					print_tree(newbie, debugtree);
 					debugtree[0] = '\0';
 					
-					better_score = regraft(latest, newbie, '\0', 1, maxswaps, numspectries, numgenetries); 
+					better_score = regraft(latest, newbie, NULL, 1, maxswaps, numspectries, numgenetries); 
 					}
 				}
-			if(!better_score && newbie != '\0') dismantle_tree(newbie);
-			newbie = '\0';
+			if(!better_score && newbie != NULL) dismantle_tree(newbie);
+			newbie = NULL;
             }
 		if(better_score == TRUE || (position == branchpointer) || donenextlevel || tried_regrafts >= maxswaps || user_break) 
 			{
@@ -9627,10 +9633,10 @@ int spr_new(struct taxon * master, int maxswaps, int numspectries, int numgenetr
 			}
 		}
 		free(debugtree);
-		if(master_copy != '\0')
+		if(master_copy != NULL)
 			{
 			dismantle_tree(master_copy);
-			master_copy = '\0';
+			master_copy = NULL;
 			}
 
         return(better_score);
@@ -9659,9 +9665,9 @@ int spr_new(struct taxon * master, int maxswaps, int numspectries, int numgenetr
 
 int spr(struct taxon * position, int maxswaps, int numspectries, int numgenetries)
 	{
-	struct taxon * start = '\0', * newbie = '\0', * latest = '\0', * tmp = '\0', *copy = '\0', *temper = '\0', *temper1 = '\0';
+	struct taxon * start = NULL, * newbie = NULL, * latest = NULL, * tmp = NULL, *copy = NULL, *temper = NULL, *temper1 = NULL;
 	int better_score = FALSE, lastinline = FALSE, numofsiblings = 0, donenextlevel = FALSE, i=0, j=0;
-	char *debugtree = '\0';
+	char *debugtree = NULL;
 	
 	debugtree = malloc(40000*sizeof(char));
 	debugtree[0] = '\0';
@@ -9674,9 +9680,9 @@ int spr(struct taxon * position, int maxswaps, int numspectries, int numgenetrie
 
 	
         /* travel down to the bottom of the tree */
-	while(position != '\0' && better_score == FALSE && (position != branchpointer) && !donenextlevel && tried_regrafts < maxswaps && !user_break)
+	while(position != NULL && better_score == FALSE && (position != branchpointer) && !donenextlevel && tried_regrafts < maxswaps && !user_break)
 		{
-		if(position->daughter != '\0' && !position->spr && !user_break)
+		if(position->daughter != NULL && !position->spr && !user_break)
 			{
 			if(donenextlevel == FALSE)
 				{
@@ -9692,7 +9698,7 @@ int spr(struct taxon * position, int maxswaps, int numspectries, int numgenetrie
             {
           /*  if(position == branchpointer && !better_score && !user_break)
                 {
-                while(position != '\0' && !user_break)
+                while(position != NULL && !user_break)
                     {
                     numofsiblings++;
                     position = position->next_sibling;
@@ -9700,46 +9706,46 @@ int spr(struct taxon * position, int maxswaps, int numspectries, int numgenetrie
                 }
 	*/		printf("numsiblingd=%d\n", numofsiblings);
             position = start;
-            if(!better_score && start->parent != '\0' && tried_regrafts < maxswaps && !user_break)
+            if(!better_score && start->parent != NULL && tried_regrafts < maxswaps && !user_break)
                     {
-                    while(position != '\0'&& start->parent != '\0' && !better_score && tried_regrafts < maxswaps && !user_break)
+                    while(position != NULL&& start->parent != NULL && !better_score && tried_regrafts < maxswaps && !user_break)
                             {
-                            /*if(newbie == '\0')
+                            /*if(newbie == NULL)
                                     newbie = make_taxon();
                             newbie->spr = TRUE; */
                             /* move position to be a daughter of newbie */
-                            if(position->next_sibling != '\0') latest = position->next_sibling;
+                            if(position->next_sibling != NULL) latest = position->next_sibling;
                             else
                                 { 
                                 latest = position->prev_sibling;
                                 lastinline = TRUE;
                                 }
                            /* newbie->daughter = position; */
-                            if(position->prev_sibling != '\0') (position->prev_sibling)->next_sibling = position->next_sibling;
-                            if(position->next_sibling != '\0') (position->next_sibling)->prev_sibling = position->prev_sibling;
-                            if(position->parent != '\0')
+                            if(position->prev_sibling != NULL) (position->prev_sibling)->next_sibling = position->next_sibling;
+                            if(position->next_sibling != NULL) (position->next_sibling)->prev_sibling = position->prev_sibling;
+                            if(position->parent != NULL)
                                 {
                                 (position->parent)->daughter = position->next_sibling;
                                 (position->next_sibling)->parent = position->parent;
                                 }
-                            position->next_sibling = '\0';
-                            position->prev_sibling = '\0';
+                            position->next_sibling = NULL;
+                            position->prev_sibling = NULL;
                            /* position->parent = newbie;*/
                             
-                            if(numofsiblings == 2 && latest->parent != '\0')  /* put the other sibling on the previous level instead of the pointer sibling that points to this level */
+                            if(numofsiblings == 2 && latest->parent != NULL)  /* put the other sibling on the previous level instead of the pointer sibling that points to this level */
                                 {
-                                if((latest->parent)->prev_sibling != '\0') ((latest->parent)->prev_sibling)->next_sibling = latest;
-                                if((latest->parent)->next_sibling != '\0') ((latest->parent)->next_sibling)->prev_sibling = latest;
-                                if((latest->parent)->parent != '\0') ((latest->parent)->parent)->daughter = latest;
+                                if((latest->parent)->prev_sibling != NULL) ((latest->parent)->prev_sibling)->next_sibling = latest;
+                                if((latest->parent)->next_sibling != NULL) ((latest->parent)->next_sibling)->prev_sibling = latest;
+                                if((latest->parent)->parent != NULL) ((latest->parent)->parent)->daughter = latest;
                                 latest->prev_sibling = (latest->parent)->prev_sibling;
                                 latest->next_sibling = (latest->parent)->next_sibling;
                                 tmp = latest->parent;
                                 latest->parent = (latest->parent)->parent;
                                 if(tree_top == tmp) tree_top = latest;
-                                tmp->next_sibling = '\0';
-                                tmp->prev_sibling = '\0';
-                                tmp->daughter = '\0';
-                                tmp->parent = '\0';
+                                tmp->next_sibling = NULL;
+                                tmp->prev_sibling = NULL;
+                                tmp->daughter = NULL;
+                                tmp->parent = NULL;
                                 free(tmp);
                                 }
 							newbie = position;
@@ -9748,14 +9754,14 @@ int spr(struct taxon * position, int maxswaps, int numspectries, int numgenetrie
 								debugtree[0] = '\0';
 							
                             tmp = latest;
-                            while(tmp->prev_sibling != '\0') tmp = tmp->prev_sibling;  /* rewinding */
+                            while(tmp->prev_sibling != NULL) tmp = tmp->prev_sibling;  /* rewinding */
 							/**** Now that we have the subtree that we want to regraft, identify the taxa in that subtree for the purposes of speeding up the calculations */
 							for(i=0; i<number_of_taxa; i++)presenceof_SPRtaxa[i] = FALSE;
 							identify_taxa(newbie, presenceof_SPRtaxa);
 							
-							/* At this point there are two paths that can be taken.
-							/* If we are doing a spr search, then we use the "regraft" function to find all possible positions to regraft the subtree onto the original tree
-							/* If we are doing a TBR search we need to reroot the subtree "newbie" at all rootings and for each, use "regraft" to try all positions of the rerooted subtree on the original tree
+							/* At this point there are two paths that can be taken. */
+							/* If we are doing a spr search, then we use the "regraft" function to find all possible positions to regraft the subtree onto the original tree */
+							/* If we are doing a TBR search we need to reroot the subtree "newbie" at all rootings and for each, use "regraft" to try all positions of the rerooted subtree on the original tree */
 							/* This makes the search longer, but allows the better penetration of treespace */
 							if(method == 2) /* spr method */
 								{
@@ -9763,14 +9769,14 @@ int spr(struct taxon * position, int maxswaps, int numspectries, int numgenetrie
 								temper->daughter = newbie; 
 								newbie->parent = temper;
 								newbie = temper;
-								temper= '\0';
+								temper= NULL;
 								newbie->spr = TRUE;
 								
 								print_tree(newbie, debugtree);
 								printf("%s\n", debugtree);
 								debugtree[0] = '\0';
 								
-								better_score = regraft(tmp, newbie, '\0', 1, maxswaps, numspectries, numgenetries);
+								better_score = regraft(tmp, newbie, NULL, 1, maxswaps, numspectries, numgenetries);
 								
 								}
 							if(method == 3) /*tbr method */
@@ -9781,10 +9787,10 @@ int spr(struct taxon * position, int maxswaps, int numspectries, int numgenetrie
 								if(i > 4) /* no point rerooting a clade with only 2 taxa or a single taxa */
 									{
 									temper = newbie->daughter;
-									temper->parent = '\0';
+									temper->parent = NULL;
 									free(newbie);
 									newbie = temper;
-									temper = '\0';
+									temper = NULL;
 
 									print_tree(newbie, debugtree);
 									strcat(debugtree, ";");
@@ -9792,11 +9798,11 @@ int spr(struct taxon * position, int maxswaps, int numspectries, int numgenetrie
 									printf("unrooted = %s\n", debugtree);
 									
 									dismantle_tree(newbie);
-									newbie = '\0';
-									temp_top = '\0';
+									newbie = NULL;
+									temp_top = NULL;
 									tree_build(1, debugtree, newbie, FALSE, -1);
 									newbie = temp_top;
-									temp_top = '\0';
+									temp_top = NULL;
 									
 									debugtree[0] = '\0';
 									print_tree(newbie, debugtree);
@@ -9805,10 +9811,10 @@ int spr(struct taxon * position, int maxswaps, int numspectries, int numgenetrie
 									
 									i = number_tree(newbie, 0); /* count the parts of newbie */
 									printf("i=%d\n", i);
-									temp_top = '\0';
-									duplicate_tree(newbie, '\0'); /* make a copy of the subtree */
+									temp_top = NULL;
+									duplicate_tree(newbie, NULL); /* make a copy of the subtree */
 									copy = temp_top;
-									temp_top = '\0';
+									temp_top = NULL;
 									
 									print_tree_withinternals(copy, debugtree);
 									printf("copy = %s\n", debugtree);
@@ -9835,12 +9841,12 @@ int spr(struct taxon * position, int maxswaps, int numspectries, int numgenetrie
 										temper->daughter = newbie; 
 										newbie->parent = temper;
 										newbie = temper;
-										temper= '\0';
+										temper= NULL;
 										newbie->spr = TRUE;
 
 
 										printf("a\n");
-										better_score = regraft(tmp, newbie, '\0', 1, maxswaps, numspectries, numgenetries);
+										better_score = regraft(tmp, newbie, NULL, 1, maxswaps, numspectries, numgenetries);
 										
 										printf("b\n");
 
@@ -9849,13 +9855,13 @@ int spr(struct taxon * position, int maxswaps, int numspectries, int numgenetrie
 											{
 											printf("change\n");
 											dismantle_tree(newbie);
-											newbie = '\0';
-											temp_top = '\0';
+											newbie = NULL;
+											temp_top = NULL;
 											printf("dismantled\n");
 
-											duplicate_tree(copy, '\0'); /* make a copy of the subtree */
+											duplicate_tree(copy, NULL); /* make a copy of the subtree */
 											newbie = temp_top;
-											temp_top = '\0';
+											temp_top = NULL;
 											number_tree(newbie, 0);
 											newbie->spr = TRUE;
 											printf("end\n");
@@ -9868,14 +9874,14 @@ int spr(struct taxon * position, int maxswaps, int numspectries, int numgenetrie
 									temper->daughter = newbie; 
 									newbie->parent = temper;
 									newbie = temper;
-									temper= '\0';
+									temper= NULL;
 									newbie->spr = TRUE;
 									
 									print_tree(newbie, debugtree);
 									printf("%s\n", debugtree);
 									debugtree[0] = '\0';
 									
-									better_score = regraft(tmp, newbie, '\0', 1, maxswaps, numspectries, numgenetries);
+									better_score = regraft(tmp, newbie, NULL, 1, maxswaps, numspectries, numgenetries);
 									}
 								}
                             if(!better_score && !user_break)
@@ -9887,9 +9893,9 @@ int spr(struct taxon * position, int maxswaps, int numspectries, int numgenetrie
                                             newbie->prev_sibling = latest->prev_sibling;
                                             newbie->parent = latest->parent;
     
-                                            if(newbie->next_sibling != '\0') (newbie->next_sibling)->prev_sibling = newbie;
-                                            if(newbie->prev_sibling != '\0') (newbie->prev_sibling)->next_sibling = newbie;
-                                            if(newbie->parent != '\0') (newbie->parent)->daughter = newbie;
+                                            if(newbie->next_sibling != NULL) (newbie->next_sibling)->prev_sibling = newbie;
+                                            if(newbie->prev_sibling != NULL) (newbie->prev_sibling)->next_sibling = newbie;
+                                            if(newbie->parent != NULL) (newbie->parent)->daughter = newbie;
                                             if(tree_top == latest) tree_top = newbie;
     
                                             if(lastinline)
@@ -9897,10 +9903,10 @@ int spr(struct taxon * position, int maxswaps, int numspectries, int numgenetrie
                                                     latest->next_sibling = position;
                                                     latest->prev_sibling = position->prev_sibling;
                                                     position->prev_sibling = latest;
-                                                    position->next_sibling = '\0';
+                                                    position->next_sibling = NULL;
                                                     latest->parent = position->parent;
-                                                    if(latest->parent != '\0') (latest->parent)->daughter = latest;
-                                                    position->parent = '\0';
+                                                    if(latest->parent != NULL) (latest->parent)->daughter = latest;
+                                                    position->parent = NULL;
     
     
                                                     }
@@ -9909,10 +9915,10 @@ int spr(struct taxon * position, int maxswaps, int numspectries, int numgenetrie
                                                     latest->prev_sibling = position;
                                                     latest->next_sibling = position->next_sibling;
                                                     position->next_sibling = latest;
-                                                    if(latest->next_sibling != '\0') (latest->next_sibling)->prev_sibling = latest;
-                                                    latest->parent = '\0';
+                                                    if(latest->next_sibling != NULL) (latest->next_sibling)->prev_sibling = latest;
+                                                    latest->parent = NULL;
                                                     }
-                                            newbie = '\0';
+                                            newbie = NULL;
                                             }
                                     else
                                             {
@@ -9920,20 +9926,20 @@ int spr(struct taxon * position, int maxswaps, int numspectries, int numgenetrie
                                                     {
                                                     latest->next_sibling = position;
                                                     position->prev_sibling = latest;
-                                                    position->next_sibling = '\0';
-                                                    position->parent = '\0';
-                                                    newbie->daughter = '\0';
+                                                    position->next_sibling = NULL;
+                                                    position->parent = NULL;
+                                                    newbie->daughter = NULL;
                                                     }
                                             else
                                                     {
                                                     position->prev_sibling = latest->prev_sibling;
-                                                    if(position->prev_sibling != '\0') (position->prev_sibling)->next_sibling = position;
+                                                    if(position->prev_sibling != NULL) (position->prev_sibling)->next_sibling = position;
                                                     position->next_sibling = latest;
                                                     latest->prev_sibling = position;
                                                     position->parent = latest->parent;
-                                                    if(position->parent != '\0') (position->parent)->daughter = position;
-                                                    latest->parent = '\0';
-                                                    newbie->daughter = '\0';
+                                                    if(position->parent != NULL) (position->parent)->daughter = position;
+                                                    latest->parent = NULL;
+                                                    newbie->daughter = NULL;
                                                     }
                                             }
     
@@ -9941,7 +9947,7 @@ int spr(struct taxon * position, int maxswaps, int numspectries, int numgenetrie
                                     }
                             else
                                     {
-                                    newbie = '\0';
+                                    newbie = NULL;
                                     branchpointer = latest;
                                     }
                             position = position->next_sibling;
@@ -9958,10 +9964,10 @@ int spr(struct taxon * position, int maxswaps, int numspectries, int numgenetrie
 void reset_spr (struct taxon *position)
     {
     
-    while(position != '\0')
+    while(position != NULL)
         {
         position->spr = FALSE;
-        if(position->daughter != '\0') reset_spr(position->daughter);
+        if(position->daughter != NULL) reset_spr(position->daughter);
         position = position->next_sibling;
         }
     }
@@ -9970,10 +9976,10 @@ void reset_spr (struct taxon *position)
 
 int regraft(struct taxon * position, struct taxon * newbie, struct taxon * last, int steps, int maxswaps, int numspectries, int numgenetries)
 	{
-	struct taxon * start = '\0', * latest = '\0';
+	struct taxon * start = NULL, * latest = NULL;
 	int better_score = FALSE, lastinline = FALSE, j=0, different = TRUE, i=0;
-	float tmpscore = 0, *tmp_fund_scores = '\0';
-	char *best_tree = '\0', *temptree = '\0';
+	float tmpscore = 0, *tmp_fund_scores = NULL;
+	char *best_tree = NULL, *temptree = NULL;
 
 	tmp_fund_scores = malloc(Total_fund_trees*sizeof(float));
 	best_tree = malloc(400000*sizeof(char));
@@ -9986,28 +9992,28 @@ int regraft(struct taxon * position, struct taxon * newbie, struct taxon * last,
 	temptree[0] = '\0';
             
         
-	while(position->prev_sibling != '\0' && !user_break) position = position->prev_sibling; /* rewinding */
+	while(position->prev_sibling != NULL && !user_break) position = position->prev_sibling; /* rewinding */
 	start = position;
 	
-	while(position != '\0' && !better_score && tried_regrafts < maxswaps && !user_break)
+	while(position != NULL && !better_score && tried_regrafts < maxswaps && !user_break)
 		{
-		if(steps < number_of_steps && position->parent != '\0' && position->parent != last && !user_break) better_score = regraft(position->parent, newbie, position, steps+1, maxswaps, numspectries, numgenetries);  /* go up the tree */
+		if(steps < number_of_steps && position->parent != NULL && position->parent != last && !user_break) better_score = regraft(position->parent, newbie, position, steps+1, maxswaps, numspectries, numgenetries);  /* go up the tree */
 		position = position->next_sibling;
 		}
 	
 	position = start;
 	if(!better_score && !user_break)
 		{
-		while(position != '\0' && !better_score && tried_regrafts < maxswaps && !user_break)
+		while(position != NULL && !better_score && tried_regrafts < maxswaps && !user_break)
 			{
 			if(steps < number_of_steps && !user_break)
-				if(position->daughter != '\0' && position->daughter != last && !user_break) better_score = regraft(position->daughter, newbie, position, steps+1, maxswaps, numspectries, numgenetries);
+				if(position->daughter != NULL && position->daughter != last && !user_break) better_score = regraft(position->daughter, newbie, position, steps+1, maxswaps, numspectries, numgenetries);
 
 			position = position->next_sibling;
 			}
 		position = start;
 
-		while(position != '\0' && !better_score && tried_regrafts < maxswaps && !user_break)
+		while(position != NULL && !better_score && tried_regrafts < maxswaps && !user_break)
 			{
 			if(!better_score && steps <= number_of_steps && !user_break)
 				{
@@ -10023,17 +10029,17 @@ int regraft(struct taxon * position, struct taxon * newbie, struct taxon * last,
 				newbie->prev_sibling = position->prev_sibling;
 				newbie->parent = position->parent;
 				
-				if(newbie->prev_sibling != '\0') (newbie->prev_sibling)->next_sibling = newbie;
-				if(newbie->next_sibling != '\0') (newbie->next_sibling)->prev_sibling = newbie;
-				if(newbie->parent != '\0') (newbie->parent)->daughter = newbie;
+				if(newbie->prev_sibling != NULL) (newbie->prev_sibling)->next_sibling = newbie;
+				if(newbie->next_sibling != NULL) (newbie->next_sibling)->prev_sibling = newbie;
+				if(newbie->parent != NULL) (newbie->parent)->daughter = newbie;
 				if(tree_top == position) tree_top = newbie;
 
 				/* put position as a daughter of newbie */
 				
 				(newbie->daughter)->next_sibling = position;
 				position->prev_sibling = newbie->daughter;
-				position->next_sibling = '\0';
-				position->parent = '\0';
+				position->next_sibling = NULL;
+				position->parent = NULL;
 
 				/* the new tree is complete, so now score this new super tree */
 
@@ -10157,14 +10163,14 @@ int regraft(struct taxon * position, struct taxon * newbie, struct taxon * last,
                                             position->parent = newbie->parent;
                                             if(tree_top == newbie) tree_top = position;
                                             
-                                            if(position->prev_sibling != '\0') (position->prev_sibling)->next_sibling = position;
-                                            if(position->next_sibling != '\0') (position->next_sibling)->prev_sibling = position;
-                                            if(position->parent != '\0') (position->parent)->daughter = position;
+                                            if(position->prev_sibling != NULL) (position->prev_sibling)->next_sibling = position;
+                                            if(position->next_sibling != NULL) (position->next_sibling)->prev_sibling = position;
+                                            if(position->parent != NULL) (position->parent)->daughter = position;
                                             
-                                            newbie->next_sibling = '\0';
-                                            newbie->prev_sibling = '\0';
-                                            newbie->parent = '\0';
-                                            (newbie->daughter)->next_sibling = '\0';
+                                            newbie->next_sibling = NULL;
+                                            newbie->prev_sibling = NULL;
+                                            newbie->parent = NULL;
+                                            (newbie->daughter)->next_sibling = NULL;
                                             
                                             /* the node is now back in position */
                                             for(i=0; i<Total_fund_trees; i++) sourcetree_scores[i] = tmp_fund_scores[i];
@@ -10182,14 +10188,14 @@ int regraft(struct taxon * position, struct taxon * newbie, struct taxon * last,
 										position->parent = newbie->parent;
 										if(tree_top == newbie) tree_top = position;
 
-										if(position->prev_sibling != '\0') (position->prev_sibling)->next_sibling = position;
-										if(position->next_sibling != '\0') (position->next_sibling)->prev_sibling = position;
-										if(position->parent != '\0') (position->parent)->daughter = position;
+										if(position->prev_sibling != NULL) (position->prev_sibling)->next_sibling = position;
+										if(position->next_sibling != NULL) (position->next_sibling)->prev_sibling = position;
+										if(position->parent != NULL) (position->parent)->daughter = position;
 
-										newbie->next_sibling = '\0';
-										newbie->prev_sibling = '\0';
-										newbie->parent = '\0';
-										(newbie->daughter)->next_sibling = '\0';
+										newbie->next_sibling = NULL;
+										newbie->prev_sibling = NULL;
+										newbie->parent = NULL;
+										(newbie->daughter)->next_sibling = NULL;
 										for(i=0; i<Total_fund_trees; i++) sourcetree_scores[i] = tmp_fund_scores[i];
 										}
                                     /* the node is now back in position */
@@ -10205,11 +10211,11 @@ int regraft(struct taxon * position, struct taxon * newbie, struct taxon * last,
 	return(better_score);
 	}
 
- int get_lengths(struct taxon *position)
+ void get_lengths(struct taxon *position)
     {
-    while(position != '\0')
+    while(position != NULL)
         {
-        if(position->daughter != '\0')
+        if(position->daughter != NULL)
             {
             get_lengths(position->daughter);
 			printf("%f\n", position->length);
@@ -10229,9 +10235,9 @@ int regraft(struct taxon * position, struct taxon * newbie, struct taxon * last,
 int xposition1 (struct taxon *position, int count)
     {
     
-    while(position != '\0')
+    while(position != NULL)
         {
-        if(position->daughter != '\0')
+        if(position->daughter != NULL)
             count = xposition1(position->daughter, count);
         else
             {
@@ -10250,7 +10256,7 @@ float middle_number(struct taxon *position)
     float start, end;
     
     start= position->xpos;
-    while(position->next_sibling != '\0')
+    while(position->next_sibling != NULL)
         {
         position = position->next_sibling;
         }
@@ -10262,9 +10268,9 @@ float middle_number(struct taxon *position)
 /* set all of the pointer taxa xpos */
 void xposition2(struct taxon *position)
     {
-    while(position != '\0')
+    while(position != NULL)
         {
-        if(position->daughter != '\0')
+        if(position->daughter != NULL)
             {
             xposition2(position->daughter);
             position->xpos = middle_number(position->daughter);
@@ -10279,9 +10285,9 @@ int yposition0(struct taxon *position, int level, int deepest)
     int tmp, deephere = level;
 	struct taxon *start = position;
 	
-    while(position != '\0')
+    while(position != NULL)
         {
-        if(position->daughter != '\0')
+        if(position->daughter != NULL)
             {
             tmp = yposition0(position->daughter, level+1, deepest);
 			if(tmp > deephere) deephere = tmp;
@@ -10289,7 +10295,7 @@ int yposition0(struct taxon *position, int level, int deepest)
         position = position->next_sibling;
         }
 	position = start;
-	while(position != '\0')
+	while(position != NULL)
         {
 		position->ypos = (deepest - (deephere-level)) -1;
 		position = position->next_sibling;
@@ -10303,9 +10309,9 @@ int yposition0(struct taxon *position, int level, int deepest)
 int yposition1(struct taxon *position, int level)
     {
     int tmp, deepest = level;
-    while(position != '\0')
+    while(position != NULL)
         {
-        if(position->daughter != '\0')
+        if(position->daughter != NULL)
             {
             tmp = yposition1(position->daughter, level+1);
             if(tmp > deepest) deepest = tmp;
@@ -10318,9 +10324,9 @@ int yposition1(struct taxon *position, int level)
 
 void yposition2(struct taxon *position, int deepest)
     {
-    while(position != '\0')
+    while(position != NULL)
         {
-        if(position->daughter != '\0')
+        if(position->daughter != NULL)
             yposition2(position->daughter, deepest);
             
         position->ypos = position->ypos/deepest;
@@ -10404,12 +10410,12 @@ void print_coordinates(struct taxon *position, char **treearray, int taxa_count,
     struct taxon *start = position;
     
         
-    while(position != '\0')
+    while(position != NULL)
         {
         x = (int)((position->xpos/taxa_count)*(taxa_count*2));
         y = (int)(position->ypos*(60));
 
-        if(position->daughter != '\0')
+        if(position->daughter != NULL)
             {
             v1 = (int)(position->ypos*500); if(v1 == 0) v1 = 30;
 			printcolour(position->loss, 0);
@@ -10463,7 +10469,7 @@ void print_coordinates(struct taxon *position, char **treearray, int taxa_count,
 					treearray[x][i] = '-';
 				}
             j=0; i++;
-			if(position->fullname != '\0')
+			if(position->fullname != NULL)
 				{
 				while(i<80 && position->fullname[j] != '\0')
 					{
@@ -10492,7 +10498,7 @@ void print_coordinates(struct taxon *position, char **treearray, int taxa_count,
     x1 = (position->xpos/taxa_count);
     if(x1 == 0) v1 =1;
     
-    while(position->next_sibling != '\0')
+    while(position->next_sibling != NULL)
         position = position->next_sibling;
     
     v2 = (int)((position->xpos/taxa_count)*(taxa_count*2));
@@ -10514,24 +10520,24 @@ void print_coordinates(struct taxon *position, char **treearray, int taxa_count,
 
 void tree_coordinates(char *tree, int bootstrap, int build, int mapping, int fundnum)
     {
-    char **treearray = '\0';
+    char **treearray = NULL;
     int i=0, j=0, taxa_count = 0, deepest = 0, acrosssize = 20, upsize = 5;
     
 	if(build)
 		{
 		 /* build the tree in memory */
 		/****** We now need to build the Supertree in memory *******/
-		if(tree_top != '\0')
+		if(tree_top != NULL)
 			{
 			dismantle_tree(tree_top);
-			tree_top = '\0';
+			tree_top = NULL;
 			}
-		temp_top = '\0';
+		temp_top = NULL;
 		largest_length = 0;
 		taxaorder = 0;
 		tree_build(1, tree, tree_top, 1, fundnum);
 		tree_top = temp_top;
-		temp_top = '\0';
+		temp_top = NULL;
 		}
 	/* check how many taxa are on the tree */
 	taxa_count = count_taxa(tree_top, 0);
@@ -10619,11 +10625,11 @@ void tree_coordinates(char *tree, int bootstrap, int build, int mapping, int fun
     
 void generatetrees(void)
 	{
-	int i, j, k, error = FALSE, gen_method = 1, random = TRUE, n = 20, data = 1, tree_rand_method = 1, super = 1, print_all_scores = FALSE, saveideal = FALSE;
-	float *results = '\0';
-	char *temptree = '\0', *rand_tree = '\0', filename[100], *pruned_tree = '\0', tmp[1000], superfilename[1000], c;
-	double min = -1, max = -1,ntrees = 100, a = 0.0, b = 1.0;
-	FILE *outfile = '\0', *superfile = '\0', *allscores = '\0', *idealfile = '\0';
+	int i, j, k, ntrees = 100, error = FALSE, gen_method = 1, random = TRUE, n = 20, data = 1, tree_rand_method = 1, super = 1, print_all_scores = FALSE, saveideal = FALSE;
+	float *results = NULL;
+	char *temptree = NULL, *rand_tree = NULL, filename[100], *pruned_tree = NULL, tmp[1000], superfilename[1000], c;
+	double min = -1, max = -1, a = 0.0, b = 1.0;
+	FILE *outfile = NULL, *superfile = NULL, *allscores = NULL, *idealfile = NULL;
 	
 	filename[0] = '\0';
 	strcpy(filename, "histogram.txt");
@@ -10701,7 +10707,7 @@ void generatetrees(void)
 						data = 3;
 					else
 						{
-						printf("Error: %s not valid sourcedata option\n");
+						printf("Error: %s not valid sourcedata option\n", parsed_command[i+1]);
 						error = TRUE;
 						}
 					}
@@ -10752,7 +10758,7 @@ void generatetrees(void)
 		{
 		printf("\n\nGeneratetrees Settings:\n");
 		printf("\tGenerating");
-		if(random) printf(" %.0f random trees\n", ntrees);
+		if(random) printf(" %d random trees\n", ntrees);
 		else printf(" all %.0f possible trees\n", sup);
 		if(random)
 			{
@@ -10777,7 +10783,7 @@ void generatetrees(void)
 		if(criterion == 2) printf("sfit\n");
 		if(criterion == 3) printf("qfit\n");
 		printf("\tOutput file = %s\n", filename);
-		if(print_all_scores)printf("\tSaving all %.0f supertree scores to file 'allscores.txt'\n", ntrees);
+		if(print_all_scores)printf("\tSaving all %d supertree scores to file 'allscores.txt'\n", ntrees);
 		
 		outfile = fopen(filename, "w");
 		
@@ -10801,7 +10807,7 @@ void generatetrees(void)
 			}
 		for(i=0; i<number_of_taxa; i++) presenceof_SPRtaxa[i] = '\0';
 		
-		if(super_scores == '\0')
+		if(super_scores == NULL)
 			{
 			super_scores = malloc(number_of_taxa*sizeof(int *));
 			if(!super_scores)  memory_error(54);
@@ -10835,19 +10841,19 @@ void generatetrees(void)
 			/** create somewhere to store the source trees during the operation **/
 			
 			stored_fund_scores = malloc(Total_fund_trees*sizeof(int**));
-			if(stored_fund_scores == '\0') memory_error(38);
+			if(stored_fund_scores == NULL) memory_error(38);
 				
 			for(i=0; i<Total_fund_trees; i++)
 				{
 				stored_fund_scores[i] = malloc((number_of_taxa)*sizeof(int*));
-				if(stored_fund_scores[i] == '\0') memory_error(39);
+				if(stored_fund_scores[i] == NULL) memory_error(39);
 					
 				else
 					{
 					for(j=0; j<(number_of_taxa); j++)
 						{
 						stored_fund_scores[i][j] = malloc((number_of_taxa)*sizeof(int));
-						if(stored_fund_scores[i][j] == '\0') memory_error(40);
+						if(stored_fund_scores[i][j] == NULL) memory_error(40);
 							
 						else
 							{
@@ -10920,17 +10926,17 @@ void generatetrees(void)
 					pruned_tree = malloc(1000*sizeof(char));
 					
 					/****** We now need to build the Supertree in memory *******/
-					if(tree_top != '\0')
+					if(tree_top != NULL)
 						{
 						dismantle_tree(tree_top);
-						tree_top = '\0';
+						tree_top = NULL;
 						}
-					temp_top = '\0';
+					temp_top = NULL;
 					if(super == 1)
 						tree_build(1, retained_supers[0], tree_top, TRUE, -1);
 					else
 						{
-						if((superfile = fopen(superfilename, "r")) == '\0')
+						if((superfile = fopen(superfilename, "r")) == NULL)
 							{
 							printf("Error opening supertree file %s\n", superfilename);
 							error = TRUE;
@@ -10952,7 +10958,7 @@ void generatetrees(void)
 							}
 						}
 					tree_top = temp_top;
-					temp_top = '\0';
+					temp_top = NULL;
 					if(!error)
 						{
 						for(i=0; i< Total_fund_trees; i++)
@@ -11043,17 +11049,17 @@ void generatetrees(void)
 					else
 						intTotree( i+1, rand_tree, number_of_taxa);
 					
-					if(tree_top != '\0')
+					if(tree_top != NULL)
 						{
 						dismantle_tree(tree_top);
-						tree_top = '\0';
+						tree_top = NULL;
 						}
-					temp_top = '\0';
+					temp_top = NULL;
 					
 					if(gen_method == 1)tree_build(1, rand_tree, tree_top, FALSE, -1);
 					if(gen_method == 2)tree_build(1, rand_tree, tree_top, TRUE, -1);
 					tree_top = temp_top;
-					temp_top = '\0';
+					temp_top = NULL;
 					printf("made random tree\n");
 			/**** evaluate its fit to the source trees in memory *****/
 					temptree[0] = '\0';
@@ -11135,7 +11141,7 @@ void draw_histogram(FILE *outfile, int bins, float *results, int num_results)
 	{
 	int i, j, x, y, z, value;
 	double max1, min = -1, max = -1, mean = 0, std_dev,  variance, skewness,  k;
-	int *hist = '\0';
+	int *hist = NULL;
 	for(i=0; i<num_results; i++)
 		{
 		if(min == -1)
@@ -11157,8 +11163,8 @@ void draw_histogram(FILE *outfile, int bins, float *results, int num_results)
 
 	mean = mean/num_results;
 
-	if(outfile != '\0')fprintf(outfile, "range\tnumber of trees\n");
-	if(outfile != '\0')
+	if(outfile != NULL)fprintf(outfile, "range\tnumber of trees\n");
+	if(outfile != NULL)
 		{
 		if(bins ==0)
 			{
@@ -11189,12 +11195,12 @@ void draw_histogram(FILE *outfile, int bins, float *results, int num_results)
 		if(hist[i] > max1) max1 = hist[i];
 		}
 		
-	if(outfile != '\0')printf("\nResults as follows:\n\n\n");
+	if(outfile != NULL)printf("\nResults as follows:\n\n\n");
 	for(i=0; i<bins; i++)
 		{
 		 x = (hist[i]/max1)*40;
-		if(outfile != '\0')fprintf(outfile, "%.2f-%.2f\t%d\n", min+(i*k), (min+((i+1)*k))-0.01, hist[i]);
-		if(outfile != '\0')printf("%.2f - %.2f\t|", min+(i*k), (min+((i+1)*k))-0.01);
+		if(outfile != NULL)fprintf(outfile, "%.2f-%.2f\t%d\n", min+(i*k), (min+((i+1)*k))-0.01, hist[i]);
+		if(outfile != NULL)printf("%.2f - %.2f\t|", min+(i*k), (min+((i+1)*k))-0.01);
 		else printf("\t%-4.0f|", min+(i*k));
 		for(j=0; j<x; j++)
 			printf("=");
@@ -11231,7 +11237,7 @@ void draw_histogram(FILE *outfile, int bins, float *results, int num_results)
 	skewness = skewness/num_results;
 	
 	
-	if(outfile != '\0')printf("Moments of the Distribution:\n\n\tMean = %f\n\tVariance = %f\n\tStandard Deviation = %f\n\tSkewness = %f\n\tStandard deviation of skewness = %f\n\n", mean, variance, std_dev, skewness, sqrt(((double)6)/(double)num_results));
+	if(outfile != NULL)printf("Moments of the Distribution:\n\n\tMean = %f\n\tVariance = %f\n\tStandard Deviation = %f\n\tSkewness = %f\n\tStandard deviation of skewness = %f\n\n", mean, variance, std_dev, skewness, sqrt(((double)6)/(double)num_results));
 	
 	
 	
@@ -11242,9 +11248,9 @@ void draw_histogram(FILE *outfile, int bins, float *results, int num_results)
 void do_consensus(void)
 	{
 	int tree_type = 0, i, j, k, l,m, numtrees = 0, present = TRUE, number, error = FALSE, useguide = FALSE;
-	char **temptrees = '\0', c, tempname[1000], consensusfilename[1000], guidetreename[100]; 
+	char **temptrees = NULL, c, tempname[1000], consensusfilename[1000], guidetreename[100]; 
 	float percentage = 0;
-	FILE *consensusfile = '\0', *guidetreefile = '\0';
+	FILE *consensusfile = NULL, *guidetreefile = NULL;
 	
 	guidetreename[0] = '\0';
 	consensusfilename[0] = '\0';
@@ -11258,8 +11264,8 @@ void do_consensus(void)
 		if(strcmp(parsed_command[i], "guidetree") == 0)
 			{
 			strcpy(guidetreename, parsed_command[i+1]);
-			if(guidetreefile != '\0') fclose(guidetreefile);
-			if((guidetreefile = fopen(guidetreename, "r")) == '\0')		/* check to see if the file is there */
+			if(guidetreefile != NULL) fclose(guidetreefile);
+			if((guidetreefile = fopen(guidetreename, "r")) == NULL)		/* check to see if the file is there */
 				{								/* Open the source tree file */
 				printf("Cannot open file %s\n", guidetreename);
 				error = TRUE;
@@ -11303,7 +11309,7 @@ void do_consensus(void)
 						tree_type = 2;
 					else
 						{
-						printf("Error: %s is an invalid option for data\n");
+						printf("Error: %s is an invalid option for data\n", parsed_command[i+1]);
 						error = TRUE;
 						}
 					}
@@ -11338,7 +11344,7 @@ void do_consensus(void)
 			if(numtrees > 0)
 				{
 				
-				if(score_of_bootstraps != '\0')
+				if(score_of_bootstraps != NULL)
 					free(score_of_bootstraps);
 				score_of_bootstraps = malloc(numtrees*sizeof(float));
 				tempname[0] = '\0';
@@ -11451,10 +11457,10 @@ void do_consensus(void)
 /*** consensus is a function to carry out a majority-rule consensus on the results of a bootstrap analysis ****/
 void consensus(int num_trees, char **trees, int num_reps, float percentage, FILE *outfile, FILE *guidetreefile)
     {
-    int i, j, k, q, r, same1 = FALSE, same2 = FALSE, same3 = FALSE, same4 = FALSE,same5 = FALSE,same6 = FALSE,same7 = FALSE,same8 = FALSE, l, **sets, *in, *tmpcoding = '\0', end = FALSE, found = -1;
+    int i, j, k, q, r, same1 = FALSE, same2 = FALSE, same3 = FALSE, same4 = FALSE,same5 = FALSE,same6 = FALSE,same7 = FALSE,same8 = FALSE, l, **sets, *in, *tmpcoding = NULL, end = FALSE, found = -1;
 	/* The first thing needed is to create a Baum-Ragan coding scheme holding all the information from the bootstrapped trees */
-	char **string, *tmp = '\0', name[100], rest[400000], value[100];
-	int count, first = -1, support = 0, **shorthand = '\0', subdivisions = ((int)(number_of_taxa/16))+1;
+	char **string, *tmp = NULL, name[100], rest[400000], value[100];
+	int count, first = -1, support = 0, **shorthand = NULL, subdivisions = ((int)(number_of_taxa/16))+1;
 	float tmpnumber = 0;
 	
 	
@@ -11597,7 +11603,7 @@ void consensus(int num_trees, char **trees, int num_reps, float percentage, FILE
 
 	free(tmpcoding);
 /*** There are going to be two ways of summarising the results of a consensus, the user can ask for the best supported tree (default) or give a guidetree ("best tree") onto which the support tree is to be projected. */
-	if(guidetreefile == '\0')	
+	if(guidetreefile == NULL)	
 		{
 		/** From the remaining splits, only retain those that have at least x% representation (this would be 50% for maj-rule or 100% for strict) **/
 		in = malloc(num_partitions*sizeof(int));  /* will record the partitions to be included */
@@ -11650,7 +11656,7 @@ void consensus(int num_trees, char **trees, int num_reps, float percentage, FILE
 									same8 = FALSE;
 								}
 							}
-						if(same1 != TRUE && same2 != TRUE && same3 != TRUE && same4 != TRUE, same5 != TRUE && same6 != TRUE && same7 != TRUE && same8 != TRUE)
+						if(same1 != TRUE && same2 != TRUE && same3 != TRUE && same4 != TRUE && same5 != TRUE && same6 != TRUE && same7 != TRUE && same8 != TRUE)
 							in[i] = FALSE;
 							
 							
@@ -11707,7 +11713,7 @@ void consensus(int num_trees, char **trees, int num_reps, float percentage, FILE
 										same8 = FALSE;
 									}
 								}
-							if(same1 != TRUE && same2 != TRUE && same3 != TRUE && same4 != TRUE, same5 != TRUE && same6 != TRUE && same7 != TRUE && same8 != TRUE)
+							if(same1 != TRUE && same2 != TRUE && same3 != TRUE && same4 != TRUE && same5 != TRUE && same6 != TRUE && same7 != TRUE && same8 != TRUE)
 								in[i] = FALSE;
 								
 								
@@ -12011,11 +12017,11 @@ void consensus(int num_trees, char **trees, int num_reps, float percentage, FILE
 void showtrees(void)
 	{
 	int worst = -2, best = -2,savetrees = FALSE, found = TRUE, taxachosen = 0, counter = 0, mode[5] = {TRUE, FALSE, FALSE, FALSE, FALSE}, start = 0, end = Total_fund_trees, error = FALSE, i=0, j=0, k=0, l=0, num=0, equalto = -1, greaterthan =3, lessthan = number_of_taxa, taxa_count = 0;
-	char *temptree, string_num[10], namecontains[100], **containstaxa = '\0', savedfile[100], temptree1[400000];
-	FILE *showfile = '\0';
-	float bestscore =10000000, worstscore = 0, **tempscores = '\0';
-	int *tempsourcetreetag = '\0', display = TRUE, best_total = -1, total = 0;
-	struct taxon *position = '\0', *species_tree = '\0', *gene_tree = '\0', *best_mapping = '\0', *unknown_fund = '\0', *pos = '\0',*copy = '\0';
+	char *temptree, string_num[10], namecontains[100], **containstaxa = NULL, savedfile[100], temptree1[400000];
+	FILE *showfile = NULL;
+	float bestscore =10000000, worstscore = 0, **tempscores = NULL;
+	int *tempsourcetreetag = NULL, display = TRUE, best_total = -1, total = 0;
+	struct taxon *position = NULL, *species_tree = NULL, *gene_tree = NULL, *best_mapping = NULL, *unknown_fund = NULL, *pos = NULL,*copy = NULL;
 	
 	tempscores = malloc(Total_fund_trees*sizeof(float *));
 	for(i=0; i<Total_fund_trees; i++)
@@ -12053,7 +12059,7 @@ void showtrees(void)
 					}
 				else
 					{
-					printf("ERROR: %s not valid modifier of \"display\"\n");
+					printf("ERROR: %s not valid modifier of \"display\"\n", parsed_command[i+1]);
 					error = TRUE;
 					}
 				}
@@ -12176,7 +12182,7 @@ void showtrees(void)
 			
 	if(savetrees)
 		{
-		if((showfile = fopen(savedfile, "w")) == '\0')		/* check to see if the file is there */
+		if((showfile = fopen(savedfile, "w")) == NULL)		/* check to see if the file is there */
 			{								/* Open the source tree file */
 			printf("Cannot open file %s\n", savedfile);
 			error = TRUE;
@@ -12206,16 +12212,16 @@ void showtrees(void)
 				returntree(temptree);
 				/* build the tree in memory */
 				/****** We now need to build the Supertree in memory *******/
-				if(tree_top != '\0')
+				if(tree_top != NULL)
 					{
 					dismantle_tree(tree_top);
-					tree_top = '\0';
+					tree_top = NULL;
 					}
-				temp_top = '\0';
+				temp_top = NULL;
 				tree_build(1, temptree, tree_top, 1, -1);
 
 				tree_top = temp_top;
-				temp_top = '\0';
+				temp_top = NULL;
 				
 				/* check how many taxa are on the tree */
 				taxa_count = count_taxa(tree_top, 0);
@@ -12236,7 +12242,7 @@ void showtrees(void)
 			{
 			for(i=0; i<Total_fund_trees; i++)
 				{
-				if(strstr(tree_names[i], namecontains) == '\0')
+				if(strstr(tree_names[i], namecontains) == NULL)
 					{
 					tempsourcetreetag[i] = FALSE;
 					}
@@ -12250,16 +12256,16 @@ void showtrees(void)
 				returntree(temptree);
 				/* build the tree in memory */
 				/****** We now need to build the Supertree in memory *******/
-				if(tree_top != '\0')
+				if(tree_top != NULL)
 					{
 					dismantle_tree(tree_top);
-					tree_top = '\0';
+					tree_top = NULL;
 					}
-				temp_top = '\0';
+				temp_top = NULL;
 				tree_build(1, temptree, tree_top, 1, -1);
 
 				tree_top = temp_top;
-				temp_top = '\0';
+				temp_top = NULL;
 				
 
 				found = TRUE;
@@ -12370,10 +12376,10 @@ void qs(float **items, int left, int right)
 void exclude(int do_all)
 	{
 	int worst = -2, best = -2,savetrees = FALSE, found = TRUE, taxachosen = 0, counter = 0, mode[5] = {FALSE, FALSE, FALSE, FALSE, FALSE}, start = 0, end = Total_fund_trees, error = FALSE, i=0, j=0, k=0, l=0, num=0, equalto = -1, greaterthan =number_of_taxa, lessthan = 3, taxa_count = 0;
-	char *temptree, string_num[10], namecontains[100], **containstaxa = '\0', savedfile[100], *command = '\0', tmp[400000];
-	FILE *showfile = '\0', *tempfile = '\0';
-	float bestscore =10000000, worstscore = 0, **tempscores = '\0';
-	int *tempsourcetreetag = '\0', countedout =0, *temp_incidence = '\0';
+	char *temptree, string_num[10], namecontains[100], **containstaxa = NULL, savedfile[100], *command = NULL, tmp[400000];
+	FILE *showfile = NULL, *tempfile = NULL;
+	float bestscore =10000000, worstscore = 0, **tempscores = NULL;
+	int *tempsourcetreetag = NULL, countedout =0, *temp_incidence = NULL;
 	
 	
 	
@@ -12521,16 +12527,16 @@ void exclude(int do_all)
 				returntree(temptree);
 				/* build the tree in memory */
 				/****** We now need to build the Supertree in memory *******/
-				if(tree_top != '\0')
+				if(tree_top != NULL)
 					{
 					dismantle_tree(tree_top);
-					tree_top = '\0';
+					tree_top = NULL;
 					}
-				temp_top = '\0';
+				temp_top = NULL;
 				tree_build(1, temptree, tree_top, 1, -1);
 
 				tree_top = temp_top;
-				temp_top = '\0';
+				temp_top = NULL;
 				
 				/* check how many taxa are on the tree */
 				taxa_count = count_taxa(tree_top, 0);
@@ -12557,7 +12563,7 @@ void exclude(int do_all)
 			{
 			for(i=0; i<Total_fund_trees; i++)
 				{
-				if(strstr(tree_names[i], namecontains) != '\0')
+				if(strstr(tree_names[i], namecontains) != NULL)
 					{
 					tempsourcetreetag[i] = FALSE;
 					countedout++;
@@ -12572,16 +12578,16 @@ void exclude(int do_all)
 				returntree(temptree);
 				/* build the tree in memory */
 				/****** We now need to build the Supertree in memory *******/
-				if(tree_top != '\0')
+				if(tree_top != NULL)
 					{
 					dismantle_tree(tree_top);
-					tree_top = '\0';
+					tree_top = NULL;
 					}
-				temp_top = '\0';
+				temp_top = NULL;
 				tree_build(1, temptree, tree_top, 1, -1);
 
 				tree_top = temp_top;
-				temp_top = '\0';
+				temp_top = NULL;
 				
 
 				found = TRUE;
@@ -12633,16 +12639,16 @@ void exclude(int do_all)
 					returntree(temptree);
 					/* build the tree in memory */
 					/****** We now need to build the Supertree in memory *******/
-					if(tree_top != '\0')
+					if(tree_top != NULL)
 						{
 						dismantle_tree(tree_top);
-						tree_top = '\0';
+						tree_top = NULL;
 						}
-					temp_top = '\0';
+					temp_top = NULL;
 					tree_build(1, temptree, tree_top, 1, -1);
 
 					tree_top = temp_top;
-					temp_top = '\0';
+					temp_top = NULL;
 					
 					for(j=0; j<number_of_taxa; j++)
 							temp_incidence[j] += find_taxa(tree_top, taxa_names[j]); 
@@ -12844,10 +12850,10 @@ void returntree(char *temptree)
 void include(int do_all)
 	{
 	int worst = -2, best = -2,savetrees = FALSE, found = TRUE, taxachosen = 0, counter = 0, mode[5] = {FALSE, FALSE, FALSE, FALSE, FALSE}, start = 0, end = Total_fund_trees, error = FALSE, i=0, j=0, k=0, l=0, num=0, equalto = -1, greaterthan =number_of_taxa, lessthan = 3, taxa_count = 0;
-	char *temptree, string_num[10], namecontains[100], **containstaxa = '\0', savedfile[100];
-	FILE *showfile = '\0';
-	float bestscore =10000000, worstscore = 0, **tempscores = '\0';
-	int *tempsourcetreetag = '\0', countedout =0;
+	char *temptree, string_num[10], namecontains[100], **containstaxa = NULL, savedfile[100];
+	FILE *showfile = NULL;
+	float bestscore =10000000, worstscore = 0, **tempscores = NULL;
+	int *tempsourcetreetag = NULL, countedout =0;
 	
 	
 	tempscores = malloc(Total_fund_trees*sizeof(float *));
@@ -12991,16 +12997,16 @@ void include(int do_all)
 				returntree(temptree);
 				/* build the tree in memory */
 				/****** We now need to build the Supertree in memory *******/
-				if(tree_top != '\0')
+				if(tree_top != NULL)
 					{
 					dismantle_tree(tree_top);
-					tree_top = '\0';
+					tree_top = NULL;
 					}
-				temp_top = '\0';
+				temp_top = NULL;
 				tree_build(1, temptree, tree_top, 1, -1);
 
 				tree_top = temp_top;
-				temp_top = '\0';
+				temp_top = NULL;
 				
 				/* check how many taxa are on the tree */
 				taxa_count = count_taxa(tree_top, 0);
@@ -13027,7 +13033,7 @@ void include(int do_all)
 			{
 			for(i=0; i<Total_fund_trees; i++)
 				{
-				if(strstr(tree_names[i], namecontains) != '\0')
+				if(strstr(tree_names[i], namecontains) != NULL)
 					{
 					tempsourcetreetag[i] = TRUE;
 					countedout++;
@@ -13042,16 +13048,16 @@ void include(int do_all)
 				returntree(temptree);
 				/* build the tree in memory */
 				/****** We now need to build the Supertree in memory *******/
-				if(tree_top != '\0')
+				if(tree_top != NULL)
 					{
 					dismantle_tree(tree_top);
-					tree_top = '\0';
+					tree_top = NULL;
 					}
-				temp_top = '\0';
+				temp_top = NULL;
 				tree_build(1, temptree, tree_top, 1, -1);
 
 				tree_top = temp_top;
-				temp_top = '\0';
+				temp_top = NULL;
 				
 
 				found = TRUE;
@@ -13157,11 +13163,11 @@ void include(int do_all)
 
 void sourcetree_dists(void)
 	{
-	int i=0, j=0, k=0, l=0, m=0, y=0, ***trees_coding = '\0', **included = '\0', *tracking = '\0', count = 0, x, total, *tree1 = '\0', *tree2 = '\0', *t1tag = '\0', *t2tag = '\0', *t1score = '\0', *t2score = '\0', same, same1, same2, same3;
+	int i=0, j=0, k=0, l=0, m=0, y=0, ***trees_coding = NULL, **included = NULL, *tracking = NULL, count = 0, x, total, *tree1 = NULL, *tree2 = NULL, *t1tag = NULL, *t2tag = NULL, *t1score = NULL, *t2score = NULL, same, same1, same2, same3;
 	char number[100], string[400000], RFfilename[100];
-	int p1 = 0, p2 = 0, counter = 0, remaining_taxa = 0, num_falsed = 0, error = FALSE, r = 0, **shared_taxa = '\0', output_format = 0, missing_method = 2, here = TRUE, found = TRUE;
-	float **results = '\0';
-	FILE *RFfile = '\0';
+	int p1 = 0, p2 = 0, counter = 0, remaining_taxa = 0, num_falsed = 0, error = FALSE, r = 0, **shared_taxa = NULL, output_format = 0, missing_method = 2, here = TRUE, found = TRUE;
+	float **results = NULL;
+	FILE *RFfile = NULL;
 
 	RFfilename[0] = '\0';
 	strcpy(RFfilename, "robinson-foulds.txt");
@@ -13201,7 +13207,7 @@ void sourcetree_dists(void)
 						missing_method = 2;
 					else
 						{
-						printf("Error: '%s' not valid option for missing\n");
+						printf("Error: '%s' not valid option for missing\n", parsed_command[i+1]);
 						error = TRUE;
 						}
 					}
@@ -13209,7 +13215,7 @@ void sourcetree_dists(void)
 			}
 		}
 	
-	if((RFfile = fopen(RFfilename, "w")) == '\0')		/* check to see if the file is there */
+	if((RFfile = fopen(RFfilename, "w")) == NULL)		/* check to see if the file is there */
 			{								/* Open the source tree file */
 			printf("Cannot open file %s\n", RFfilename);
 			error = TRUE;
@@ -13645,9 +13651,9 @@ void sourcetree_dists(void)
 
 void exclude_taxa(int do_all)
 	{
-	char  *pruned_tree = '\0', tmp[400000], *command = '\0', tmpfilename[10000], previnputfilename[10000];
-	int i=0, j=0, q=0, error = FALSE, taxachosen = 0, found = FALSE, *tobeexcluded = '\0', k=0, l=0, done = FALSE, num_left = 0, min_taxa = 4;
-	FILE *tempfile = '\0';
+	char  *pruned_tree = NULL, tmp[400000], *command = NULL, tmpfilename[10000], previnputfilename[10000];
+	int i=0, j=0, q=0, error = FALSE, taxachosen = 0, found = FALSE, *tobeexcluded = NULL, k=0, l=0, done = FALSE, num_left = 0, min_taxa = 4;
+	FILE *tempfile = NULL;
 	
 	tmp[0] = '\0';
 	tmpfilename[0] = '\0';
@@ -13745,15 +13751,15 @@ void exclude_taxa(int do_all)
 					{
 					num_left++;
 					/***  build the sourcetree in memory ***/
-					if(tree_top != '\0')
+					if(tree_top != NULL)
                         {
                         dismantle_tree(tree_top);
-                        tree_top = '\0';
+                        tree_top = NULL;
                         }
-                    temp_top = '\0';
+                    temp_top = NULL;
                     tree_build(1, fundamentals[i], tree_top, FALSE, -1);
                     tree_top = temp_top;
-                    temp_top = '\0';
+                    temp_top = NULL;
 
 					
 					/***  prune the sourcetree of any of the taxa **/
@@ -13817,10 +13823,10 @@ void prune_taxa_for_exclude(struct taxon * super_pos, int *tobeexcluded)
 	
 	/* Traverse the supertree, visiting every taxa and checking if that taxa is on the fundamental tree */
 	
-	while(super_pos != '\0')
+	while(super_pos != NULL)
 		{
 		
-		if(super_pos->daughter != '\0') prune_taxa_for_exclude(super_pos->daughter, tobeexcluded);  /* If this is pointer sibling, move down the tree */
+		if(super_pos->daughter != NULL) prune_taxa_for_exclude(super_pos->daughter, tobeexcluded);  /* If this is pointer sibling, move down the tree */
 	
 		if(super_pos->name != -1) /* If there is an actual taxa on this sibling */
 			{	
@@ -13840,11 +13846,11 @@ void prune_taxa_for_exclude(struct taxon * super_pos, int *tobeexcluded)
 
 void spr_dist(void)
 	{
-	float real_score = 0, sprscore = 0, bestreal = 0, diff, amountspr, previous, totalnow, bestfake = 0, *results = '\0';
-	int i=0, j=0, k=0, l=0, x=0, y=0, error = FALSE, *originaldiff = '\0', numbersprs =0, nreps=100, bestnumSPR = 0, minsprs = 0, best = FALSE, now = 0, bestscore = -1, ***scores_original = '\0', **scores_changed = '\0';
-	char *pruned_tree = '\0', tmp[400000], ideal[400000], userinfile[1000], c, outputfile[1000], inputtree[400000];
+	float real_score = 0, sprscore = 0, bestreal = 0,  amountspr, previous, totalnow, bestfake = 0, *results = NULL;
+	int i=0, j=0, k=0, l=0, x=0, y=0, error = FALSE, diff, *originaldiff = NULL, numbersprs =0, nreps=100, bestnumSPR = 0, minsprs = 0, best = FALSE, now = 0, bestscore = -1, ***scores_original = NULL, **scores_changed = NULL;
+	char *pruned_tree = NULL, tmp[400000], ideal[400000], userinfile[1000], c, outputfile[1000], inputtree[400000];
 	int starting_super = 0, randomisation = TRUE;
-	FILE *outfile = '\0', *infile = '\0';
+	FILE *outfile = NULL, *infile = NULL;
 	
 	userinfile[0] = '\0'; outputfile[0] = '\0'; inputtree[0] = '\0';
 	strcpy(outputfile, "SPRdistances.txt");
@@ -13867,7 +13873,7 @@ void spr_dist(void)
 					}
 				else
 					{
-					if((infile = fopen(parsed_command[i+1], "r")) == '\0')
+					if((infile = fopen(parsed_command[i+1], "r")) == NULL)
 						{
 						printf("Error opening file named %s\n", parsed_command[i+1]);
 						error = TRUE;
@@ -13903,7 +13909,7 @@ void spr_dist(void)
 			
 		}
 		
-	if((outfile = fopen(outputfile, "w")) == '\0')
+	if((outfile = fopen(outputfile, "w")) == NULL)
 		{
 		printf("Error opening file named %s\n", outputfile);
 		error = TRUE;
@@ -13942,19 +13948,19 @@ void spr_dist(void)
 		ideal[0] = '\0';
 		
 		stored_fund_scores = malloc(Total_fund_trees*sizeof(int**));
-		if(stored_fund_scores == '\0') memory_error(38);
+		if(stored_fund_scores == NULL) memory_error(38);
 			
 		for(i=0; i<Total_fund_trees; i++)
 			{
 			stored_fund_scores[i] = malloc((number_of_taxa)*sizeof(int*));
-			if(stored_fund_scores[i] == '\0') memory_error(39);
+			if(stored_fund_scores[i] == NULL) memory_error(39);
 				
 			else
 				{
 				for(j=0; j<(number_of_taxa); j++)
 					{
 					stored_fund_scores[i][j] = malloc((number_of_taxa)*sizeof(int));
-					if(stored_fund_scores[i][j] == '\0') memory_error(40);
+					if(stored_fund_scores[i][j] == NULL) memory_error(40);
 						
 					else
 						{
@@ -14029,12 +14035,12 @@ void spr_dist(void)
 		/*** assign  */
 		for(y=0; y<2; y++)
 			{		
-			if(tree_top != '\0')
+			if(tree_top != NULL)
 				{
 				dismantle_tree(tree_top);
-				tree_top = '\0';
+				tree_top = NULL;
 				}
-			temp_top = '\0';
+			temp_top = NULL;
 			
 
 			if(starting_super != 2) tree_build(1, retained_supers[0], tree_top, TRUE, -1);
@@ -14042,7 +14048,7 @@ void spr_dist(void)
 				tree_build(1, inputtree, tree_top, TRUE, -1);
 
 			tree_top = temp_top;
-			temp_top = '\0';
+			temp_top = NULL;
 			strcpy(tmp, "");
 
 			if(!error)
@@ -14058,7 +14064,7 @@ void spr_dist(void)
 					
 					if(y== 1)  /* if this is the randomisation part */
 						{
-						/*randomise_tree(fundamentals[i]); /*equiprobable */
+						/*randomise_tree(fundamentals[i]); */ /*equiprobable */
 						randomise_taxa(fundamentals[i]);  /*markovian*/
 						}
 					/** calculate the pathmetric for the real tree */
@@ -14256,8 +14262,8 @@ void spr_dist(void)
 
 int string_SPR(char * string)
 	{
-	int i=0, j=0, k=0, l=0, components = 0, random_num = 0, done = FALSE, found = FALSE, **scores_original = '\0', **scores_changed = '\0', attempts = 0;
-	char extracted[400000], *temptree = '\0', *tmp = '\0', original[400000];
+	int i=0, j=0, k=0, l=0, components = 0, random_num = 0, done = FALSE, found = FALSE, **scores_original = NULL, **scores_changed = NULL, attempts = 0;
+	char extracted[400000], *temptree = NULL, *tmp = NULL, original[400000];
 	
 	
 	scores_original = malloc(number_of_taxa*sizeof(int*));
@@ -14409,17 +14415,17 @@ int string_SPR(char * string)
 		/*** delete unwanted parts of the original tree ***/
 		
 		/*** build the post-extraction tree in memory ****/
-		if(tree_top != '\0')
+		if(tree_top != NULL)
 			{
 			dismantle_tree(tree_top);
-			tree_top = '\0';
+			tree_top = NULL;
 			}
-		temp_top = '\0';
+		temp_top = NULL;
 		
 		tree_build(1, string, tree_top, FALSE, -1);
 
 		tree_top = temp_top;
-		temp_top = '\0';
+		temp_top = NULL;
 
 		/**** shrink the tree ***/
 		shrink_tree(tree_top);
@@ -14584,11 +14590,11 @@ int string_SPR(char * string)
 
 
 
-int exhaustive_SPR(char * string)
+void exhaustive_SPR(char * string)
 	{
-	int i, j, k, l, x, y, q, r=-1, labelonly = FALSE, exnum, components =0, pruned_components =0, num, *component_index = '\0', *pruned_component_index = '\0', **scores_original = '\0', **scores_changed = '\0';
+	int i, j, k, l, x, y, q, r=-1, labelonly = FALSE, exnum, components =0, pruned_components =0, num, *component_index = NULL, *pruned_component_index = NULL, **scores_original = NULL, **scores_changed = NULL;
 	char labeledtree[400000], taxaname[100], tmp_labeledtree[400000], filename[100], filename1[100], pasted_name[10000], cut_name[100], extractedpart[400000], tmp_tree[400000], pruned_tree[400000], tmp[400000];
-	FILE *sproutfile = '\0', *sprdescriptor = '\0', *labeledtreefile = '\0';
+	FILE *sproutfile = NULL, *sprdescriptor = NULL, *labeledtreefile = NULL;
 	
 	 for(i=0; i<num_commands; i++)
         {
@@ -14707,12 +14713,12 @@ int exhaustive_SPR(char * string)
 			
 			strcpy(filename, "");
 			sprintf(filename, "sprpart%d.ph", num);
-			if(sproutfile != '\0') fclose(sproutfile);
+			if(sproutfile != NULL) fclose(sproutfile);
 			sproutfile = fopen(filename, "w");
 			
 			strcpy(filename1, "");
 			sprintf(filename1, "sprdescr%d.txt", num);
-			if(sprdescriptor != '\0') fclose(sprdescriptor);
+			if(sprdescriptor != NULL) fclose(sprdescriptor);
 			sprdescriptor = fopen(filename1, "w");
 			
 			
@@ -14778,16 +14784,16 @@ int exhaustive_SPR(char * string)
 			tmp_tree[j+1] = '\0';
 			
 			/*** build the post-extraction tree in memory ****/
-			if(tree_top != '\0')
+			if(tree_top != NULL)
 				{
 				dismantle_tree(tree_top);
-				tree_top = '\0';
+				tree_top = NULL;
 				}
-			temp_top = '\0';
+			temp_top = NULL;
 			tree_build(1, tmp_tree, tree_top, FALSE, -1);
 
 			tree_top = temp_top;
-			temp_top = '\0';
+			temp_top = NULL;
 			/**** shrink the tree ***/
 			shrink_tree(tree_top);
 			pruned_tree[0] = '\0';
@@ -14958,9 +14964,9 @@ int exhaustive_SPR(char * string)
 
 void neighbor_joining(int brlens, char *tree, int names)
 	{
-	int num_nodes = number_of_taxa, *deleted = '\0', i, j, smallest_i = -1, smallest_j = -1;
-	float *transformed = '\0', smallest = 0, vi, vj, vtmp;
-	char **tree_structure = '\0', string[400000], tmp[400000], c;
+	int num_nodes = number_of_taxa, *deleted = NULL, i, j, smallest_i = -1, smallest_j = -1;
+	float *transformed = NULL, smallest = 0, vi, vj, vtmp;
+	char **tree_structure = NULL, string[400000], tmp[400000], c;
 	
 
 	string[0] = '\0'; tmp[0] = '\0';
@@ -15108,8 +15114,8 @@ void neighbor_joining(int brlens, char *tree, int names)
 void nj(void)
 	{
 	int i, j, missing_method = 1, error = FALSE;
-	char *tree = '\0', useroutfile[100], *fakefilename = '\0';
-	FILE *outfile = '\0';
+	char *tree = NULL, useroutfile[100], *fakefilename = NULL;
+	FILE *outfile = NULL;
 	
 	useroutfile[0] = '\0';
 	strcpy(useroutfile, "NJ-tree.ph");
@@ -15138,7 +15144,7 @@ void nj(void)
 		
 	if(!error)
 		{
-		if((outfile = fopen(useroutfile, "w")) == '\0')
+		if((outfile = fopen(useroutfile, "w")) == NULL)
 			{
 			printf("Error opening file named %s\n", useroutfile);
 			error = TRUE;
@@ -15157,7 +15163,7 @@ void nj(void)
 			printf("ultrametric distances\n");
 		printf("\tresulting tree saved to file %s\n\n\n", useroutfile);
 		
-		average_consensus(0, missing_method, fakefilename, '\0');
+		average_consensus(0, missing_method, fakefilename, NULL);
 		neighbor_joining(TRUE, tree, TRUE);
 		fprintf(outfile, "%s\n", tree);
 		tree_coordinates(tree, TRUE, TRUE, FALSE, -1);
@@ -15180,8 +15186,8 @@ void nj(void)
 	
 void reroot_tree(struct taxon *outgroup)
 	{
-	struct taxon *newbie = '\0', *temp_treetop = '\0', *position = '\0', *temp = '\0', *start = '\0', *parent_start = '\0', *next = '\0', *parent = '\0', *pointer = '\0';
-	char *temptree = '\0';
+	struct taxon *newbie = NULL, *temp_treetop = NULL, *position = NULL, *temp = NULL, *start = NULL, *parent_start = NULL, *next = NULL, *parent = NULL, *pointer = NULL;
+	char *temptree = NULL;
 	temptree = malloc(400000*sizeof(char));
 	temptree[0] = '\0';
 	newbie = make_taxon();
@@ -15189,9 +15195,9 @@ void reroot_tree(struct taxon *outgroup)
 	/* every sibling must become a descendent and every descentdent as sibling of that level */
 	/*** Assign newbie to point to any siblings of outgroup as a daughter **/
 	position = outgroup;
-	if(outgroup->prev_sibling != '\0')
+	if(outgroup->prev_sibling != NULL)
 		{
-		while(position->prev_sibling != '\0') position = position->prev_sibling;
+		while(position->prev_sibling != NULL) position = position->prev_sibling;
 		}
 	else
 		position = position->next_sibling;
@@ -15200,30 +15206,30 @@ void reroot_tree(struct taxon *outgroup)
 	newbie->daughter = start;
 	
 	/***2: extract the ougroup ***/
-	if(outgroup->next_sibling != '\0')(outgroup->next_sibling)->prev_sibling = outgroup->prev_sibling;
-	if(outgroup->prev_sibling != '\0')(outgroup->prev_sibling)->next_sibling = outgroup->next_sibling;
-	if(outgroup->prev_sibling == '\0' && outgroup->parent != '\0')
+	if(outgroup->next_sibling != NULL)(outgroup->next_sibling)->prev_sibling = outgroup->prev_sibling;
+	if(outgroup->prev_sibling != NULL)(outgroup->prev_sibling)->next_sibling = outgroup->next_sibling;
+	if(outgroup->prev_sibling == NULL && outgroup->parent != NULL)
 		{
 		(outgroup->parent)->daughter = outgroup->next_sibling;
 		(outgroup->next_sibling)->parent = outgroup->parent;
-		outgroup->parent = '\0';
+		outgroup->parent = NULL;
 		}
-	outgroup->next_sibling = '\0';
-	outgroup->prev_sibling = '\0';
+	outgroup->next_sibling = NULL;
+	outgroup->prev_sibling = NULL;
 	
 	parent = start->parent;
 	
 	/** create new pointer on first level */
 	pointer = make_taxon();
 	position = start;
-	while(position->next_sibling != '\0') position = position->next_sibling;
+	while(position->next_sibling != NULL) position = position->next_sibling;
 	position->next_sibling = pointer;
 	pointer->prev_sibling = position;
 	
-	while(parent != '\0')
+	while(parent != NULL)
 		{
 		position = parent;
-		while(position->prev_sibling != '\0') position = position->prev_sibling;
+		while(position->prev_sibling != NULL) position = position->prev_sibling;
 		parent_start = position;
 		pointer->daughter = parent_start;
 		next = parent_start->parent;
@@ -15233,7 +15239,7 @@ void reroot_tree(struct taxon *outgroup)
 		parent = next;
 		
 		}
-	pointer->daughter = '\0';
+	pointer->daughter = NULL;
 	
 	(newbie->daughter)->parent = newbie;
 	
@@ -15255,36 +15261,36 @@ void reroot_tree(struct taxon *outgroup)
 void clean_pointer_taxa(struct taxon *position)
 	{
 	
-	struct taxon *start = position, *tmp = '\0';
+	struct taxon *start = position, *tmp = NULL;
 	int i=0;
 	
-	while(position != '\0')
+	while(position != NULL)
 		{
-		if(position->daughter != '\0') clean_pointer_taxa(position->daughter);
+		if(position->daughter != NULL) clean_pointer_taxa(position->daughter);
 		position = position->next_sibling;
 		}
 	position = start;
 	
 	/*** Check to see if there are any pointer taxa not going anywhere ***/
 	
-	while(position != '\0')
+	while(position != NULL)
 		{
-		if(position->name == -1 && position->daughter == '\0')
+		if(position->name == -1 && position->daughter == NULL)
 			{
 			tmp = position->next_sibling;
-			if(position->next_sibling != '\0') (position->next_sibling)->prev_sibling = position->prev_sibling;
-			if(position->prev_sibling != '\0') (position->prev_sibling)->next_sibling = position->next_sibling;
-			if(position->parent != '\0')
+			if(position->next_sibling != NULL) (position->next_sibling)->prev_sibling = position->prev_sibling;
+			if(position->prev_sibling != NULL) (position->prev_sibling)->next_sibling = position->next_sibling;
+			if(position->parent != NULL)
 				{
-				if(position->next_sibling != '\0')
+				if(position->next_sibling != NULL)
 					{
 					start = position->next_sibling;
 					(position->parent)->daughter = position->next_sibling;
 					(position->next_sibling)->parent = position->parent;
 					}
 				else
-					(position->parent)->daughter = '\0';
-				position->parent = '\0';
+					(position->parent)->daughter = NULL;
+				position->parent = NULL;
 				}
 			if(position == tree_top)
 				 tree_top = position->next_sibling;
@@ -15293,19 +15299,19 @@ void clean_pointer_taxa(struct taxon *position)
 			position = tmp;
 			}
 		else
-			if(position != '\0') position = position->next_sibling;
+			if(position != NULL) position = position->next_sibling;
 		}
 	position = start;
 	
 	/*** Count the number of children of each pointer taxa, if any only have 1 then delete that pointer taxa and replace it with its daughter ***/
 	
-	while(position != '\0')
+	while(position != NULL)
 		{
-		if(position->daughter != '\0')
+		if(position->daughter != NULL)
 			{
 			i=0;
 			tmp = position->daughter;
-			while(tmp != '\0')
+			while(tmp != NULL)
 				{
 				i++;
 				tmp = tmp->next_sibling;
@@ -15313,14 +15319,14 @@ void clean_pointer_taxa(struct taxon *position)
 			if(i == 1)
 				{
 				tmp = position->daughter;
-				if(position->prev_sibling != '\0')(position->prev_sibling)->next_sibling = position->daughter;
-				if(position->next_sibling != '\0')(position->next_sibling)->prev_sibling = position->daughter;
+				if(position->prev_sibling != NULL)(position->prev_sibling)->next_sibling = position->daughter;
+				if(position->next_sibling != NULL)(position->next_sibling)->prev_sibling = position->daughter;
 				(position->daughter)->next_sibling = position->next_sibling;
 				(position->daughter)->prev_sibling = position->prev_sibling;
 				(position->daughter)->parent = position->parent;
-				if(position->parent != '\0') (position->parent)->daughter = position->daughter;
+				if(position->parent != NULL) (position->parent)->daughter = position->daughter;
 				if(position == tree_top) tree_top = position->daughter;
-				if(position->fullname != '\0') free(position->fullname);
+				if(position->fullname != NULL) free(position->fullname);
 				free(position);
 				position = tmp;
 				}
@@ -15337,21 +15343,21 @@ void clean_pointer_taxa(struct taxon *position)
 
 struct taxon * get_branch(struct taxon *position, int name)
 	{
-	struct taxon *start = position, *answer = '\0';
+	struct taxon *start = position, *answer = NULL;
 	
 	
-	while(position != '\0' && answer == '\0')
+	while(position != NULL && answer == NULL)
 		{
-		if(position->daughter != '\0')
+		if(position->daughter != NULL)
 			{
 			answer = get_branch(position->daughter, name);
 			}
 		position = position->next_sibling;
 		}
-	if(answer == '\0')
+	if(answer == NULL)
 		{
 		position = start;
-		while(position != '\0' && answer == '\0')
+		while(position != NULL && answer == NULL)
 			{
 			if(position->tag == name)
 				{
@@ -15366,22 +15372,22 @@ struct taxon * get_branch(struct taxon *position, int name)
 
 struct taxon * get_taxon(struct taxon *position, int name)
 	{
-	struct taxon *start = position, *answer = '\0';
+	struct taxon *start = position, *answer = NULL;
 	
-	while(position != '\0' && answer == '\0')
+	while(position != NULL && answer == NULL)
 		{
-		if(position->daughter != '\0')
+		if(position->daughter != NULL)
 			{
 			answer = get_taxon(position->daughter, name);
 			}
 		position = position->next_sibling;
 		}
-	if(answer == '\0')
+	if(answer == NULL)
 		{
 		position = start;
-		while(position != '\0' && answer == '\0')
+		while(position != NULL && answer == NULL)
 			{
-			if(position->name == name && position->daughter == '\0')
+			if(position->name == name && position->daughter == NULL)
 				{
 				answer = position;
 				}
@@ -15394,31 +15400,31 @@ struct taxon * get_taxon(struct taxon *position, int name)
 int compress_tree (struct taxon * position)
 	{
 	int count = 0, tot = 0, done = FALSE;
-	struct taxon *pos = '\0';
+	struct taxon *pos = NULL;
 	
-	while(position != '\0')
+	while(position != NULL)
 		{
 		done = FALSE;
-		if(position->daughter != '\0') 
+		if(position->daughter != NULL) 
 			{
 			tot = compress_tree(position->daughter);  /* tot will be equal to the number of daughters that this pointer has */
 			if(tot < 2)
 				{
 				pos = position->next_sibling;
 				done = TRUE;
-				if(position->next_sibling != '\0') (position->next_sibling)->prev_sibling = position->daughter;
-				if(position->prev_sibling != '\0') (position->prev_sibling)->next_sibling = position->daughter;
-				if(position->parent != '\0') 
+				if(position->next_sibling != NULL) (position->next_sibling)->prev_sibling = position->daughter;
+				if(position->prev_sibling != NULL) (position->prev_sibling)->next_sibling = position->daughter;
+				if(position->parent != NULL) 
 					{
 					(position->parent)->daughter = position->daughter;
 					(position->daughter)->parent = position->parent;
 					}
 				else
-					(position->daughter)->parent = '\0';
+					(position->daughter)->parent = NULL;
 				(position->daughter)->next_sibling = position->next_sibling;
 				(position->daughter)->prev_sibling = position->prev_sibling;
 				if(position == tree_top) tree_top = position->daughter;
-				if(position->donor != '\0') free(position->donor);
+				if(position->donor != NULL) free(position->donor);
 				free(position);
 				position = pos;
 				
@@ -15440,37 +15446,37 @@ int compress_tree (struct taxon * position)
 int compress_tree1 (struct taxon * position)
 	{
 	int count = 0, tot = 0, done = FALSE, i;
-	struct taxon *pos = '\0', *start = position;
-	while(position != '\0')
+	struct taxon *pos = NULL, *start = position;
+	while(position != NULL)
 		{
 		done = FALSE;
-		if(position->daughter != '\0') 
+		if(position->daughter != NULL) 
 			{
 			tot = compress_tree1(position->daughter);  /* tot will be equal to the number of daughters that this pointer has */
 			if(tot < 2)
 				{
 				pos = position->next_sibling;
 				done = TRUE;
-				if(position->donor != '\0')
+				if(position->donor != NULL)
 					{
 					for(i=0; i<num_gene_nodes; i++)
 						{
 						if(position->donor[i] == TRUE) (position->daughter)->donor[i] = TRUE;
 						}
 					}
-				if(position->next_sibling != '\0') (position->next_sibling)->prev_sibling = position->daughter;
-				if(position->prev_sibling != '\0') (position->prev_sibling)->next_sibling = position->daughter;
-				if(position->parent != '\0') 
+				if(position->next_sibling != NULL) (position->next_sibling)->prev_sibling = position->daughter;
+				if(position->prev_sibling != NULL) (position->prev_sibling)->next_sibling = position->daughter;
+				if(position->parent != NULL) 
 					{
 					(position->parent)->daughter = position->daughter;
 					(position->daughter)->parent = position->parent;
 					}
 				else
-					(position->daughter)->parent = '\0';
+					(position->daughter)->parent = NULL;
 				(position->daughter)->next_sibling = position->next_sibling;
 				(position->daughter)->prev_sibling = position->prev_sibling;
 				if(position == tree_top) tree_top = position->daughter;
-				if(position->donor != '\0') free(position->donor);
+				if(position->donor != NULL) free(position->donor);
 				free(position);
 				position = pos;
 				
@@ -15486,31 +15492,31 @@ int compress_tree1 (struct taxon * position)
 			}				
 		if(!done) position = position->next_sibling;
 		}
-	if(start == tree_top && count == 1 && start->daughter != '\0') /* then this is the top node and we need to delete it here and now */
+	if(start == tree_top && count == 1 && start->daughter != NULL) /* then this is the top node and we need to delete it here and now */
 		{
 		tree_top = start->daughter;
-		(start->daughter)->parent = '\0';
-		if(start->donor != '\0')
+		(start->daughter)->parent = NULL;
+		if(start->donor != NULL)
 			{
 			for(i=0; i<num_gene_nodes; i++)
 				{
 				if(start->donor[i] == TRUE) (start->daughter)->donor[i] = TRUE;
 				}
 			free(start->donor);
-			start->donor = '\0';
+			start->donor = NULL;
 			}
 		free(start);
-		start = '\0';
+		start = NULL;
 		}
 	return(count);
 	}
 
 void isittagged(struct taxon * position)
 	{
-	while(position != '\0')
+	while(position != NULL)
 		{
 		if(position->tag2 == TRUE) printf("found\n");
-		if(position->daughter != '\0')
+		if(position->daughter != NULL)
 			{
 			isittagged(position->daughter);
 			}
@@ -15520,12 +15526,12 @@ void isittagged(struct taxon * position)
 
 void duplicate_tree(struct taxon * orig_pos, struct taxon * prev_dup_pos)
 	{
-	struct taxon *sibling = '\0', *dup_pos = '\0';
+	struct taxon *sibling = NULL, *dup_pos = NULL;
 	int done = FALSE, i;
 	
-	if(orig_pos->parent == '\0') done = TRUE;
+	if(orig_pos->parent == NULL) done = TRUE;
 	
-	while(orig_pos != '\0')
+	while(orig_pos != NULL)
 		{
 		dup_pos = make_taxon();
 		if(done)
@@ -15534,7 +15540,7 @@ void duplicate_tree(struct taxon * orig_pos, struct taxon * prev_dup_pos)
 			done = FALSE;
 			}
 		dup_pos->name = orig_pos->name;
-		if(orig_pos->fullname != '\0')
+		if(orig_pos->fullname != NULL)
 			{
 			dup_pos->fullname = malloc((strlen(orig_pos->fullname)+10)*sizeof(char));
 			dup_pos->fullname[0] = '\0';
@@ -15549,23 +15555,23 @@ void duplicate_tree(struct taxon * orig_pos, struct taxon * prev_dup_pos)
 		strcpy(dup_pos->weight, orig_pos->weight);
 		dup_pos->loss = orig_pos->loss;
 		dup_pos->length = orig_pos->length;
-		if(orig_pos->donor != '\0')
+		if(orig_pos->donor != NULL)
 			{
 			dup_pos->donor = malloc(num_gene_nodes*sizeof(int));
 			for(i=0; i<num_gene_nodes; i++) dup_pos->donor[i] = orig_pos->donor[i];
 			}
-		if(orig_pos->prev_sibling != '\0')
+		if(orig_pos->prev_sibling != NULL)
 			{
 			dup_pos->prev_sibling = sibling;
 			sibling->next_sibling = dup_pos;
 			}
-		if(orig_pos->parent != '\0')
+		if(orig_pos->parent != NULL)
 			{
 			dup_pos->parent = prev_dup_pos;
 			prev_dup_pos->daughter = dup_pos;
 			}
 		sibling = dup_pos;
-		if(orig_pos->daughter != '\0') duplicate_tree(orig_pos->daughter, dup_pos);
+		if(orig_pos->daughter != NULL) duplicate_tree(orig_pos->daughter, dup_pos);
 		orig_pos = orig_pos->next_sibling;
 		}
 	}
@@ -15574,8 +15580,8 @@ void duplicate_tree(struct taxon * orig_pos, struct taxon * prev_dup_pos)
 			
 float tree_map(struct taxon * gene_top, struct taxon * species_top, int print)
 	{
-	int xnum =0, *presence = '\0', i, j, num_dups = 0, num_losses = 0, best = 0;
-	char *temptree = '\0', reconfilename[100], *treetmp = '\0';
+	int xnum =0, *presence = NULL, i, j, num_dups = 0, num_losses = 0, best = 0;
+	char *temptree = NULL, reconfilename[100], *treetmp = NULL;
 
 	treetmp = malloc(100000*sizeof(int));
 	treetmp[0] = '\0';
@@ -15605,9 +15611,9 @@ float tree_map(struct taxon * gene_top, struct taxon * species_top, int print)
 
 void printnamesandtags(struct taxon *position)
 	{
-	while(position != '\0')
+	while(position != NULL)
 		{
-		if(position->daughter != '\0') 
+		if(position->daughter != NULL) 
 			{
 			printf(" ->%d", position->tag);
 			printnamesandtags(position->daughter);
@@ -15620,14 +15626,14 @@ void printnamesandtags(struct taxon *position)
 
 struct taxon * find_same(struct taxon * position, int tofind)
 	{
-	struct taxon *answer = '\0';
-	while(position != '\0' && answer == '\0')
+	struct taxon *answer = NULL;
+	while(position != NULL && answer == NULL)
 		{
 		if(position->tag == tofind)
 			{
 			answer = position;
 			}
-		if(position->daughter != '\0' && position->tag2 == TRUE && answer == '\0')
+		if(position->daughter != NULL && position->tag2 == TRUE && answer == NULL)
 			answer = find_same(position->daughter, tofind);
 		position = position->next_sibling;
 		}	
@@ -15637,10 +15643,10 @@ struct taxon * find_same(struct taxon * position, int tofind)
 
 void resolve_tricotomies(struct taxon *position, struct taxon *species_tree)
 	{
-	struct taxon *start = position, *copy = '\0', *best1 = '\0', *best2 = '\0', **thislevel = '\0', *previous = position->parent, *pos1 = '\0', *pos2 = '\0', *newbie = '\0', *lastsibling = '\0';
-	int i=0, j=0, k=0, l=0, x=0, y=0, multiples = FALSE, topoftree = FALSE, *found = '\0', num_dups = 0, num_losses = 0, *presence = '\0', possible_internal = 0, donestuff = TRUE, smallest = 2*number_of_taxa, result, nope = TRUE;
+	struct taxon *start = position, *copy = NULL, *best1 = NULL, *best2 = NULL, **thislevel = NULL, *previous = position->parent, *pos1 = NULL, *pos2 = NULL, *newbie = NULL, *lastsibling = NULL;
+	int i=0, j=0, k=0, l=0, x=0, y=0, multiples = FALSE, topoftree = FALSE, *found = NULL, num_dups = 0, num_losses = 0, *presence = NULL, possible_internal = 0, donestuff = TRUE, smallest = 2*number_of_taxa, result, nope = TRUE;
 	float best_score = -1;
-	char *pruned_tree = '\0';
+	char *pruned_tree = NULL;
 	
 	
 	presence = malloc((2*number_of_taxa)*sizeof(int));
@@ -15653,10 +15659,10 @@ void resolve_tricotomies(struct taxon *position, struct taxon *species_tree)
 	/* go down to the bottom of the gene tree */
 	
 	
-	while(position != '\0')
+	while(position != NULL)
 		{
 		i++;
-		if(position->daughter != '\0')
+		if(position->daughter != NULL)
 			{
 			resolve_tricotomies(position->daughter, species_tree);
 			found[position->tag]++;
@@ -15667,12 +15673,12 @@ void resolve_tricotomies(struct taxon *position, struct taxon *species_tree)
 		}
 	position = start;
 	/* work out any tricotomies containing multiples at this level */
-	if(start->parent == '\0')
+	if(start->parent == NULL)
 		{
 		topoftree=TRUE;
 		}
 
-/*	if( i > 2 && start->parent != '\0' ) /*if there are more than two siblings at this level, and there is at least one more than once */
+/*	if( i > 2 && start->parent != NULL ) *//*if there are more than two siblings at this level, and there is at least one more than once */
 	
 	if( (i > 2 && !topoftree) || ( i>3 && topoftree)) /*if there are more than two siblings at this level, and there is at least one more than once */
 		{
@@ -15687,11 +15693,11 @@ void resolve_tricotomies(struct taxon *position, struct taxon *species_tree)
 				pos1=start;
 				x=0;
 				
-				while(pos1 != '\0' && ((l > 2 && !topoftree) || ( l>3 && topoftree)))
+				while(pos1 != NULL && ((l > 2 && !topoftree) || ( l>3 && topoftree)))
 					{
 					pos2 = pos1->next_sibling;
 					y=x+1;
-					while(pos2 != '\0' && ((l > 2 && !topoftree) || ( l>3 && topoftree)))
+					while(pos2 != NULL && ((l > 2 && !topoftree) || ( l>3 && topoftree)))
 						{
 						if((possible_internal = are_siblings(species_tree, pos1->tag, pos2->tag)) != FALSE)
 							{
@@ -15701,32 +15707,32 @@ void resolve_tricotomies(struct taxon *position, struct taxon *species_tree)
 							newbie->tag = possible_internal;
 							newbie->daughter = pos1;
 							newbie->tag2 = TRUE;
-							if(pos1->prev_sibling == '\0')
+							if(pos1->prev_sibling == NULL)
 								{
-								if(pos1->parent != '\0')
+								if(pos1->parent != NULL)
 									(pos1->parent)->daughter = newbie;
 								newbie->parent = pos1->parent;
 								start = newbie;
 								}
-							if(pos1->next_sibling != '\0') (pos1->next_sibling)->prev_sibling = newbie;
-							if(pos1->prev_sibling != '\0') (pos1->prev_sibling)->next_sibling = newbie;
+							if(pos1->next_sibling != NULL) (pos1->next_sibling)->prev_sibling = newbie;
+							if(pos1->prev_sibling != NULL) (pos1->prev_sibling)->next_sibling = newbie;
 							pos1->parent = newbie;
 							newbie->next_sibling = pos1->next_sibling;
 							newbie->prev_sibling = pos1->prev_sibling;
 							pos1->next_sibling = pos2;
-							pos1->prev_sibling = '\0';
+							pos1->prev_sibling = NULL;
 							
 							
-							if(pos2->next_sibling != '\0') (pos2->next_sibling)->prev_sibling = pos2->prev_sibling;
-							if(pos2->prev_sibling != '\0') (pos2->prev_sibling)->next_sibling = pos2->next_sibling;
+							if(pos2->next_sibling != NULL) (pos2->next_sibling)->prev_sibling = pos2->prev_sibling;
+							if(pos2->prev_sibling != NULL) (pos2->prev_sibling)->next_sibling = pos2->next_sibling;
 							
-							pos2->next_sibling = '\0';
+							pos2->next_sibling = NULL;
 							pos2->prev_sibling = pos1;
 							
 							pos1 = start;
 							pos2 = pos1->next_sibling;
-							if(topoftree && newbie->prev_sibling == '\0') temp_top2 = newbie;
-							newbie = '\0';
+							if(topoftree && newbie->prev_sibling == NULL) temp_top2 = newbie;
+							newbie = NULL;
 							l--;
 							donestuff = TRUE;
 							/*printf("done siblings\n");*/
@@ -15746,12 +15752,12 @@ void resolve_tricotomies(struct taxon *position, struct taxon *species_tree)
 					/* Step 2: Join together any that are the same */
 					pos1=start;
 					x=0;
-					while((pos1 != '\0' && ((l > 2 && !topoftree) || ( l>3 && topoftree)))  )
+					while((pos1 != NULL && ((l > 2 && !topoftree) || ( l>3 && topoftree)))  )
 						{
 						nope = TRUE;
 						pos2 = pos1->next_sibling;
 						y=x+1;
-						while((pos2 != '\0' && ((l > 2 && !topoftree) || ( l>3 && topoftree))) )
+						while((pos2 != NULL && ((l > 2 && !topoftree) || ( l>3 && topoftree))) )
 							{
 							if(pos1->tag == pos2->tag)
 								{
@@ -15759,31 +15765,31 @@ void resolve_tricotomies(struct taxon *position, struct taxon *species_tree)
 								newbie->tag = pos1->tag;
 								newbie->daughter = pos1;
 								newbie->tag2=TRUE;
-								if(pos1->prev_sibling == '\0')
+								if(pos1->prev_sibling == NULL)
 									{
-									if(pos1->parent != '\0')
+									if(pos1->parent != NULL)
 										(pos1->parent)->daughter = newbie;
 									newbie->parent = pos1->parent;
 									start = newbie;
 									}
-								if(pos1->next_sibling != '\0') (pos1->next_sibling)->prev_sibling = newbie;
-								if(pos1->prev_sibling != '\0') (pos1->prev_sibling)->next_sibling = newbie;
+								if(pos1->next_sibling != NULL) (pos1->next_sibling)->prev_sibling = newbie;
+								if(pos1->prev_sibling != NULL) (pos1->prev_sibling)->next_sibling = newbie;
 								pos1->parent = newbie;
 								newbie->next_sibling = pos1->next_sibling;
 								newbie->prev_sibling = pos1->prev_sibling;
 								pos1->next_sibling = pos2;
-								pos1->prev_sibling = '\0';
+								pos1->prev_sibling = NULL;
 								
 								
-								if(pos2->next_sibling != '\0') (pos2->next_sibling)->prev_sibling = pos2->prev_sibling;
-								if(pos2->prev_sibling != '\0') (pos2->prev_sibling)->next_sibling = pos2->next_sibling;
+								if(pos2->next_sibling != NULL) (pos2->next_sibling)->prev_sibling = pos2->prev_sibling;
+								if(pos2->prev_sibling != NULL) (pos2->prev_sibling)->next_sibling = pos2->next_sibling;
 								
-								pos2->next_sibling = '\0';
+								pos2->next_sibling = NULL;
 								pos2->prev_sibling = pos1;
 								pos1 = start;
 								pos2 = pos1->next_sibling;
-								if(topoftree && newbie->prev_sibling == '\0') temp_top2 = newbie;
-								newbie = '\0';
+								if(topoftree && newbie->prev_sibling == NULL) temp_top2 = newbie;
+								newbie = NULL;
 								l--;
 								donestuff = TRUE;
 								/*printf("done easy same\n");*/
@@ -15797,54 +15803,54 @@ void resolve_tricotomies(struct taxon *position, struct taxon *species_tree)
 						if(nope) /* if we haven't found any taxa the same as pos 1 , go down through the pairings already made */
 							{
 							
-							pos2 = '\0';
+							pos2 = NULL;
 							copy = start;
 							y=0;
-							while(copy != '\0' && pos2 == '\0')
+							while(copy != NULL && pos2 == NULL)
 								{
-								if(copy->daughter != '\0' && copy != pos1 && copy->tag2 == TRUE)
+								if(copy->daughter != NULL && copy != pos1 && copy->tag2 == TRUE)
 									pos2 = find_same(copy->daughter, pos1->tag);
 								copy = copy->next_sibling;
 								y++;
 								}
-							if(pos2 != '\0' && pos2 != pos1)
+							if(pos2 != NULL && pos2 != pos1)
 								{
 								newbie = make_taxon();
 								newbie->tag = pos1->tag;
 								newbie->daughter = pos1;
 								newbie->tag2=TRUE;
-								if(pos1->prev_sibling == '\0')
+								if(pos1->prev_sibling == NULL)
 									{
-									if(pos1->parent != '\0' )
+									if(pos1->parent != NULL )
 										(pos1->parent)->daughter = pos1->next_sibling;
 									(pos1->next_sibling)->parent = pos1->parent;
 									start = pos1->next_sibling;
 									}							
-								if(pos1->next_sibling != '\0') (pos1->next_sibling)->prev_sibling = pos1->prev_sibling;
-								if(pos1->prev_sibling != '\0') (pos1->prev_sibling)->next_sibling = pos1->next_sibling;
+								if(pos1->next_sibling != NULL) (pos1->next_sibling)->prev_sibling = pos1->prev_sibling;
+								if(pos1->prev_sibling != NULL) (pos1->prev_sibling)->next_sibling = pos1->next_sibling;
 								pos1->parent = newbie;
 								newbie->next_sibling = pos2->next_sibling;
 								newbie->prev_sibling = pos2->prev_sibling;
-								if(pos2->next_sibling != '\0') (pos2->next_sibling)->prev_sibling = newbie;
-								if(pos2->prev_sibling != '\0') (pos2->prev_sibling)->next_sibling = newbie;
-								if(pos2->prev_sibling == '\0')
+								if(pos2->next_sibling != NULL) (pos2->next_sibling)->prev_sibling = newbie;
+								if(pos2->prev_sibling != NULL) (pos2->prev_sibling)->next_sibling = newbie;
+								if(pos2->prev_sibling == NULL)
 									{
-									if(pos2->parent != '\0')
+									if(pos2->parent != NULL)
 										(pos2->parent)->daughter = newbie;
 									newbie->parent = pos2->parent;
-									pos2->parent = '\0';
+									pos2->parent = NULL;
 									if(start == pos2) start = newbie;
 									}
 								pos1->next_sibling = pos2;
 								pos2->prev_sibling = pos1;
 								
-								pos1->prev_sibling = '\0';
-								pos2->next_sibling = '\0';
+								pos1->prev_sibling = NULL;
+								pos2->next_sibling = NULL;
 								l--;
 								donestuff = TRUE;
 								
 								pos1 = start;
-								newbie = '\0';
+								newbie = NULL;
 								
 								/*printf("done hard same\n");*/
 								}
@@ -15861,9 +15867,9 @@ void resolve_tricotomies(struct taxon *position, struct taxon *species_tree)
 				pos1 = start;
 				pos2 = pos1->next_sibling;
 				x=0;
-				while(pos1 != '\0')
+				while(pos1 != NULL)
 					{
-					while(pos2 != '\0')
+					while(pos2 != NULL)
 						{
 						y=x+1;
 						for(j=0; j<2*number_of_taxa; j++)
@@ -15891,31 +15897,31 @@ void resolve_tricotomies(struct taxon *position, struct taxon *species_tree)
 				newbie->tag = smallest;
 				newbie->daughter = pos1;
 				newbie->tag2 = TRUE;
-				if(pos1->prev_sibling == '\0')
+				if(pos1->prev_sibling == NULL)
 					{
-					if(pos1->parent != '\0')
+					if(pos1->parent != NULL)
 						(pos1->parent)->daughter = newbie;
 					newbie->parent = pos1->parent;
 					start = newbie;
 					}
-				if(pos1->next_sibling != '\0') (pos1->next_sibling)->prev_sibling = newbie;
-				if(pos1->prev_sibling != '\0') (pos1->prev_sibling)->next_sibling = newbie;
+				if(pos1->next_sibling != NULL) (pos1->next_sibling)->prev_sibling = newbie;
+				if(pos1->prev_sibling != NULL) (pos1->prev_sibling)->next_sibling = newbie;
 				pos1->parent = newbie;
 				newbie->next_sibling = pos1->next_sibling;
 				newbie->prev_sibling = pos1->prev_sibling;
 				pos1->next_sibling = pos2;
-				pos1->prev_sibling = '\0';
+				pos1->prev_sibling = NULL;
 				
-				if(pos2->next_sibling != '\0') (pos2->next_sibling)->prev_sibling = pos2->prev_sibling;
-				if(pos2->prev_sibling != '\0') (pos2->prev_sibling)->next_sibling = pos2->next_sibling;
+				if(pos2->next_sibling != NULL) (pos2->next_sibling)->prev_sibling = pos2->prev_sibling;
+				if(pos2->prev_sibling != NULL) (pos2->prev_sibling)->next_sibling = pos2->next_sibling;
 				
-				pos2->next_sibling = '\0';
+				pos2->next_sibling = NULL;
 				pos2->prev_sibling = pos1;
 				
 				pos1 = start;
 				pos2 = pos1->next_sibling;
-				if(topoftree && newbie->prev_sibling == '\0') temp_top2 = newbie;
-				newbie = '\0';
+				if(topoftree && newbie->prev_sibling == NULL) temp_top2 = newbie;
+				newbie = NULL;
 				l--;
 				donestuff = TRUE;				
 				/*printf("done lca\n");*/
@@ -15939,7 +15945,7 @@ int are_siblings(struct taxon *position, int first, int second)
 	{
 	struct taxon *start = position;
 	int i=0, answer = FALSE;
-	while(position != '\0')
+	while(position != NULL)
 		{
 		if(position->tag == first || position->tag == second || position->name == first || position->name == second)
 			{
@@ -15954,9 +15960,9 @@ int are_siblings(struct taxon *position, int first, int second)
 	if(!answer)
 		{
 		position = start;
-		while(position != '\0')
+		while(position != NULL)
 			{
-			if(position->daughter != '\0') answer = are_siblings(position->daughter, first, second);
+			if(position->daughter != NULL) answer = are_siblings(position->daughter, first, second);
 			position=position->next_sibling;
 			}
 		}
@@ -15970,16 +15976,16 @@ int number_tree1(struct taxon * position, int num)
 	int i =0;
 	
 	
-	while(position != '\0')
+	while(position != NULL)
 		{
-		if(position->daughter != '\0')
+		if(position->daughter != NULL)
 			num = number_tree1(position->daughter, num);
 		position = position->next_sibling;
 		}
 	position = start;
-	while(position != '\0')
+	while(position != NULL)
 		{
-		if(position->daughter != '\0')
+		if(position->daughter != NULL)
 			{
 			position->tag = num;
 			num++;
@@ -15998,7 +16004,7 @@ int number_tree1(struct taxon * position, int num)
 void print_tree_labels(struct taxon *position, int **results, int treenum, struct taxon *species_tree)
 	{
 	int onetoone;
-	while(position != '\0')
+	while(position != NULL)
 		{
 		if(position->loss >= 1) results[1][position->tag]++;
 		else
@@ -16008,7 +16014,7 @@ void print_tree_labels(struct taxon *position, int **results, int treenum, struc
 				{
 				results[0][position->tag]++;
 				/** now check to see if what follows is a 1:1 ortholog **/
-				if(position->daughter != '\0')
+				if(position->daughter != NULL)
 					{
 					onetoone = isit_onetoone(position->daughter, 2);
 					if(onetoone == 1)
@@ -16037,7 +16043,7 @@ void print_tree_labels(struct taxon *position, int **results, int treenum, struc
 					}
 				}
 			}
-		if(position->daughter != '\0')
+		if(position->daughter != NULL)
 			{
 			if(position->loss != -1) print_tree_labels(position->daughter, results, treenum, species_tree);
 			}
@@ -16048,15 +16054,15 @@ void print_tree_labels(struct taxon *position, int **results, int treenum, struc
 
 
 
-print_onetoone_names(struct taxon *position, int onetoone)
+void print_onetoone_names(struct taxon *position, int onetoone)
 	{
-    while(position != '\0')
+    while(position != NULL)
 		{
-		if(position->daughter != '\0')
+		if(position->daughter != NULL)
 			{
 			print_onetoone_names(position->daughter, onetoone);
 			}
-		if(position->fullname != '\0')
+		if(position->fullname != NULL)
 			{
 			fprintf(onetoonefile, "%s\t", position->fullname);
 			if(onetoone == 2) fprintf(strictonetoonefile, "%s\t", position->fullname);
@@ -16067,22 +16073,22 @@ print_onetoone_names(struct taxon *position, int onetoone)
 			
 int isit_onetoone(struct taxon *position, int onetoone)  /* This will return 0 if not a 1:1, 1 if it was a relaxed 1:1 and 2 if it was a strict 1:1 */
 	{
-	while(position != '\0' && onetoone != 0)
+	while(position != NULL && onetoone != 0)
 		{
 		if(position->loss >= 1)
 			{
-			if(position->daughter != '\0') onetoone = 0;
+			if(position->daughter != NULL) onetoone = 0;
 			else onetoone = 1;
 			}
 		else
 			{
 			if(position->loss == -1)
 				{
-				if(position->daughter != '\0') onetoone = 0;
+				if(position->daughter != NULL) onetoone = 0;
 				else onetoone = 1;
 				}
 			}
-		if(position->daughter != '\0' && onetoone != 0)
+		if(position->daughter != NULL && onetoone != 0)
 			{
 			if(position->loss != -1) onetoone = isit_onetoone(position->daughter, onetoone);
 			}
@@ -16095,19 +16101,19 @@ int isit_onetoone(struct taxon *position, int onetoone)  /* This will return 0 i
 			
 void label_gene_tree(struct taxon * gene_position, struct taxon * species_top, int *presence, int xnum)
 	{
-	struct taxon * position = gene_position, *tmp = '\0';
+	struct taxon * position = gene_position, *tmp = NULL;
 	int i =0, j=0, latest = -1;
 /*	printf("in Label_gene_tree\n");*/
-	while(position != '\0')
+	while(position != NULL)
 		{
-		if(position->daughter != '\0') 
+		if(position->daughter != NULL) 
 			{
 	/*		printf("daughter\n"); */
 			label_gene_tree(position->daughter, species_top, presence, xnum);
 			for(i=0; i<2*number_of_taxa; i++) presence[i] = FALSE;
 			tmp = position->daughter;
 			j=0;
-			while(tmp != '\0')
+			while(tmp != NULL)
 				{
 				if(tmp->name != -1)
 					{
@@ -16142,9 +16148,9 @@ void label_gene_tree(struct taxon * gene_position, struct taxon * species_top, i
 void descend(struct taxon * position, int *presence)
 	{
 	
-	while(position != '\0')
+	while(position != NULL)
 		{
-		if(position->daughter != '\0') descend(position->daughter, presence);
+		if(position->daughter != NULL) descend(position->daughter, presence);
 		else presence[position->name] = TRUE;
 		position = position->next_sibling;
 		}
@@ -16157,9 +16163,9 @@ int get_min_node(struct taxon * position, int *presence, int num)
 	
 	tmp = malloc(number_of_taxa*sizeof(int));
 	
-	while(position != '\0')
+	while(position != NULL)
 		{
-		if(position->daughter != '\0')
+		if(position->daughter != NULL)
 			{
 			num = get_min_node(position->daughter, presence, num);
 			for(i=0; i<number_of_taxa; i++) tmp[i] = presence[i];
@@ -16180,7 +16186,7 @@ int get_min_node(struct taxon * position, int *presence, int num)
 	
 void subtree_id(struct taxon * position, int *tmp)
 	{
-	while(position != '\0')
+	while(position != NULL)
 		{
 		if(position->name != -1) tmp[position->name] = FALSE;
 		else
@@ -16194,19 +16200,19 @@ void subtree_id(struct taxon * position, int *tmp)
 	
 int reconstruct_map(struct taxon *position, struct taxon *species_top)
 	{
-	struct taxon *start = '\0', *tmp = '\0', *spec_pointer= '\0', *daug_pointer = '\0', *newbie = '\0';
+	struct taxon *start = NULL, *tmp = NULL, *spec_pointer= NULL, *daug_pointer = NULL, *newbie = NULL;
 	int found = FALSE, num_dups = 0;
 	
-	while(position != '\0')
+	while(position != NULL)
 		{
-		if(position->daughter != '\0')
+		if(position->daughter != NULL)
 			{
 			num_dups += reconstruct_map(position->daughter, species_top);
 			
 			/** Check to see if any of the daughters of this pointer taxa have the same id (or name) as its id **/
 			tmp = position->daughter;
 			found = FALSE;
-			while(tmp != '\0')
+			while(tmp != NULL)
 				{
 				if(tmp->name == -1)
 					{
@@ -16226,7 +16232,7 @@ int reconstruct_map(struct taxon *position, struct taxon *species_top)
 				found = FALSE;
 				/*** now check to see if any of positions' daughters are not the same as pointer ***/
 				tmp = position->daughter;
-				while(tmp != '\0')
+				while(tmp != NULL)
 					{
 					if(tmp->tag != position->tag && tmp->name != position->tag) /** we need to add parts to the tree ***/
 						{
@@ -16236,11 +16242,11 @@ int reconstruct_map(struct taxon *position, struct taxon *species_top)
 						newbie->next_sibling = tmp->next_sibling;
 						newbie->prev_sibling = tmp->prev_sibling;
 						newbie->parent = tmp->parent;
-						if(tmp->parent != '\0') (tmp->parent)->daughter = newbie;
-						if(tmp->prev_sibling != '\0') (tmp->prev_sibling)->next_sibling = newbie;
-						if(tmp->next_sibling != '\0') (tmp->next_sibling)->prev_sibling = newbie;
-						tmp->next_sibling = '\0';
-						tmp->prev_sibling = '\0';
+						if(tmp->parent != NULL) (tmp->parent)->daughter = newbie;
+						if(tmp->prev_sibling != NULL) (tmp->prev_sibling)->next_sibling = newbie;
+						if(tmp->next_sibling != NULL) (tmp->next_sibling)->prev_sibling = newbie;
+						tmp->next_sibling = NULL;
+						tmp->prev_sibling = NULL;
 						tmp->parent = newbie;
 						}
 					tmp = tmp->next_sibling;
@@ -16258,16 +16264,16 @@ int reconstruct_map(struct taxon *position, struct taxon *species_top)
 
 void add_losses(struct taxon * position, struct taxon *species_top)
 	{
-	struct taxon * start = position, *spec_equiv = '\0', *tmp1 = '\0', *pos = '\0', *pos2 = '\0', *pos3 = '\0';
-	int *presence = '\0', i;
+	struct taxon * start = position, *spec_equiv = NULL, *tmp1 = NULL, *pos = NULL, *pos2 = NULL, *pos3 = NULL;
+	int *presence = NULL, i;
 	
 	presence = malloc((2*number_of_taxa)*sizeof(int));
 	for(i=0; i<number_of_taxa; i++) presence[i] = FALSE;
 	
 	/** Go down the gene tree to the bottom */
-	while(position != '\0')
+	while(position != NULL)
 		{
-		if(position->daughter != '\0') 
+		if(position->daughter != NULL) 
 			{
 			add_losses(position->daughter, species_top);
 			/* now for the position we are at, find the equivalent position in the species tree */
@@ -16276,13 +16282,13 @@ void add_losses(struct taxon * position, struct taxon *species_top)
 				spec_equiv = get_branch(species_top, position->tag);
 				
 				tmp1 = position->daughter;
-				tmp1->parent = '\0';
-				position->daughter = '\0';
+				tmp1->parent = NULL;
+				position->daughter = NULL;
 				
 				/* record the nodes (and taxa) that are direct sibilngs to tmp1 */
 				for(i=0; i<(2*number_of_taxa); i++) presence[i] = FALSE;
 				pos = tmp1;
-				while(pos != '\0')
+				while(pos != NULL)
 					{
 					presence[pos->tag] = TRUE;
 					pos = pos->next_sibling;
@@ -16296,7 +16302,7 @@ void add_losses(struct taxon * position, struct taxon *species_top)
 		position = position->next_sibling;
 		}	
 	free(presence);
-	presence = '\0';
+	presence = NULL;
 	}
 
 
@@ -16304,9 +16310,9 @@ void add_losses(struct taxon * position, struct taxon *species_top)
 struct taxon * construct_tree(struct taxon * spec_pos, struct taxon *gene_pos, int *presence, struct taxon *extra_gene)
 	{
 	int first = TRUE, i, count;
-	struct taxon * start = spec_pos, *position = '\0', *tmp = gene_pos, *tmp1 = '\0', *newbie = '\0';
+	struct taxon * start = spec_pos, *position = NULL, *tmp = gene_pos, *tmp1 = NULL, *newbie = NULL;
 	
-	while(spec_pos != '\0')
+	while(spec_pos != NULL)
 		{
 		if(presence[spec_pos->tag])  /* This already existed on the gene tree so we need to splice it back in here */
 			{
@@ -16320,8 +16326,8 @@ struct taxon * construct_tree(struct taxon * spec_pos, struct taxon *gene_pos, i
 			/*** uncouple this from extra_gene and place in the gene tree ***/
 			if(position == extra_gene)
 				extra_gene = position->next_sibling;
-			if(position->prev_sibling != '\0') (position->prev_sibling)->next_sibling = position->next_sibling;
-			if(position->next_sibling != '\0') (position->next_sibling)->prev_sibling = position->prev_sibling;
+			if(position->prev_sibling != NULL) (position->prev_sibling)->next_sibling = position->next_sibling;
+			if(position->next_sibling != NULL) (position->next_sibling)->prev_sibling = position->prev_sibling;
 			}
 		else /* if it doesn't already exist */
 			{
@@ -16335,8 +16341,8 @@ struct taxon * construct_tree(struct taxon * spec_pos, struct taxon *gene_pos, i
 			{
 			tmp->daughter = position;
 			position->parent = tmp;
-			position->next_sibling = '\0';
-			position->prev_sibling = '\0';
+			position->next_sibling = NULL;
+			position->prev_sibling = NULL;
 			tmp = position;
 			first = FALSE;
 			}
@@ -16344,11 +16350,11 @@ struct taxon * construct_tree(struct taxon * spec_pos, struct taxon *gene_pos, i
 			{
 			tmp->next_sibling = position;
 			position->prev_sibling = tmp;
-			position->next_sibling = '\0';
+			position->next_sibling = NULL;
 			tmp = position;
 			}
 			
-		if(spec_pos->daughter != '\0' && !presence[spec_pos->tag]) extra_gene = construct_tree(spec_pos->daughter, tmp, presence, extra_gene);
+		if(spec_pos->daughter != NULL && !presence[spec_pos->tag]) extra_gene = construct_tree(spec_pos->daughter, tmp, presence, extra_gene);
 		
 		spec_pos = spec_pos->next_sibling;
 		}
@@ -16361,9 +16367,9 @@ int join_losses(struct taxon * position)
 	{
 	int loss = TRUE;
 	
-	while(position != '\0')
+	while(position != NULL)
 		{
-		if(position->daughter != '\0')
+		if(position->daughter != NULL)
 			{
 			if(join_losses(position->daughter))
 				position->loss = -1;
@@ -16382,12 +16388,12 @@ int join_losses(struct taxon * position)
 int count_losses(struct taxon * position)
 	{
 	int count = 0;
-	while(position != '\0')
+	while(position != NULL)
 		{
 		if(position->loss == -1) count++;
 		else
 			{
-			if(position->daughter != '\0') count += count_losses(position->daughter);
+			if(position->daughter != NULL) count += count_losses(position->daughter);
 			}
 		position = position->next_sibling;
 		}
@@ -16396,9 +16402,9 @@ int count_losses(struct taxon * position)
 
 void find(struct taxon * position)
 	{
-	while(position != '\0')
+	while(position != NULL)
 		{
-		if(position->daughter != '\0') find(position->daughter);
+		if(position->daughter != NULL) find(position->daughter);
 		if(position->tag2 == TRUE)
 			printf("!%d\n", position->tag);
 		position = position->next_sibling;
@@ -16408,10 +16414,10 @@ void find(struct taxon * position)
 
 struct taxon * find_remaining(struct taxon * position)  /* This looks for the next tagged branch in the tree down from here and returns a pointer to it, otherwise it returns null pointer */
 	{
-	struct taxon * start = position, *pos = '\0', *found = '\0';
+	struct taxon * start = position, *pos = NULL, *found = NULL;
 	int i = 0;
 	
-	while(position != '\0' && found == '\0')
+	while(position != NULL && found == NULL)
 		{
 		if(position->tag == TRUE) 
 			{
@@ -16420,9 +16426,9 @@ struct taxon * find_remaining(struct taxon * position)  /* This looks for the ne
 		position = position->next_sibling;
 		}
 	position = start;
-	while(position != '\0' && found == '\0')
+	while(position != NULL && found == NULL)
 		{
-		if(position->daughter != '\0') found = find_remaining(position->daughter);
+		if(position->daughter != NULL) found = find_remaining(position->daughter);
 		position = position->next_sibling;
 		}
 	return(found);
@@ -16432,18 +16438,18 @@ struct taxon * find_remaining(struct taxon * position)  /* This looks for the ne
 
 void find_tagged(struct taxon * position, int *thispresence)
 	{
-	struct taxon * start = position, *pos = '\0';
+	struct taxon * start = position, *pos = NULL;
 	int i = 0;
 	
-	while(position != '\0')
+	while(position != NULL)
 		{
-		if(position->daughter != '\0') find_tagged(position->daughter, thispresence);
+		if(position->daughter != NULL) find_tagged(position->daughter, thispresence);
 		
 		if(position->tag2 == TRUE) 
 			{
 			/* Mark this as being present */
 			thispresence[position->tag] = TRUE;
-			if(position->daughter != '\0') down_tree(position->daughter, position, thispresence);
+			if(position->daughter != NULL) down_tree(position->daughter, position, thispresence);
 			/**** count how many siblings on this level are not "lost"   */
 			pos = start;
 			i=0;
@@ -16458,11 +16464,11 @@ void find_tagged(struct taxon * position, int *thispresence)
 void up_tree(struct taxon * position, int * presence)
 	{
 	int i=0;
-	struct taxon * prev = position , *start = '\0';
+	struct taxon * prev = position , *start = NULL;
 	presence[position->tag] = TRUE;
 	
-	while(position->next_sibling != '\0') position = position->next_sibling;
-	while(position != '\0')
+	while(position->next_sibling != NULL) position = position->next_sibling;
+	while(position != NULL)
 		{
 		if(position->loss != -1) i++;
 		start = position;
@@ -16471,11 +16477,11 @@ void up_tree(struct taxon * position, int * presence)
 	position = start;	
 	if(i<2)
 		{
-		if(position->parent != '\0') up_tree(position->parent, presence);
-		while(position != '\0')
+		if(position->parent != NULL) up_tree(position->parent, presence);
+		while(position != NULL)
 			{
 			presence[position->tag] = TRUE;
-			if(position != prev && position->daughter != '\0') down_tree(position->daughter, position, presence);
+			if(position != prev && position->daughter != NULL) down_tree(position->daughter, position, presence);
 			position =position->next_sibling;
 			}
 		}
@@ -16485,12 +16491,12 @@ void down_tree(struct taxon * position, struct taxon *prev, int * presence)
 	{
 	int i=0;
 	struct taxon *start = position;
-	while(position != '\0')
+	while(position != NULL)
 		{
 		if(position->loss == -1)
 			{
 			presence[position->tag] = TRUE;
-			if(position->daughter != '\0') down_tree(position->daughter, position, presence);
+			if(position->daughter != NULL) down_tree(position->daughter, position, presence);
 			}
 		else
 			i++;
@@ -16499,13 +16505,13 @@ void down_tree(struct taxon * position, struct taxon *prev, int * presence)
 	if(i < 2)
 		{
 		position = start;
-		if(start->parent != '\0' && start->parent != prev) up_tree(start->parent, presence);
-		while(position != '\0')
+		if(start->parent != NULL && start->parent != prev) up_tree(start->parent, presence);
+		while(position != NULL)
 			{
 			if(position->loss != -1 && position->tag2 != TRUE)
 				{
 				presence[position->tag] = TRUE;
-				if(position->daughter != '\0') down_tree(position->daughter, position, presence);
+				if(position->daughter != NULL) down_tree(position->daughter, position, presence);
 				}
 			position = position->next_sibling;
 			}
@@ -16515,9 +16521,9 @@ void down_tree(struct taxon * position, struct taxon *prev, int * presence)
 
 void mapunknowns()
 	{
-	struct taxon *position = '\0', *species_tree = '\0', *gene_tree = '\0', *best_mapping = '\0', *unknown_fund = '\0', *pos = '\0',*copy = '\0';
-	int i, j, k, l,  *presence = '\0', basescore = 1;
-	float *overall_placements = '\0', biggest = -1, total, best_total = -1;
+	struct taxon *position = NULL, *species_tree = NULL, *gene_tree = NULL, *best_mapping = NULL, *unknown_fund = NULL, *pos = NULL,*copy = NULL;
+	int i, j, k, l,  *presence = NULL, basescore = 1;
+	float *overall_placements = NULL, biggest = -1, total, best_total = -1;
 	char *temptree, temptree1[400000];
 	temptree = malloc(400000*sizeof(char));
 	temptree[0] = '\0';
@@ -16536,32 +16542,32 @@ void mapunknowns()
 	returntree(temptree);
 	/* build the tree in memory */
 	/****** We now need to build the Supertree in memory *******/
-	temp_top = '\0';
+	temp_top = NULL;
 	tree_build(1, temptree, species_tree, 1, -1);
 	species_tree = temp_top;
-	temp_top = '\0';
+	temp_top = NULL;
 	/** add an extra node to the top of the tree */
 	temp_top = make_taxon();
 	temp_top->daughter = species_tree;
 	species_tree->parent = temp_top;
 	species_tree = temp_top;
-	temp_top = '\0';
+	temp_top = NULL;
 	
 	
 	
 	
 	for(l=1; l<Total_fund_trees; l++)
 		{
-		temp_top = '\0';
+		temp_top = NULL;
 		strcpy(temptree, "");
 		strcpy(temptree, fundamentals[l]);
 		returntree(temptree);
 		/* build the tree in memory */
 		/****** We now need to build the Supertree in memory *******/
-		temp_top = '\0';
+		temp_top = NULL;
 		tree_build(1, temptree, gene_tree, 1, -1);
 		gene_tree = temp_top;
-		temp_top = '\0';
+		temp_top = NULL;
 		strcpy(temptree1, temptree);
 		
 		k=0;
@@ -16572,31 +16578,31 @@ void mapunknowns()
 
 		/** this is an unknown. we need to remove it, but mark its neighbors */
 		pos = position;
-		while(pos->prev_sibling != '\0') pos = pos->prev_sibling;
-		while(pos != '\0')
+		while(pos->prev_sibling != NULL) pos = pos->prev_sibling;
+		while(pos != NULL)
 			{
 			pos->tag2 = TRUE;
 			pos = pos->next_sibling;
 			}
 		
 		/*** remove the unknown ****/
-		if(position->next_sibling != '\0') (position->next_sibling)->prev_sibling = position->prev_sibling;
-		if(position->prev_sibling != '\0') (position->prev_sibling)->next_sibling = position->next_sibling;
-		if(position->parent != '\0') 
+		if(position->next_sibling != NULL) (position->next_sibling)->prev_sibling = position->prev_sibling;
+		if(position->prev_sibling != NULL) (position->prev_sibling)->next_sibling = position->next_sibling;
+		if(position->parent != NULL) 
 			{
 			(position->parent)->daughter = position->next_sibling;
 			(position->next_sibling)->parent = position->parent;
 			}
 		
 		free(position);
-		position = '\0';
+		position = NULL;
 		compress_tree(gene_tree);
 
 		if(presence_of_trichotomies(gene_tree)) gene_tree = do_resolve_tricotomies(gene_tree, species_tree, basescore);
 		
-		duplicate_tree(gene_tree, '\0');
+		duplicate_tree(gene_tree, NULL);
 		copy = temp_top;
-		tree_top = '\0';
+		tree_top = NULL;
 		i = number_tree(gene_tree, 0);
 		best_total = -1;
 		for(j=0; j<i; j++)
@@ -16606,32 +16612,32 @@ void mapunknowns()
 			tree_top = gene_tree;
 			reroot_tree(position);
 			gene_tree = tree_top;
-			tree_top = '\0';
+			tree_top = NULL;
 			total = tree_map(gene_tree, species_tree,0);
 			
 			
 			if(total < best_total || best_total == -1)
 				{
 				best_total = total;
-				if(best_mapping != '\0')
+				if(best_mapping != NULL)
 					{
 					dismantle_tree(best_mapping);
-					best_mapping = '\0';
+					best_mapping = NULL;
 					}
 				best_mapping = gene_tree;
-				gene_tree = '\0';
+				gene_tree = NULL;
 				}
 			else
 				{
 				dismantle_tree(gene_tree);
-				gene_tree = '\0';
+				gene_tree = NULL;
 				}
-			temp_top = '\0';
-			tree_top = '\0';
-			duplicate_tree(copy, '\0');
+			temp_top = NULL;
+			tree_top = NULL;
+			duplicate_tree(copy, NULL);
 			gene_tree = temp_top;
-			temp_top = '\0';
-			tree_top = '\0';
+			temp_top = NULL;
+			tree_top = NULL;
 			number_tree(gene_tree, 0);
 			}
 			
@@ -16650,21 +16656,21 @@ void mapunknowns()
 			{
 			if(presence[i]) overall_placements[i] += (float)1/(float)j;
 			}
-		if(copy != '\0')
+		if(copy != NULL)
 			{
 			dismantle_tree(copy);
-			copy = '\0';
+			copy = NULL;
 			}
 		
-		if(gene_tree != '\0')
+		if(gene_tree != NULL)
 			{
 			dismantle_tree(gene_tree);
-			gene_tree = '\0';
+			gene_tree = NULL;
 			}
-		if(best_mapping != '\0')
+		if(best_mapping != NULL)
 			{
 			dismantle_tree(best_mapping);
-			best_mapping = '\0';
+			best_mapping = NULL;
 			}
 		}
 	
@@ -16681,14 +16687,14 @@ void mapunknowns()
 	tree_top = species_tree;
 	tree_coordinates(temptree, TRUE, FALSE, TRUE, -1);
 	
-	if(species_tree != '\0')
+	if(species_tree != NULL)
 		{
 		dismantle_tree(species_tree);
-		species_tree = '\0';
+		species_tree = NULL;
 		}
 	
 		
-	tree_top = '\0';
+	tree_top = NULL;
 	free(temptree);
 	free(presence);
 	free(overall_placements);
@@ -16696,9 +16702,9 @@ void mapunknowns()
 
 float get_recon_score(char *giventree, int numspectries, int numgenetries)
 	{
-	struct taxon *position = '\0', *species_tree = '\0', *gene_tree = '\0', *best_mapping = '\0', *copy = '\0', *temp_top1 = '\0', *temp_top2 = '\0', *spec_copy = '\0';
+	struct taxon *position = NULL, *species_tree = NULL, *gene_tree = NULL, *best_mapping = NULL, *copy = NULL, *temp_top1 = NULL, *temp_top2 = NULL, *spec_copy = NULL;
 	int i, j, k, l, m, q, r, spec_start=0, spec_end, gene_start, gene_end, num_species_internal = 0, error = FALSE, num_species_roots = 0, basescore = 1, rand1=0, rand2=0, dospecrand = 1, dogenerand=1;
-	float *overall_placements = '\0', biggest = -1, total, best_total = -1, sum_of_totals = 0, rooting_score = -1;
+	float *overall_placements = NULL, biggest = -1, total, best_total = -1, sum_of_totals = 0, rooting_score = -1;
 	char *temptree, temptree1[400000];
 
 	temptree = malloc(400000*sizeof(char));
@@ -16712,16 +16718,16 @@ float get_recon_score(char *giventree, int numspectries, int numgenetries)
 		returntree(temptree);
 		/* build the tree in memory */
 		/****** We now need to build the Supertree in memory *******/
-		temp_top = '\0';
+		temp_top = NULL;
 		tree_build(1, temptree, species_tree, 1, -1);
 		species_tree = temp_top;
-		temp_top = '\0';
+		temp_top = NULL;
 		
 		num_species_roots = number_tree1(species_tree, number_of_taxa);
 
-		duplicate_tree(species_tree, '\0');
+		duplicate_tree(species_tree, NULL);
 		spec_copy = temp_top;
-		temp_top2 = '\0';
+		temp_top2 = NULL;
 		
 		
 		if(numspectries == -1)
@@ -16748,7 +16754,7 @@ float get_recon_score(char *giventree, int numspectries, int numgenetries)
 				spec_start = 0;
 				spec_end = num_species_roots;
 				}
-/*		for(m=0; m<num_species_roots; m++)  /* for every rooting of the species tree */
+/*		for(m=0; m<num_species_roots; m++) */ /* for every rooting of the species tree */
 			for(m=spec_start; m<spec_end; m++) 
 				{
 			
@@ -16756,11 +16762,11 @@ float get_recon_score(char *giventree, int numspectries, int numgenetries)
 				temp_top = species_tree;
 				reroot_tree(position);
 				species_tree = temp_top;
-				temp_top = '\0';
+				temp_top = NULL;
 
 				for(l=0; l<Total_fund_trees; l++)  /* for every gene tree */
 					{
-					temp_top1 = '\0';
+					temp_top1 = NULL;
 					strcpy(temptree, "");
 					strcpy(temptree, fundamentals[l]);
 					unroottree(temptree);
@@ -16768,20 +16774,20 @@ float get_recon_score(char *giventree, int numspectries, int numgenetries)
 					returntree(temptree);
 					/* build the tree in memory */
 					/****** We now need to build the genetree in memory *******/
-					temp_top = '\0';
+					temp_top = NULL;
 					taxaorder=0;
 					tree_build(1, temptree, gene_tree, 1, l);
 					gene_tree = temp_top;
-					temp_top = '\0';
+					temp_top = NULL;
 					strcpy(temptree1, temptree);
 
 					if(presence_of_trichotomies(gene_tree)) gene_tree = do_resolve_tricotomies(gene_tree, species_tree, basescore);	
 				/*	else printf("no resolving needed\n"); */
 
 
-					duplicate_tree(gene_tree, '\0');
+					duplicate_tree(gene_tree, NULL);
 					copy = temp_top;
-					temp_top2 = '\0';
+					temp_top2 = NULL;
 					i = number_tree(gene_tree, 0);
 					best_total = -1;
 					for(r=0; r<numgenetries; r++)
@@ -16797,7 +16803,7 @@ float get_recon_score(char *giventree, int numspectries, int numgenetries)
 							gene_end = i;
 							}						
 						rand2 = (int)fmod(rand(), i);
-					/*	for(j=0; j<i; j++)   /* For every rooting of the genetree */
+					/*	for(j=0; j<i; j++)  */ /* For every rooting of the genetree */
 						for(j=gene_start; j<gene_end; j++)   
 							{
 				/*			printf("trying rooting %d of%d in the genetree\t score:", j, i); */
@@ -16805,50 +16811,50 @@ float get_recon_score(char *giventree, int numspectries, int numgenetries)
 							temp_top = gene_tree;
 							reroot_tree(position);
 							gene_tree = temp_top;
-							temp_top = '\0';
+							temp_top = NULL;
 							
 							total = tree_map(gene_tree, species_tree,0);
 						/*	printf("%f\t",j, i, total); */
 							if(total < best_total || best_total == -1)
 								{
 								best_total = total;
-								if(best_mapping != '\0')
+								if(best_mapping != NULL)
 									{
 									dismantle_tree(best_mapping);
-									best_mapping = '\0';
+									best_mapping = NULL;
 									}
 								best_mapping = gene_tree;
-								gene_tree = '\0';
+								gene_tree = NULL;
 								}
 							else
 								{
 								dismantle_tree(gene_tree);
-								gene_tree = '\0';
+								gene_tree = NULL;
 								}
-							temp_top1 = '\0';
-							temp_top = '\0';
-							duplicate_tree(copy, '\0');
+							temp_top1 = NULL;
+							temp_top = NULL;
+							duplicate_tree(copy, NULL);
 							gene_tree = temp_top;
-							temp_top1 = '\0';
-							temp_top = '\0';
+							temp_top1 = NULL;
+							temp_top = NULL;
 							number_tree(gene_tree, 0);
 							}
 						}
-					if(copy != '\0')
+					if(copy != NULL)
 						{
 						dismantle_tree(copy);
-						copy = '\0';
+						copy = NULL;
 						}
 					
-					if(gene_tree != '\0')
+					if(gene_tree != NULL)
 						{
 						dismantle_tree(gene_tree);
-						gene_tree = '\0';
+						gene_tree = NULL;
 						}
-					if(best_mapping != '\0')
+					if(best_mapping != NULL)
 						{
 						dismantle_tree(best_mapping);
-						best_mapping = '\0';
+						best_mapping = NULL;
 						}
 					sum_of_totals+=best_total;
 					}
@@ -16858,21 +16864,21 @@ float get_recon_score(char *giventree, int numspectries, int numgenetries)
 					}
 				sum_of_totals = 0;
 				dismantle_tree(species_tree);
-				duplicate_tree(spec_copy, '\0');
+				duplicate_tree(spec_copy, NULL);
 				species_tree = temp_top;
-				temp_top2 = '\0';
+				temp_top2 = NULL;
 
 				}
 			}
-	if(spec_copy != '\0')
+	if(spec_copy != NULL)
 		{
 		dismantle_tree(spec_copy);
-		spec_copy = '\0';
+		spec_copy = NULL;
 		}
-	if(species_tree != '\0')
+	if(species_tree != NULL)
 		{
 		dismantle_tree(species_tree);
-		species_tree = '\0';
+		species_tree = NULL;
 		}
 	free(temptree);
 	return(rooting_score);
@@ -16881,9 +16887,9 @@ float get_recon_score(char *giventree, int numspectries, int numgenetries)
 void print_descendents(struct taxon *position, FILE *outfile)
 	{
 	
-	while(position != '\0')
+	while(position != NULL)
 		{
-		if(position->daughter != '\0')
+		if(position->daughter != NULL)
 			{
 			fprintf(outfile, "%s\t", position->weight);
 			print_descendents(position->daughter, outfile);
@@ -16900,11 +16906,11 @@ void do_descendents(struct taxon *position, FILE *outfile)
 	{
 	struct taxon *start = position;
 	
-	if(start->parent != '\0')  /*If we are not at the top of the tree */
+	if(start->parent != NULL)  /*If we are not at the top of the tree */
 		{
-		while(position != '\0')
+		while(position != NULL)
 			{
-			if(position->daughter != '\0')
+			if(position->daughter != NULL)
 				{
 				fprintf(outfile, "%s\t", position->weight);
 				print_descendents(position->daughter, outfile);
@@ -16917,9 +16923,9 @@ void do_descendents(struct taxon *position, FILE *outfile)
 			}
 		}
 	position = start;
-	while(position != '\0')
+	while(position != NULL)
 		{
-		if(position->daughter != '\0')
+		if(position->daughter != NULL)
 			{
 			fprintf(outfile, "\n%s:\t", position->weight);
 			do_descendents(position->daughter, outfile);
@@ -16934,14 +16940,14 @@ int presence_of_trichotomies(struct taxon * position)
 	{
 	struct taxon *start = position;
 	int i=0, result = FALSE;
-	while(position != '\0')
+	while(position != NULL)
 		{
 		i++;
 		position = position->next_sibling;
 		}
 	if(i > 2)
 		{
-		if(start->parent != '\0')
+		if(start->parent != NULL)
 			result = TRUE;
 		else
 			{
@@ -16951,9 +16957,9 @@ int presence_of_trichotomies(struct taxon * position)
 		}
 
 	position = start;
-	while(position != '\0' && result == FALSE)
+	while(position != NULL && result == FALSE)
 		{
-		if(position->daughter != '\0')	
+		if(position->daughter != NULL)	
 			{
 			if(presence_of_trichotomies(position->daughter))
 				result = TRUE;
@@ -16966,9 +16972,9 @@ int presence_of_trichotomies(struct taxon * position)
 			
 struct taxon * do_resolve_tricotomies(struct taxon * gene_tree, struct taxon * species_tree, int basescore)
 	{
-	int i, j, xnum=0, *presence='\0', **scores = '\0';
-	char *temper='\0';
-	struct taxon * teeemp = '\0';
+	int i, j, xnum=0, *presence=NULL, **scores = NULL;
+	char *temper=NULL;
+	struct taxon * teeemp = NULL;
 	
 	temper = malloc(400000*sizeof(int));
 	temper[0] = '\0';
@@ -17026,24 +17032,24 @@ struct taxon * do_resolve_tricotomies(struct taxon * gene_tree, struct taxon * s
 	/*count the number of daughters at the top of the tree */
 	i=0;
 	teeemp = gene_tree;
-	while(teeemp != '\0')
+	while(teeemp != NULL)
 		{
 		i++;
 		teeemp = teeemp->next_sibling;
 		}
 	if(i < 3)
 		{
-		teeemp = '\0';
-		if(gene_tree->daughter != '\0')
+		teeemp = NULL;
+		if(gene_tree->daughter != NULL)
 			{
 			temp_top2 = gene_tree->daughter;
 			(gene_tree->next_sibling)->next_sibling = temp_top2;
-			(gene_tree->next_sibling)->prev_sibling = '\0';
+			(gene_tree->next_sibling)->prev_sibling = NULL;
 			temp_top2->prev_sibling = (gene_tree->next_sibling);
-			temp_top2->parent = '\0';
+			temp_top2->parent = NULL;
 			temp_top2 = temp_top2->prev_sibling;
-			gene_tree->next_sibling = '\0';
-			gene_tree->daughter = '\0';
+			gene_tree->next_sibling = NULL;
+			gene_tree->daughter = NULL;
 			dismantle_tree(gene_tree);
 			gene_tree = temp_top2;
 			}
@@ -17053,10 +17059,10 @@ struct taxon * do_resolve_tricotomies(struct taxon * gene_tree, struct taxon * s
 			teeemp = gene_tree->next_sibling;
 			gene_tree->next_sibling = temp_top2;
 			temp_top2->prev_sibling = gene_tree;
-			teeemp->prev_sibling = '\0';
-			teeemp->daughter = '\0';
+			teeemp->prev_sibling = NULL;
+			teeemp->daughter = NULL;
 			dismantle_tree(teeemp);
-			teeemp = '\0';
+			teeemp = NULL;
 			}
 		}
 	
@@ -17074,7 +17080,7 @@ void make_unrooted(struct taxon * position)
 	{
 	int i=0;
 	struct taxon * start = position;
-	while(position != '\0')
+	while(position != NULL)
 		{
 		i++;
 		position = position->next_sibling;
@@ -17087,11 +17093,11 @@ void make_unrooted(struct taxon * position)
 
 void reconstruct(int print_settings)
 	{
-	struct taxon *position = '\0', *species_tree = '\0', *gene_tree = '\0', *best_mapping = '\0', *unknown_fund = '\0', *pos = '\0', *copy = '\0', *newbie = '\0';
-	int i, j, k, l, xnum=0, *presence = '\0', **label_results = '\0', num_species_internal = 0, error = FALSE, printfiles = TRUE, how_many = 0, diff_overall =0, dorecon = FALSE, basescore = 1;
-	float *overall_placements = '\0', biggest = -1, total, best_total = -1;
-	char *temptree, temptree1[400000], reconfilename[100], otherfilename[100], *tmp1 = '\0', c = '\0';
-	FILE *reconstructionfile = '\0', *descendentsfile = '\0', *genebirthfile = '\0';
+	struct taxon *position = NULL, *species_tree = NULL, *gene_tree = NULL, *best_mapping = NULL, *unknown_fund = NULL, *pos = NULL, *copy = NULL, *newbie = NULL;
+	int i, j, k, l, xnum=0, *presence = NULL, **label_results = NULL, num_species_internal = 0, error = FALSE, printfiles = TRUE, how_many = 0, diff_overall =0, dorecon = FALSE, basescore = 1;
+	float *overall_placements = NULL, biggest = -1, total, best_total = -1;
+	char *temptree, temptree1[400000], reconfilename[100], otherfilename[100], *tmp1 = NULL, c = '\0';
+	FILE *reconstructionfile = NULL, *descendentsfile = NULL, *genebirthfile = NULL;
 	
 	temptree = malloc(400000*sizeof(char));
 	temptree[0] = '\0';
@@ -17195,16 +17201,16 @@ void reconstruct(int print_settings)
 		returntree(temptree);
 		/* build the tree in memory */
 		/****** We now need to build the Species tree in memory *******/
-		temp_top = '\0';
+		temp_top = NULL;
 		tree_build(1, temptree, species_tree, 1, -1);
 		species_tree = temp_top;
-		temp_top = '\0';
+		temp_top = NULL;
 		/** add an extra node to the top of the tree */
 		temp_top = make_taxon();
 		temp_top->daughter = species_tree;
 		species_tree->parent = temp_top;
 		species_tree = temp_top;
-		temp_top = '\0';
+		temp_top = NULL;
 		number_tree1(species_tree, number_of_taxa);
 		num_species_internal = count_internal_branches(species_tree, 0);
 		if(printfiles)
@@ -17226,7 +17232,7 @@ void reconstruct(int print_settings)
 		
 		for(l=1; l<Total_fund_trees; l++)
 			{
-			temp_top = '\0';
+			temp_top = NULL;
 			strcpy(temptree, "");
 			strcpy(temptree, fundamentals[l]);
 			unroottree(temptree);
@@ -17236,12 +17242,12 @@ void reconstruct(int print_settings)
 			
 			/* build the tree in memory */
 			/****** We now need to build the gene tree in memory *******/
-			temp_top = '\0';
+			temp_top = NULL;
 			how_many++;
 			taxaorder=0;
 			tree_build(1, temptree, gene_tree, 1, l);
 			gene_tree = temp_top;
-			temp_top = '\0';
+			temp_top = NULL;
 			strcpy(temptree1, temptree);
 			i = count_taxa(gene_tree, 0);
 			
@@ -17252,12 +17258,12 @@ void reconstruct(int print_settings)
 			tree_top = gene_tree;
 			compress_tree1(gene_tree);
 			gene_tree = tree_top;
-			temp_top = '\0';
-			duplicate_tree(gene_tree, '\0');
+			temp_top = NULL;
+			duplicate_tree(gene_tree, NULL);
 			how_many++;
 			copy = temp_top;
 						
-			tree_top = '\0';
+			tree_top = NULL;
 			i = number_tree(gene_tree, 0);
 			best_total = -1;
 			if(i>2)
@@ -17276,28 +17282,28 @@ void reconstruct(int print_settings)
 					if(total < best_total || best_total == -1)
 						{
 						best_total = total;
-						if(best_mapping != '\0')
+						if(best_mapping != NULL)
 							{
 							dismantle_tree(best_mapping);
 							how_many--;
-							best_mapping = '\0';
+							best_mapping = NULL;
 							}
 						best_mapping = gene_tree;
-						gene_tree = '\0';
+						gene_tree = NULL;
 						}
 					else
 						{
 						dismantle_tree(gene_tree);
 						how_many--;
-						gene_tree = '\0';
+						gene_tree = NULL;
 						}
-					temp_top = '\0';
-					tree_top = '\0';
-					duplicate_tree(copy, '\0');
+					temp_top = NULL;
+					tree_top = NULL;
+					duplicate_tree(copy, NULL);
 					how_many++;
 					gene_tree = temp_top;
-					temp_top = '\0';
-					tree_top = '\0';
+					temp_top = NULL;
+					tree_top = NULL;
 					number_tree(gene_tree, 0);
 					another_check += malloc_check;
 					}
@@ -17308,11 +17314,11 @@ void reconstruct(int print_settings)
 				newbie->daughter=gene_tree;
 				gene_tree->parent = newbie;
 				gene_tree = newbie;
-				newbie = '\0';
+				newbie = NULL;
 				total = tree_map(gene_tree, species_tree,1);				
 				best_total = total;
 				best_mapping = gene_tree;
-				gene_tree = '\0';
+				gene_tree = NULL;
 				}
 			if(strcmp(tree_names[l], "") == 0)
 				printf("Tree number: %d\t%f\n", l, best_total);
@@ -17371,23 +17377,23 @@ void reconstruct(int print_settings)
 				{
 				if(presence[i]) overall_placements[i] += (float)1/(float)j;
 				}
-			if(copy != '\0')
+			if(copy != NULL)
 				{
 				dismantle_tree(copy);
-				copy = '\0';
+				copy = NULL;
 				}
 				how_many--;
 			
-			if(gene_tree != '\0')
+			if(gene_tree != NULL)
 				{
 				dismantle_tree(gene_tree);
-				gene_tree = '\0';
+				gene_tree = NULL;
 				}
 			how_many--;
-			if(best_mapping != '\0')
+			if(best_mapping != NULL)
 				{
 				dismantle_tree(best_mapping);
-				best_mapping = '\0';
+				best_mapping = NULL;
 				}
 				
 				
@@ -17396,10 +17402,10 @@ void reconstruct(int print_settings)
 			how_many--;
 			}
 		
-		if(species_tree != '\0')
+		if(species_tree != NULL)
 			{
 			dismantle_tree(species_tree);
-			species_tree = '\0';
+			species_tree = NULL;
 			}
 		}
 	if(printfiles)
@@ -17410,20 +17416,20 @@ void reconstruct(int print_settings)
 		fclose(onetoonefile);
 		fclose(strictonetoonefile);
 		}
-	tree_top = '\0';
+	tree_top = NULL;
 	free(temptree);
 	free(tmp1);
 	free(presence);
 	free(overall_placements);
-	if(label_results != '\0')
+	if(label_results != NULL)
 		{
 		for(i=0; i<5; i++)
 			{
 			free(label_results[i]);
-			label_results[i] = '\0';
+			label_results[i] = NULL;
 			}
 		free(label_results);
-		label_results = '\0';
+		label_results = NULL;
 		}
 
 	count_now=FALSE;
@@ -17435,9 +17441,9 @@ void reconstruct(int print_settings)
 
 void put_in_scores(struct taxon * position, float * total)
 	{
-	while(position != '\0')
+	while(position != NULL)
 		{
-		if(position->daughter != '\0') put_in_scores(position->daughter, total);
+		if(position->daughter != NULL) put_in_scores(position->daughter, total);
 		if(total[position->tag] == 0) position->loss = -1;
 		else position->loss = total[position->tag];
 		position = position->next_sibling;
@@ -17446,10 +17452,10 @@ void put_in_scores(struct taxon * position, float * total)
 
 void reset_tag2(struct taxon * position)
 	{
-	while(position != '\0')
+	while(position != NULL)
 		{
 		position->tag2 = FALSE;
-		if(position->daughter != '\0') reset_tag2(position->daughter);
+		if(position->daughter != NULL) reset_tag2(position->daughter);
 		position = position->next_sibling;
 		}
 	}
@@ -17457,10 +17463,10 @@ void reset_tag2(struct taxon * position)
 void assign_hgtdonors(struct taxon * position, int num, int part_num)
 	{
 	int i;
-	while(position != '\0')
+	while(position != NULL)
 		{
-		if(position->daughter != '\0') assign_hgtdonors(position->daughter, num, part_num);
-		if(position->donor == '\0')
+		if(position->daughter != NULL) assign_hgtdonors(position->daughter, num, part_num);
+		if(position->donor == NULL)
 			{
 			position->donor = malloc(num*sizeof(int));
 			for(i=0; i<num; i++) position->donor[i] = FALSE;
@@ -17476,13 +17482,13 @@ void assign_hgtdonors(struct taxon * position, int num, int part_num)
 int assign_tag2(struct taxon * position, int num)
 	{
 	int found = FALSE, i;
-	while(position != '\0')
+	while(position != NULL)
 		{
-		if(position->daughter != '\0')
+		if(position->daughter != NULL)
 			{
 			if(assign_tag2(position->daughter, num)) found = TRUE;
 			}
-		if(position->donor == '\0')
+		if(position->donor == NULL)
 			{
 			position->donor = malloc(num_gene_nodes*sizeof(int));
 			for(i=0; i<num_gene_nodes; i++) position->donor[i] = FALSE;
@@ -17499,11 +17505,11 @@ int assign_tag2(struct taxon * position, int num)
 
 void hgt_reconstruction()
 	{
-	struct taxon *position = '\0', *species_tree = '\0', *gene_tree = '\0', *best_mapping = '\0', *best_mapping1 = '\0', *best_mapping2 = '\0', *unknown_fund = '\0', *posit = '\0',*copy = '\0', *copy1 = '\0', **parts = '\0', *test_part = '\0', *pos = '\0', *best_donor = '\0', *best_HGT = '\0', *attached = '\0';
-	int i, j, k, l,  *presence = '\0',*presence1 = '\0', *presence2 = '\0', hgt_receipient1, hgt_receipient2, **overall_presence = '\0', *overall_reconstruction = '\0', *overall_receptor = '\0', receptor, **tmp_presence1 = '\0', **tmp_presence2 = '\0', *before1 = '\0', *before2 = '\0', *after1 = '\0', *after2 = '\0', *temporary = '\0';
-	float *overall_placements = '\0', biggest = -1,  total, best_total = -1,  best_total1 = -1, best_total2 = -1, HGT1 = 0, HGT2 = 0, original = 0, best_HGT_recon = -1, best_reconstruction = -1, sum, HGT_score = -1, donor_score = -1, tmp_allow = FALSE;
-	char *temptree = '\0', temptree1[400000];
-	int **species_allowed = '\0', **dependent_species_allowed = '\0', *previous = '\0', xnum =0, x, y, z, partA, partB, q, r, s, allow_HGT1 = TRUE, allow_HGT2 = TRUE, numparts = 1,  place_marker = 1, found_better = FALSE, error = FALSE; 
+	struct taxon *position = NULL, *species_tree = NULL, *gene_tree = NULL, *best_mapping = NULL, *best_mapping1 = NULL, *best_mapping2 = NULL, *unknown_fund = NULL, *posit = NULL,*copy = NULL, *copy1 = NULL, **parts = NULL, *test_part = NULL, *pos = NULL, *best_donor = NULL, *best_HGT = NULL, *attached = NULL;
+	int i, j, k, l,  *presence = NULL,*presence1 = NULL, *presence2 = NULL, hgt_receipient1, hgt_receipient2, **overall_presence = NULL, *overall_reconstruction = NULL, *overall_receptor = NULL, receptor, **tmp_presence1 = NULL, **tmp_presence2 = NULL, *before1 = NULL, *before2 = NULL, *after1 = NULL, *after2 = NULL, *temporary = NULL;
+	float *overall_placements = NULL, biggest = -1,  total, best_total = -1,  best_total1 = -1, best_total2 = -1, HGT1 = 0, HGT2 = 0, original = 0, best_HGT_recon = -1, best_reconstruction = -1, sum, HGT_score = -1, donor_score = -1, tmp_allow = FALSE;
+	char *temptree = NULL, temptree1[400000];
+	int **species_allowed = NULL, **dependent_species_allowed = NULL, *previous = NULL, xnum =0, x, y, z, partA, partB, q, r, s, allow_HGT1 = TRUE, allow_HGT2 = TRUE, numparts = 1,  place_marker = 1, found_better = FALSE, error = FALSE; 
 	int basescore = 1; /** see reconstrution command **/
 	
 	temptree = malloc(400000*sizeof(char));
@@ -17529,15 +17535,15 @@ void hgt_reconstruction()
 	
 	printf("Calculating best reconstruction of Duplications, losses and Horizontal gene transfers (HGT)\n\nDuplication weight set to %f\nLoss weight set to %f\nHGT weight set to %f\n\n", dup_weight, loss_weight, hgt_weight);
 	
-	tree_top = '\0';
+	tree_top = NULL;
 	
 	/**** First, take the species tree and calculate those part of the tree that would constitute travelling in time if a HGT was to occur (ie in ancestral or descendent branches) ***/
 	species_allowed = malloc((2*number_of_taxa)* sizeof(int*));
-	if(species_allowed == '\0') memory_error(120);
+	if(species_allowed == NULL) memory_error(120);
 	for(i=0; i<(2*number_of_taxa); i++)
 		{
 		species_allowed[i] = malloc((2*number_of_taxa)*sizeof(int));
-		if(species_allowed[i] == '\0') memory_error(121);
+		if(species_allowed[i] == NULL) memory_error(121);
 		for(j=0; j<(2*number_of_taxa); j++) species_allowed[i][j] = TRUE;
 		}
 	
@@ -17546,7 +17552,7 @@ void hgt_reconstruction()
 	for(i=0; i<(2*number_of_taxa); i++)
 		{
 		dependent_species_allowed[i] = malloc((2*number_of_taxa)*sizeof(int));
-		if(dependent_species_allowed[i] == '\0') memory_error(123);
+		if(dependent_species_allowed[i] == NULL) memory_error(123);
 		for(j=0; j<(2*number_of_taxa); j++) dependent_species_allowed[i][j] = TRUE;
 		}
 	
@@ -17572,16 +17578,16 @@ void hgt_reconstruction()
 	returntree(temptree);
 	/* build the tree in memory */
 	/****** We now need to build the Species tree in memory *******/
-	temp_top = '\0';
+	temp_top = NULL;
 	tree_build(1, temptree, species_tree, 1, -1);
 	species_tree = temp_top;
-	temp_top = '\0';
+	temp_top = NULL;
 	/** add an extra node to the top of the tree */
 	temp_top = make_taxon();
 	temp_top->daughter = species_tree;
 	species_tree->parent = temp_top;
 	species_tree = temp_top;
-	temp_top = '\0';
+	temp_top = NULL;
 	xnum = number_tree1(species_tree, number_of_taxa); /* label the internal and external branches of the species tree */
 	assign_ances_desc(species_tree, species_allowed, previous);
 	free(previous);
@@ -17590,20 +17596,20 @@ void hgt_reconstruction()
 	for(l=1; l<Total_fund_trees; l++)
 		{
 		best_reconstruction = -1;
-		best_donor = '\0';
-		best_HGT = '\0';
-		temp_top = '\0';
+		best_donor = NULL;
+		best_HGT = NULL;
+		temp_top = NULL;
 		strcpy(temptree, "");
 		strcpy(temptree, fundamentals[l]);
 		returntree(temptree);
 		unroottree(temptree);  /* we need the gene tree to be unrooted when we are breaking it up */
 		/* build the tree in memory */
 		/****** We now need to build the genetree in memory *******/
-		temp_top = '\0';
+		temp_top = NULL;
 		taxaorder=0;
 		tree_build(1, temptree, gene_tree, 1, l);
 		gene_tree = temp_top;
-		temp_top = '\0';
+		temp_top = NULL;
 			
 		strcpy(temptree1, temptree);
 	
@@ -17615,7 +17621,7 @@ void hgt_reconstruction()
 		for(i=0; i<num_gene_nodes; i++) overall_receptor[i] = -1;
 		
 		parts = malloc(num_gene_nodes*sizeof(struct taxon *));
-		for(i=0; i<num_gene_nodes; i++) parts[i] = '\0';
+		for(i=0; i<num_gene_nodes; i++) parts[i] = NULL;
 		
 		overall_placements = malloc(num_gene_nodes*sizeof(float));
 		for(i=0; i<num_gene_nodes; i++)
@@ -17645,11 +17651,11 @@ void hgt_reconstruction()
 		if(presence_of_trichotomies(gene_tree)) gene_tree = do_resolve_tricotomies(gene_tree, species_tree, basescore);
 
 		parts[0] = gene_tree;
-		gene_tree = '\0';
+		gene_tree = NULL;
 		strcpy(temptree, "");
 		print_tree(parts[0], temptree);
 		
-		duplicate_tree(parts[0], '\0');
+		duplicate_tree(parts[0], NULL);
 		copy = tree_top;			
 		i = number_tree(copy, 0);
 		best_total = -1;
@@ -17660,21 +17666,21 @@ void hgt_reconstruction()
 			reroot_tree(position);
 		
 			copy = tree_top;
-			tree_top = '\0';
+			tree_top = NULL;
 			total = tree_map(copy, species_tree,0);
 			if(total < best_total || best_total == -1) best_total = total;
 			dismantle_tree(copy);
-			copy = '\0';
-			temp_top = '\0';
-			tree_top = '\0';
-			duplicate_tree(parts[0], '\0');
+			copy = NULL;
+			temp_top = NULL;
+			tree_top = NULL;
+			duplicate_tree(parts[0], NULL);
 			copy = tree_top;
-			temp_top = '\0';
-			tree_top = '\0';
+			temp_top = NULL;
+			tree_top = NULL;
 			number_tree(copy, 0);
 			}  /* WE now know the cost for the best reconstruction of dups and losses on this tree WITHOUT any HGTs */
 		dismantle_tree(copy);
-		copy = '\0';
+		copy = NULL;
 		original = best_total;
 		overall_placements[0] = original;
 		numparts = 1;
@@ -17687,7 +17693,7 @@ void hgt_reconstruction()
 			best_reconstruction = overall_placements[k];
 			found_better = FALSE;
 			j=0;
-			while(parts[j] != '\0') j++;
+			while(parts[j] != NULL) j++;
 			place_marker = j;   /* THis is to tell us the next available spce in parts[], so that if there is a HGT found we know where to attach it */
 			reset_tag2(parts[k]);
 			/* calculate the cost for duplications and losses for the tree as it is given  (trying all rootings )*/
@@ -17699,39 +17705,39 @@ void hgt_reconstruction()
 					partA = partB = TRUE;
 					/* Duplicate this tree (or part of), that we are at, and use this to find the best place to break the tree ***/
 
-					tree_top = '\0';
-					duplicate_tree(parts[k], '\0');
+					tree_top = NULL;
+					duplicate_tree(parts[k], NULL);
 					copy = tree_top;
 					
 					number_tree(copy, 0);
 					position = get_branch(copy, j); /* this is the branch at which we are going to break the tree :-) */
-					if(position != '\0') /* no point in seperating at the top node of the tree (which in reality doesn't exist ) */
+					if(position != NULL) /* no point in seperating at the top node of the tree (which in reality doesn't exist ) */
 						{
 						
 						test_part = position;
 						if(position == copy) copy = position->next_sibling;
 						/* mark the position where this was removed from */
 						posit = position;
-						if(position->next_sibling != '\0') attached = position->next_sibling;
+						if(position->next_sibling != NULL) attached = position->next_sibling;
 						else attached = position->prev_sibling;
-						while(posit->prev_sibling != '\0') posit = posit->prev_sibling;
-						while(posit != '\0')
+						while(posit->prev_sibling != NULL) posit = posit->prev_sibling;
+						while(posit != NULL)
 							{
 							posit->tag2 = TRUE;
 							posit = posit->next_sibling;
 							}
 						
 						/* remove this node from the tree */
-						if(position->parent != '\0')
+						if(position->parent != NULL)
 							{
 							(position->parent)->daughter = position->next_sibling;
 							(position->next_sibling)->parent = position->parent;
-							position->parent = '\0';
+							position->parent = NULL;
 							}
-						if(position->next_sibling != '\0') (position->next_sibling)->prev_sibling = position->prev_sibling;
-						if(position->prev_sibling != '\0') (position->prev_sibling)->next_sibling = position->next_sibling;
-						position->next_sibling = '\0';
-						position->prev_sibling = '\0';
+						if(position->next_sibling != NULL) (position->next_sibling)->prev_sibling = position->prev_sibling;
+						if(position->prev_sibling != NULL) (position->prev_sibling)->next_sibling = position->next_sibling;
+						position->next_sibling = NULL;
+						position->prev_sibling = NULL;
 						/* now we need to compress the tree we just pruned to make sure that there are no unnecessary pointer taxa */
 						tree_top = copy;
 						compress_tree1(copy);
@@ -17754,8 +17760,8 @@ void hgt_reconstruction()
 						/* first calculate the dup+loss score for the two parts, this is the score for each as if both were the HGT part, "test_part" doesn't have to be rerooted, but "copy" does, at the point that "test_part" was attached */
 						if(k == 0)  /* we only need to assume "copy" was the HGT if k == 0, otherwise it must be the donor */
 							{
-							tree_top = '\0';
-							duplicate_tree(copy, '\0');
+							tree_top = NULL;
+							duplicate_tree(copy, NULL);
 							copy1 = tree_top;
 							
 							tree_top = copy;
@@ -17766,7 +17772,7 @@ void hgt_reconstruction()
 								posit->daughter = tree_top;
 								tree_top->parent = posit;
 								tree_top = posit;
-								posit = '\0';
+								posit = NULL;
 								} 
 							copy = tree_top;  
 							
@@ -17775,41 +17781,41 @@ void hgt_reconstruction()
 
 							dismantle_tree(copy);
 							copy = copy1;
-							copy1 = '\0';
+							copy1 = NULL;
 							}
 						
 						/* If k != 0 then we don't reroot the tree before figuring out where the HGT was attached, if k != 0 then test_part cannot be the donor! (because this would mean we would have to reroot parts[k], which is a HGT already and as such is rooted :-) */
-						tree_top = '\0';
-						duplicate_tree(copy, '\0');
+						tree_top = NULL;
+						duplicate_tree(copy, NULL);
 						copy1 = tree_top;
 						best_total1 = tree_map(copy1, species_tree,0);
 						find_tagged(copy1, presence1);
 						best_mapping1 = copy1; /* this will be used later for checking HGT compatibilities (( this version is only used if k != 0 ))*/
-						copy1 = '\0';
+						copy1 = NULL;
 						
-						tree_top = '\0';
-						duplicate_tree(test_part, '\0');
+						tree_top = NULL;
+						duplicate_tree(test_part, NULL);
 						copy1 = tree_top;
 						HGT2 = tree_map(copy1, species_tree,0); /* HGT2 no has the score for the tree "test_part" */
 						hgt_receipient2 = copy1->tag; /* if this is the HGT part, then this is the hypothesised node on the species tree that received the HGT */
 						/*find_tagged(copy1, presence2); This is commented out because if k != 0 then test_part cannot be the donor */
 						dismantle_tree(copy1);
-						copy1 = '\0';
-						tree_top = '\0';
+						copy1 = NULL;
+						tree_top = NULL;
 						/*** Next calculate the best rerooting of each tree in terms of dups+losses ***/
 						
 						if(k == 0) /* we can only reroot the original part of the tree, any subsequent ones are rooted because they are the HGTs */
 							{
 							dismantle_tree(best_mapping1);
-							best_mapping1 = '\0';
+							best_mapping1 = NULL;
 							for(z=0; z<2; z++)
 								{
 								/**** CHECK TO SEE IF BREAKING THE TREE AT THIS POINT MAKES THE HGT "TRAVEL IN TIME" also calculate the best dups+loss reconstruction for each tree  */
-								tree_top = '\0';
-								if(z == 0) duplicate_tree(copy, '\0');
-								else duplicate_tree(test_part, '\0');
+								tree_top = NULL;
+								if(z == 0) duplicate_tree(copy, NULL);
+								else duplicate_tree(test_part, NULL);
 								copy1 = tree_top;
-								tree_top = '\0';
+								tree_top = NULL;
 								tree_top = copy1;
 								compress_tree1(copy1);
 								copy1 = tree_top;
@@ -17829,12 +17835,12 @@ void hgt_reconstruction()
 												{
 												posit = tree_top;
 												q=0;
-												while(posit != '\0')
+												while(posit != NULL)
 													{
 													q++;
 													posit = posit->next_sibling;
 													}
-												posit = '\0';
+												posit = NULL;
 												if(q != 1)
 													{
 													reroot_tree(tree_top);
@@ -17842,36 +17848,36 @@ void hgt_reconstruction()
 												}
 											} 
 										copy1 = tree_top;
-										tree_top = '\0';
+										tree_top = NULL;
 										
 										
 										total = tree_map(copy1, species_tree,0);
 										if(total < best_total || best_total == -1)
 											{
 											best_total = total;
-											if(best_mapping != '\0')
+											if(best_mapping != NULL)
 												{
 												dismantle_tree(best_mapping);
-												best_mapping = '\0';
+												best_mapping = NULL;
 												}
 											best_mapping = copy1;
-											copy1 = '\0';
+											copy1 = NULL;
 											}
 										else
 											{
 											dismantle_tree(copy1);
-											copy1 = '\0';
+											copy1 = NULL;
 											}
-										temp_top = '\0';
-										tree_top = '\0';
-										if(z == 0) duplicate_tree(copy, '\0');
-										else duplicate_tree(test_part, '\0');
+										temp_top = NULL;
+										tree_top = NULL;
+										if(z == 0) duplicate_tree(copy, NULL);
+										else duplicate_tree(test_part, NULL);
 										copy1 = tree_top;
-										temp_top = '\0';
+										temp_top = NULL;
 										tree_top = copy1;
 										compress_tree1(copy1);
 										copy1 = tree_top;
-										tree_top = '\0';
+										tree_top = NULL;
 										number_tree(copy1, 0);
 										}
 									}
@@ -17879,7 +17885,7 @@ void hgt_reconstruction()
 									{
 									best_total = tree_map(copy1, species_tree,0);
 									best_mapping = copy1;
-									copy1 = '\0';
+									copy1 = NULL;
 									}
 								if(z==0) best_total1 = best_total;
 								else best_total2 = best_total;
@@ -17896,12 +17902,12 @@ void hgt_reconstruction()
 								
 								if(z==0) best_mapping1 = best_mapping;
 								else best_mapping2 = best_mapping;
-								best_mapping = '\0';
+								best_mapping = NULL;
 								
-								if(copy1 != '\0')
+								if(copy1 != NULL)
 									{
 									dismantle_tree(copy1);
-									copy1 = '\0';
+									copy1 = NULL;
 									}
 								}
 							}
@@ -18213,10 +18219,10 @@ void hgt_reconstruction()
 							
 							}
 						
-						if(best_mapping1 != '\0') dismantle_tree(best_mapping1);
-							best_mapping1 = '\0';
-						if(best_mapping2 != '\0') dismantle_tree(best_mapping2);
-							best_mapping2 = '\0';
+						if(best_mapping1 != NULL) dismantle_tree(best_mapping1);
+							best_mapping1 = NULL;
+						if(best_mapping2 != NULL) dismantle_tree(best_mapping2);
+							best_mapping2 = NULL;
 						
 						/***************************************************************/
 						/* now see if the reconstruction cost of either of the HGTs that are still allowed would be less than (or equal to?) the best so far (which may be the original) */
@@ -18230,12 +18236,12 @@ void hgt_reconstruction()
 								donor_score = best_total1;
 								receptor = hgt_receipient2;
 								HGT_score = HGT2;
-								if(best_donor != '\0') dismantle_tree(best_donor);
-								if(best_HGT != '\0') dismantle_tree(best_HGT);
+								if(best_donor != NULL) dismantle_tree(best_donor);
+								if(best_HGT != NULL) dismantle_tree(best_HGT);
 								best_donor = copy;
-								copy = '\0';
+								copy = NULL;
 								best_HGT = test_part;
-								test_part = '\0';
+								test_part = NULL;
 								for(q=0; q<2*number_of_taxa; q++) presence[q] = presence1[q];
 								for(q=1; q<numparts; q++)
 									{
@@ -18251,12 +18257,12 @@ void hgt_reconstruction()
 									donor_score = best_total2;
 									receptor = hgt_receipient1;
 									HGT_score = HGT1;
-									if(best_donor != '\0') dismantle_tree(best_donor);
-									if(best_HGT != '\0') dismantle_tree(best_HGT);
+									if(best_donor != NULL) dismantle_tree(best_donor);
+									if(best_HGT != NULL) dismantle_tree(best_HGT);
 									best_donor = test_part;
-									test_part = '\0';
+									test_part = NULL;
 									best_HGT = copy;
-									copy = '\0';
+									copy = NULL;
 									for(q=0; q<2*number_of_taxa; q++) presence[q] = presence2[q];
 									for(q=1; q<numparts; q++)
 										{
@@ -18277,12 +18283,12 @@ void hgt_reconstruction()
 									donor_score = best_total1;
 									receptor = hgt_receipient2;
 									HGT_score = HGT2;
-									if(best_donor != '\0') dismantle_tree(best_donor);
-									if(best_HGT != '\0') dismantle_tree(best_HGT);
+									if(best_donor != NULL) dismantle_tree(best_donor);
+									if(best_HGT != NULL) dismantle_tree(best_HGT);
 									best_donor = copy;
-									copy = '\0';
+									copy = NULL;
 									best_HGT = test_part;
-									test_part = '\0';
+									test_part = NULL;
 									for(q=0; q<2*number_of_taxa; q++) presence[q] = presence1[q];
 									for(q=1; q<numparts; q++)
 										{
@@ -18299,12 +18305,12 @@ void hgt_reconstruction()
 									donor_score = best_total2;
 									receptor = hgt_receipient1;
 									HGT_score = HGT1;
-									if(best_donor != '\0') dismantle_tree(best_donor);
-									if(best_HGT != '\0') dismantle_tree(best_HGT);
+									if(best_donor != NULL) dismantle_tree(best_donor);
+									if(best_HGT != NULL) dismantle_tree(best_HGT);
 									best_donor = test_part;
-									test_part = '\0';
+									test_part = NULL;
 									best_HGT = copy;
-									copy = '\0';
+									copy = NULL;
 									for(q=0; q<2*number_of_taxa; q++) presence[q] = presence2[q];
 									for(q=1; q<numparts; q++)
 										{
@@ -18314,10 +18320,10 @@ void hgt_reconstruction()
 								}
 							}
 						}
-					if(copy != '\0') dismantle_tree(copy);
-					copy = '\0';
-					if(test_part != '\0') dismantle_tree(test_part);
-					test_part = '\0';
+					if(copy != NULL) dismantle_tree(copy);
+					copy = NULL;
+					if(test_part != NULL) dismantle_tree(test_part);
+					test_part = NULL;
 					}
 				}
 			if(found_better == TRUE) /* if we have found a better reconstruction that includes a HGT for this part of the tree */
@@ -18327,10 +18333,10 @@ void hgt_reconstruction()
 				overall_receptor[place_marker] = receptor;
 				overall_placements[k] = donor_score;
 				overall_placements[place_marker] = HGT_score;
-				if(parts[k] != '\0') dismantle_tree(parts[k]);
-				if(parts[place_marker] != '\0') dismantle_tree(parts[place_marker]);
+				if(parts[k] != NULL) dismantle_tree(parts[k]);
+				if(parts[place_marker] != NULL) dismantle_tree(parts[place_marker]);
 				parts[k] = best_donor;
-				best_donor = '\0';
+				best_donor = NULL;
 				strcpy(temptree, "");
 				print_tree(parts[k], temptree);
 				printf("donor:\n%s\n", temptree);
@@ -18339,7 +18345,7 @@ void hgt_reconstruction()
 				print_tree(parts[place_marker], temptree);
 				printf("hgt:\n%s\n", temptree);
 
-				best_HGT = '\0';
+				best_HGT = NULL;
 				assign_hgtdonors(parts[k], num_gene_nodes, place_marker);
 				for(q=0; q<2*number_of_taxa; q++) overall_presence[place_marker][q] = presence[q]; /* record the possible donor nodes for this HGT */
 				
@@ -18352,7 +18358,7 @@ void hgt_reconstruction()
 			
 		/**** print out the results */
 		i=0;
-		while(parts[i] != '\0' && i < num_gene_nodes)
+		while(parts[i] != NULL && i < num_gene_nodes)
 			{
 			printf("part %d\nScore = %f\nReceptor Node:%d\nPossible Donors: ",i,overall_placements[i], overall_receptor[i] );
 			for(j=0; j<2*number_of_taxa; j++) printf("%d,", overall_presence[i][j]);
@@ -18369,58 +18375,58 @@ void hgt_reconstruction()
 			}
 		
 			
-		if(copy != '\0')
+		if(copy != NULL)
 			{
 			dismantle_tree(copy);
-			copy = '\0';
+			copy = NULL;
 			}
-		if(gene_tree != '\0')
+		if(gene_tree != NULL)
 			{
 			dismantle_tree(gene_tree);
-			gene_tree = '\0';
+			gene_tree = NULL;
 			}
-		if(best_mapping != '\0')
+		if(best_mapping != NULL)
 			{
 			dismantle_tree(best_mapping);
-			best_mapping = '\0';
+			best_mapping = NULL;
 			}
 		for(i=0; i<num_gene_nodes; i++)
 			{
-			if(parts[i] != '\0') dismantle_tree(parts[i]);
-			parts[i] = '\0';
+			if(parts[i] != NULL) dismantle_tree(parts[i]);
+			parts[i] = NULL;
 			}
 		
 		free(parts);
-		parts = '\0';
+		parts = NULL;
 		free(overall_receptor);
-		overall_receptor = '\0';
+		overall_receptor = NULL;
 		for(i=0; i<num_gene_nodes; i++)
 			{
 			free(tmp_presence1[i]);
-			tmp_presence1[i] = '\0';
+			tmp_presence1[i] = NULL;
 			free(tmp_presence2[i]);
-			tmp_presence2[i] = '\0';
+			tmp_presence2[i] = NULL;
 			free(overall_presence[i]);
-			overall_presence[i] = '\0';
+			overall_presence[i] = NULL;
 			}
 		
 		free(overall_presence);
-		overall_presence = '\0';
+		overall_presence = NULL;
 		free(tmp_presence1);
-		tmp_presence1 = '\0';
+		tmp_presence1 = NULL;
 		free(tmp_presence2);
-		tmp_presence2 = '\0';
+		tmp_presence2 = NULL;
 		
 		free(overall_placements);
-		overall_placements = '\0';
+		overall_placements = NULL;
 		}
 	
 	for(i=0; i<(2*number_of_taxa); i++) free(species_allowed[i]);
 	free(species_allowed);
-	species_allowed = '\0';
+	species_allowed = NULL;
 	for(i=0; i<(2*number_of_taxa); i++) free(dependent_species_allowed[i]);
 	free(dependent_species_allowed);
-	dependent_species_allowed = '\0';
+	dependent_species_allowed = NULL;
 	
 	free(before1); 
 	free(before2); 
@@ -18428,19 +18434,19 @@ void hgt_reconstruction()
 	free(after2);
 
 	
-	if(species_tree != '\0')
+	if(species_tree != NULL)
 		{
 		dismantle_tree(species_tree);
-		species_tree = '\0';
+		species_tree = NULL;
 		}
 	
-	if(gene_tree != '\0')
+	if(gene_tree != NULL)
 		{
 		dismantle_tree(gene_tree);
-		gene_tree = '\0';
+		gene_tree = NULL;
 		}
 	
-	tree_top = '\0';
+	tree_top = NULL;
 	free(temptree);
 	free(presence);
 	free(presence1);
@@ -18456,7 +18462,7 @@ void assign_before_after(struct taxon *position, int *previous, int *before, int
 	{
 	int i=0;
 	
-	while(position != '\0')
+	while(position != NULL)
 		{
 		if(position->tag == num)
 			{
@@ -18469,7 +18475,7 @@ void assign_before_after(struct taxon *position, int *previous, int *before, int
 			if(found) after[position->tag] = TRUE;
 			}
 			
-		if(position->daughter != '\0')
+		if(position->daughter != NULL)
 			{
 			previous[position->tag] = TRUE;
 			assign_before_after(position->daughter,previous, before, after, num, found);
@@ -18486,9 +18492,9 @@ void assign_ances_desc(struct taxon *position, int ** allowed_species, int * pre
 	{
 	int i=0;
 	
-	while(position != '\0')
+	while(position != NULL)
 		{
-		if(position->daughter != '\0')
+		if(position->daughter != NULL)
 			{
 			previous[position->tag] = TRUE;
 			assign_ances_desc(position->daughter, allowed_species, previous);
@@ -18515,9 +18521,9 @@ void random_prune(char *fund_tree)
 	{
 	float user_limit;
 	int i=0, j=0;
-	int *to_delete = '\0';
-	char *prunecommand = '\0';
-	FILE *rp_outfile = '\0';
+	int *to_delete = NULL;
+	char *prunecommand = NULL;
+	FILE *rp_outfile = NULL;
 	rp_outfile = fopen("prunedtaxa.txt", "w");
 	
 	prunecommand = malloc(1000000*sizeof(char));
@@ -18531,13 +18537,13 @@ void random_prune(char *fund_tree)
 		if(strcmp(parsed_command[i], "brlen") == 0)
 			user_limit = atof(parsed_command[i+1]);
 		}
-	if(tree_top != '\0') dismantle_tree(tree_top);
-	tree_top = '\0';
+	if(tree_top != NULL) dismantle_tree(tree_top);
+	tree_top = NULL;
 	
-	temp_top = '\0';
+	temp_top = NULL;
 	tree_build(1, fund_tree, tree_top, 0, -1);
 	tree_top = temp_top;
-	temp_top = '\0';
+	temp_top = NULL;
 	
 	collapse_clades(tree_top, user_limit, to_delete, rp_outfile);
 	strcpy(prunecommand, "deletetaxa ");
@@ -18574,9 +18580,9 @@ void collapse_clades(struct taxon * position, float user_limit, int * to_delete,
 	int count = 0, keep = 0, taxa_count = 0;
 	
 	
-	while(position != '\0')
+	while(position != NULL)
 		{
-		if(position->daughter != '\0')
+		if(position->daughter != NULL)
 			{
 			total =0; count = 0;
 			taxa_count = get_brlens(position->daughter, &total, &count);
@@ -18599,9 +18605,9 @@ void collapse_clades(struct taxon * position, float user_limit, int * to_delete,
 int get_brlens(struct taxon * position, float *total, int *count)
 	{
 	int taxa_count = 0, tmpcount = 0;
-	while(position != '\0')
+	while(position != NULL)
 		{
-		if(position->daughter != '\0')
+		if(position->daughter != NULL)
 			{
 			taxa_count += get_brlens(position->daughter, total, count);
 			}
@@ -18644,9 +18650,9 @@ float return_length(char *string)
 
 int print_keep(struct taxon *position, int keep, int count, FILE *rp_outfile)
 	{
-	while(position != '\0')
+	while(position != NULL)
 		{
-		if(position->daughter != '\0')	
+		if(position->daughter != NULL)	
 			count = print_keep(position->daughter, keep, count, rp_outfile);
 		else
 			{
@@ -18666,9 +18672,9 @@ int untag_taxa(struct taxon *position, int * to_delete, int keep, int count, FIL
 	{
 	
 	
-	while(position != '\0')
+	while(position != NULL)
 		{
-		if(position->daughter != '\0')
+		if(position->daughter != NULL)
 			count = untag_taxa(position->daughter, to_delete, keep, count, rp_outfile);
 		else
 			{
@@ -18687,17 +18693,17 @@ int untag_taxa(struct taxon *position, int * to_delete, int keep, int count, FIL
 			
 void resolve_tricotomies_dist (struct taxon *gene_tree, struct taxon *species_tree, int ** scores)
 	{
-	struct taxon *position = gene_tree, *start = gene_tree, *position2 = '\0', *new = '\0', *first = '\0', *second = '\0';
-	int i=0, j, minscore, *presence = '\0';
+	struct taxon *position = gene_tree, *start = gene_tree, *position2 = NULL, *new = NULL, *first = NULL, *second = NULL;
+	int i=0, j, minscore, *presence = NULL;
 	
 	presence = malloc(number_of_taxa*sizeof(int));
 	for(i=0; i<number_of_taxa; i++) presence[i] = FALSE;
 	i=0;
-	while(position != '\0')
+	while(position != NULL)
 		{
 		i++;
 		/* go though looking for internal branches and follow them down */
-		if(position->daughter != '\0')
+		if(position->daughter != NULL)
 			resolve_tricotomies_dist(position->daughter, species_tree, scores);
 		position = position->next_sibling;
 		}
@@ -18706,12 +18712,12 @@ void resolve_tricotomies_dist (struct taxon *gene_tree, struct taxon *species_tr
 	while((temp_top2 != start && i > 2) || (temp_top2 == start && i > 3))
 		{
 		position = start;
-		minscore=-1; first = '\0'; second = '\0'; 
+		minscore=-1; first = NULL; second = NULL; 
 		/* identify the branches at this level with the minimum distance between them */
-		while(position->next_sibling != '\0')
+		while(position->next_sibling != NULL)
 			{
 			position2 = position->next_sibling;
-			while(position2 != '\0')
+			while(position2 != NULL)
 				{
 				if(minscore==-1 || scores[position->tag][position2->tag] < minscore)
 					{
@@ -18738,12 +18744,12 @@ void resolve_tricotomies_dist (struct taxon *gene_tree, struct taxon *species_tr
 		/* create a new internal branch */
 		new = make_taxon();
 		/* make the two min branches daughters of the new node */
-		if(position->next_sibling != '\0') (position->next_sibling)->prev_sibling = position->prev_sibling;
-		if(position->prev_sibling != '\0') (position->prev_sibling)->next_sibling = position->next_sibling;
-		if(position->prev_sibling == '\0')
+		if(position->next_sibling != NULL) (position->next_sibling)->prev_sibling = position->prev_sibling;
+		if(position->prev_sibling != NULL) (position->prev_sibling)->next_sibling = position->next_sibling;
+		if(position->prev_sibling == NULL)
 			{
 			start = position->next_sibling;
-			if(position->parent == '\0') 
+			if(position->parent == NULL) 
 				temp_top2 = start;
 			else 
 				(position->parent)->daughter = position->next_sibling;
@@ -18753,28 +18759,28 @@ void resolve_tricotomies_dist (struct taxon *gene_tree, struct taxon *species_tr
 		position->parent = new;
 		new->daughter = position;
 		position->next_sibling = position2;
-		position->prev_sibling = '\0';
+		position->prev_sibling = NULL;
 		
-		if(position2->next_sibling != '\0') (position2->next_sibling)->prev_sibling = position2->prev_sibling;
-		if(position2->prev_sibling != '\0') (position2->prev_sibling)->next_sibling = position2->next_sibling;
-		if(position2->prev_sibling == '\0')
+		if(position2->next_sibling != NULL) (position2->next_sibling)->prev_sibling = position2->prev_sibling;
+		if(position2->prev_sibling != NULL) (position2->prev_sibling)->next_sibling = position2->next_sibling;
+		if(position2->prev_sibling == NULL)
 			{
 			start = position2->next_sibling;
-			if(position2->parent == '\0')
+			if(position2->parent == NULL)
 				temp_top2 = start;
 			else
 				{
 				(position2->parent)->daughter = position2->next_sibling;
 				(position2->next_sibling)->parent = position2->parent;
-				position2->parent = '\0';
+				position2->parent = NULL;
 				}
 			
 			
 			}
 		position2->prev_sibling = position;
-		position2->next_sibling = '\0';
+		position2->next_sibling = NULL;
 		/* put "new" into the tree at the present position (after the first) */
-		if(start->next_sibling != '\0') (start->next_sibling)->prev_sibling = new;
+		if(start->next_sibling != NULL) (start->next_sibling)->prev_sibling = new;
 		new->prev_sibling = start;
 		new->next_sibling = start->next_sibling;
 		start->next_sibling = new;
@@ -18797,9 +18803,9 @@ void resolve_tricotomies_dist (struct taxon *gene_tree, struct taxon *species_tr
 
 void get_taxa(struct taxon *position, int *presence)
 	{
-	while(position != '\0')
+	while(position != NULL)
 		{
-		if(position->daughter != '\0') 
+		if(position->daughter != NULL) 
 			get_taxa(position->daughter, presence);
 		else
 			presence[position->name] = TRUE;
@@ -18817,9 +18823,9 @@ int get_best_node(struct taxon * position, int *presence, int num)
 	
 	tmp = malloc(number_of_taxa*sizeof(int));
 	tmp1 = malloc(number_of_taxa*sizeof(int));
-	while(position != '\0')
+	while(position != NULL)
 		{
-		if(position->daughter != '\0')
+		if(position->daughter != NULL)
 			{
 			num = get_best_node(position->daughter, presence, num);
 			for(i=0; i<number_of_taxa; i++)
@@ -18858,24 +18864,24 @@ void check_treeisok(struct taxon *position)
 	{
 	struct taxon *start = position;
 	
-	if(position->parent != '\0') printf("^^ position->parent %d\n", position->parent->tag);
-	while(position != '\0')
+	if(position->parent != NULL) printf("^^ position->parent %d\n", position->parent->tag);
+	while(position != NULL)
 		{
-		if(position->prev_sibling != '\0') printf("[prev %d\t", position->prev_sibling->tag);
+		if(position->prev_sibling != NULL) printf("[prev %d\t", position->prev_sibling->tag);
 		else printf("[no prev\t");
-		if(position->parent != '\0') printf("^^ parent = %d ^^\t ", position->parent->tag);
-		if(position->daughter != '\0')
+		if(position->parent != NULL) printf("^^ parent = %d ^^\t ", position->parent->tag);
+		if(position->daughter != NULL)
 			printf("pointer vv%d (daughter = %d)\t", position->tag, position->daughter->tag);
 		else
 			printf("taxa %d\t", position->name);
-		if(position->next_sibling != '\0') printf("\tnext %d]\t", position->next_sibling->tag);
+		if(position->next_sibling != NULL) printf("\tnext %d]\t", position->next_sibling->tag);
 		else printf("no next]\n");
 		position = position->next_sibling;
 		}
 	position = start;
-	while(position != '\0')
+	while(position != NULL)
 		{
-		if(position->daughter != '\0') check_treeisok(position->daughter);
+		if(position->daughter != NULL) check_treeisok(position->daughter);
 		position = position->next_sibling;
 		}
 	}
@@ -18884,30 +18890,34 @@ void check_treeisok(struct taxon *position)
 
 /* function for Karen to automatically collapse clades that have all of the same taxa in them, keeping only the one with the longest sequence (found in the full name) */
 
-void prune_monophylies(char *fund_tree)
+void prune_monophylies(void)
     {
     int i=0, j=0;
-    char *pruned_tree = NULL;
+    char *pruned_tree = NULL, *tmp = NULL;
     FILE *pm_outfile = NULL;
-    rp_outfile = fopen("prunedtrees.txt", "w");
+    pm_outfile = fopen("prunedtrees.txt", "w");
     
+    tmp = malloc(10000000*sizeof(char));
+    tmp[0] = '\0';
     pruned_tree = malloc(10000000*sizeof(char));
     pruned_tree[0] = '\0';
 
+    printf("test1 \n");
     for(j=0; j<Total_fund_trees; j++)
         {
-  
+        printf("fund nember %d\n", j);
         if(tree_top != NULL) dismantle_tree(tree_top);  /* Dismantle any trees already in memory */
         tree_top = NULL;
         
         temp_top = NULL;
-        tree_build(1, fundamentals[j], tree_top, 0, -1); /* build the tree passed to the function */
+        tree_build(1, fundamentals[j], tree_top, 0, 0); /* build the tree passed to the function */
         tree_top = temp_top;
         temp_top = NULL;
-        
+        printf("tree built\n");
         identify_species_specific_clades(tree_top);  /* Call recursive function to travel down the tree looking for species-specific clades */
+        printf("finished  idenitfying clades\n");
         shrink_tree(tree_top);    /* Shrink the pruned tree by switching off any internal nodes that are not needed */
-        
+        printf("finished shrinking tree\n");
         pruned_tree[0] = '\0'; /* initialise the string */
         if(print_pruned_tree(tree_top, 0, pruned_tree, TRUE) >1)
             {
@@ -18922,6 +18932,8 @@ void prune_monophylies(char *fund_tree)
         fprintf(pm_outfile, "%s\n", pruned_tree);
         }
     
+    free(tmp);
+    free(pruned_tree);
     fclose(pm_outfile);
     }
 
@@ -18929,7 +18941,7 @@ void prune_monophylies(char *fund_tree)
 void identify_species_specific_clades(struct taxon * position)
     {
     float total = 0;
-    int count = 0, taxa_count = 0, all_same_taxon = -1, *foundtaxa = NULL;
+    int count = 0, taxa_count = 0, all_same_taxon = -1, *foundtaxa = NULL, i;
     long seqlength = 0;
     struct taxon * starting = position, *longest=NULL;
     foundtaxa = malloc(number_of_taxa*sizeof(int));
@@ -18937,14 +18949,16 @@ void identify_species_specific_clades(struct taxon * position)
     /* identify if all descendant nodes are from the same species */
     
     for(i=0; i<number_of_taxa; i++) foundtaxa[i] = FALSE;  /* array to keep track of taxa to delete */
+    printf("starting list taxa\n");
     seqlength= list_taxa_in_clade(position, foundtaxa, longest, seqlength);
+    printf("finished list taxa\n");
     for(i=0; i<number_of_taxa; i++) {
         if(foundtaxa[i] == TRUE) count++;  /* count the number of different taxa we found here */
         }
 
     if(count > 1)
         {
-        reset_tree(position->daughter); /* if there was more than one species in this clade, then undo all the tagging from the previous */
+        reset_tree(position); /* if there was more than one species in this clade, then undo all the tagging from the previous */
             /* no point going further down this clade if we already know they are all the same species */
         while(position != NULL)
             {
@@ -18969,18 +18983,24 @@ long list_taxa_in_clade(struct taxon * position, int * foundtaxa, struct taxon *
         {
         if(position->daughter != NULL)
             {
-            seqlength = list_taxa_in_clade(position->daughter);
+                printf("in\n");
+            seqlength = list_taxa_in_clade(position->daughter, foundtaxa, longest, seqlength);
+                printf("out\n");
             }
         else
             {
             if(position->name != -1)
                 {
+                printf("found taxa %d, short:%s Long:%s\n", position->name, taxa_names[position->name], position->fullname);
                 foundtaxa[position->name]=TRUE;
+                printf("1\n");
                 if((newseqlength = extract_length(position->fullname)) > seqlength) /* if this taxa has a longer length than the previously found longest */
                     {
+                    printf("seqlength=%ld\n",newseqlength);
                     seqlength = newseqlength;
-                    longest->tag = FALSE; /* mark the previously found largest for pruning */
+                    if(longest!= NULL) longest->tag = FALSE; /* mark the previously found largest for pruning */
                     longest = position;
+                    printf("2\n");
                     }
                 else
                     {
