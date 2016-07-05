@@ -1040,7 +1040,7 @@ void print_commands(int num)
         printf("\nMiscellaneous calculations:\n");
         printf("\trfdists\t\t- Calculate Robinson-Foulds distances between all source trees\n");
         printf("\tgeneratetrees\t- Generate random supertrees & assess  against source trees in memory\n");
-        printf("\tyaptp\t\t- \"Yet another permuted-tail-probability\" test - performs a randomisation test\n");
+        printf("\tyaptp\t\t- \"Yet another permutation-tail-probability\" test - performs a randomisation test\n");
 
 
 
@@ -1798,13 +1798,13 @@ void execute_command(char *commandline, int do_all)
 						while(c != ']' && !feof(infile))
 							{
 
-							/*tree_names[Total_fund_trees-1][j] = c;
-						*/	if(j<99) j++;
+							tree_names[Total_fund_trees-1][j] = c;
+							if(j<99) j++;
 							c = getc(infile);
 							}
 
-						/*tree_names[Total_fund_trees-1][j] = '\0';
-						*/ while((c == ' ' || c == '\t' || c == '\n' || c == '\r' || c == ']') && !feof(infile)) c = getc(infile);
+						tree_names[Total_fund_trees-1][j] = '\0';
+						while((c == ' ' || c == '\t' || c == '\n' || c == '\r' || c == ']') && !feof(infile)) c = getc(infile);
 
 						}
                     }  /* End of reading tree */
@@ -18996,7 +18996,10 @@ void prune_monophylies(void)
             }
         strcat(pruned_tree, ";");
 
-        fprintf(pm_outfile, "%s[%d]\n", pruned_tree, j);
+        if(strcmp(tree_names[j], "") != 0)
+        	fprintf(pm_outfile, "%s[%s]\n", pruned_tree, tree_names[j]);
+        else
+        	fprintf(pm_outfile, "%s[%d]\n", pruned_tree, j);
         }
     
     printf("\nPruning finished. All pruned trees written to the file \"%s\"\n", filename2);
