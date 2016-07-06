@@ -799,7 +799,7 @@ int main(int argc, char *argv[])
 																												if(strcmp(parsed_command[0], "randomisetrees") == 0)
 																													{
 																													if(num_commands == 2 && parsed_command[1][0] == '?')
-																														print_commands(23);
+																														print_commands(27);
 																													else
 																														{
 																														if(number_of_taxa > 0)
@@ -819,7 +819,7 @@ int main(int argc, char *argv[])
 																													if(strcmp(parsed_command[0], "randomprune") == 0)
 																														{
 																														if(num_commands == 2 && parsed_command[1][0] == '?')
-																															print_commands(23);
+																															print_commands(28);
 																														else
 																															{
 																															if(number_of_taxa > 0)
@@ -1036,7 +1036,7 @@ void print_commands(int num)
         printf("\thelp\t\t- Display this message\n");
         printf("\tquit\t\t- Quit Clann\n");
         printf("\tset\t\t- Set the optimality criterion for carrying reconstructing a supertree\n");
-        printf("\t!\t\t- Run a shell session, while preserving the current Clann session (type quit to return)\n");
+        printf("\t!\t\t- Run a shell session, while preserving the current Clann session (type \'exit\' to return)\n");
 
         printf("\nThe following commands are only available when there are source trees in memory:\n");
 
@@ -1053,6 +1053,7 @@ void print_commands(int num)
        printf("\tdeletetrees\t- Specify source trees to delete from memory (based on a variety of criteria)\n"); 
       /*  printf("\tincludetrees\t- Specify trees for inclusion in the analysis (based on a variety of criteria)\n"); */ /* we are excluding the include command because it is problematic*/
         printf("\tdeletetaxa\t- Specify taxa to delete from all source trees in memory (i.e. prune from the trees while preserving branch lengths)\n");
+        printf("\trandomisetrees\t- Randomises the source trees in memory, while preserving taxa composition in each tree\n");
 
         printf("\nMiscellaneous calculations:\n");
         printf("\trfdists\t\t- Calculate Robinson-Foulds distances between all source trees\n");
@@ -1417,8 +1418,21 @@ void print_commands(int num)
         printf("\t===========================================================\n");
         printf("\n\tnumber\t<value between 1 and 10>\t\trandom");
         }
-
-		
+    if(num == 27)
+        {
+        printf("\trandomisetrees \t\n\n");
+        printf("\tOptions\t\tSettings\t\t\tCurrent\n");
+        printf("\t===========================================================\n");
+        printf("\n\tThis command randomises all source trees in memory\n");
+        }
+    if(num == 28)
+        {
+        printf("\trandomprune \t\n\n");
+        printf("\tOptions\t\tSettings\t\t\tCurrent\n");
+        printf("\t===========================================================\n");
+        printf("\n\tThis command randomly prunes the source trees in memory\n");
+        }
+	
 	
 		
      if(num != 0)
