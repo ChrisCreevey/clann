@@ -168,7 +168,7 @@ void exclude_taxa(int do_all);
 void sourcetree_dists();
 void prune_taxa_for_exclude(struct taxon * super_pos, int *tobeexcluded);
 void spr_dist(void);
-int string_SPR(char * string);
+int string_SPR(char * string); /* carries out random SPR operations on the tree */
 void neighbor_joining( int brlens, char *tree, int names);
 void nj(void);
 void identify_taxa(struct taxon * position, int *name_array);
@@ -261,7 +261,7 @@ float *scores_retained_supers = NULL, *partition_number = NULL, num_partitions =
 float *score_of_bootstraps = NULL, *yaptp_results = NULL, largest_length = 0, dup_weight = 1, loss_weight = 1, hgt_weight = 1, BESTSCORE = -1;
 time_t interval1, interval2;
 double sup=1;
-char saved_supertree[400000],  *test_array, inputfilename[100];
+char saved_supertree[TREE_LENGTH],  *test_array, inputfilename[100];
 int trees_in_memory = 0, *sourcetreetag = NULL, remainingtrees = 0, GC, user_break = FALSE, delimiter = FALSE, print_log = FALSE, num_gene_nodes, testarraypos = 0, taxaorder=0;
 int malloc_check =0, count_now = FALSE, another_check =0;
 
@@ -270,7 +270,7 @@ int main(int argc, char *argv[])
     {
 	
     int i = 0, j=0, k=0, l=0, m=0, error=FALSE, x, doexecute_command = FALSE, command_line = FALSE;
-    char *command = NULL, HOME[100], PATH[200], exefilename[1000];
+    char *command = NULL, HOME[1000], PATH[1000], exefilename[1000];
     time_t time1, time2;
     double diff=0;    
     FILE *tmpclann = NULL;
@@ -278,7 +278,7 @@ int main(int argc, char *argv[])
 	exefilename[0] = '\0';
 	inputfilename[0] = '\0';
     saved_supertree[0] = '\0';
-	test_array = malloc(400000*sizeof(int));
+	test_array = malloc(TREE_LENGTH*sizeof(int));
 	test_array[0] = '\0';
     
 	if(argc > 1)
@@ -326,7 +326,7 @@ int main(int argc, char *argv[])
     if(!command) memory_error(74);
     command[0] = '\0';
 
-    tempsuper = malloc(400000*sizeof(char));
+    tempsuper = malloc(TREE_LENGTH*sizeof(char));
     tempsuper[0] = '\0';
 
     /** allocate the array to store multiple commands that are sepatated by ";" on the commandline */
@@ -346,7 +346,7 @@ int main(int argc, char *argv[])
     if(!retained_supers) memory_error(45);
     for(i=0; i<number_retained_supers; i++)
         {
-        retained_supers[i] = malloc(1000*sizeof(char));
+        retained_supers[i] = malloc(TREE_LENGTH*sizeof(char));
         if(!retained_supers[i]) memory_error(46);
         retained_supers[i][0] = '\0';
         }
@@ -1524,7 +1524,7 @@ void execute_command(char *commandline, int do_all)
 		num_excluded_taxa = 0;
 		trees_in_memory = 0;
             /************************ Assign the dynamic arrays *************************/
-        newbietree = malloc(500000*sizeof(char));
+        newbietree = malloc(TREE_LENGTH*sizeof(char));
 		if(newbietree == NULL) memory_error(110);
 		newbietree[0] = '\0';
 		if(weighted_scores != NULL)
@@ -1600,7 +1600,7 @@ void execute_command(char *commandline, int do_all)
 			
 			fulltaxanames[i] = NULL;
 
-			tree_names[i] = malloc(100*sizeof(char));
+			tree_names[i] = malloc(1000*sizeof(char));
 			if(!tree_names) memory_error(108);
 			tree_names[i][0] = '\0';
 			tree_weights[i] = 1;
@@ -1998,7 +1998,7 @@ void input_fund_tree(char *intree, int fundnum)
 		temp_tree_names = malloc(((fundamental_assignments-1)*FUNDAMENTAL_NUM)*sizeof(char *));
 		for(i=0; i< ((fundamental_assignments-1)*FUNDAMENTAL_NUM); i++)
 			{
-			temp_tree_names[i] = malloc(100*sizeof(char));
+			temp_tree_names[i] = malloc(1000*sizeof(char));
 			temp_tree_names[i][0] = '\0';
 			strcpy(temp_tree_names[i], tree_names[i]);
 			free(tree_names[i]);
@@ -2018,7 +2018,7 @@ void input_fund_tree(char *intree, int fundnum)
 		if(!tree_weights) memory_error(103);
 		for(i=0; i<(fundamental_assignments*FUNDAMENTAL_NUM); i++)
 			{
-			tree_names[i] = malloc(100*sizeof(char));
+			tree_names[i] = malloc(1000*sizeof(char));
 			if(!tree_names[i]) memory_error(104);
 			tree_names[i][0] = '\0';
 			tree_weights[i] = 1;
@@ -2153,9 +2153,9 @@ int nexusparser(FILE *nexusfile)
 	int error = FALSE, i, j, k, l, translated = FALSE, num_taxa = 1000, num_trees = 0, found = FALSE, numtranslatedtaxa = 0;
 	char *string = NULL, ***names = NULL, *newtree, single[1000];
 	
-	newtree = malloc(400000*sizeof(char));
+	newtree = malloc(TREE_LENGTH*sizeof(char));
 	newtree[0] = '\0';
-	string = malloc(400000*sizeof(char));
+	string = malloc(TREE_LENGTH*sizeof(char));
 	string[0] = '\0';
 	while(((c = getc(nexusfile)) == ' ' || c == '\t' || c == '\n' || c == '\r') && !feof(nexusfile));
 
@@ -3327,7 +3327,7 @@ void unroottree(char * tree)
     int i=0, j=0, k=0, l=0, m=0, basecount = 0, parentheses=0;
     int foundopen = FALSE, foundclose = FALSE;
 	float del_nodelen = 0;
-	char length[100], restof[400000];
+	char length[100], restof[TREE_LENGTH];
 	
 	restof[0] = '\0';
 	length[0] = '\0';
@@ -3574,7 +3574,7 @@ int treeToInt(char *array)
 void intTotree(int tree_num, char *array, int num_taxa)
     {
     int  i = 0, j=0, k=0, l=0, exit = 0, bracket_count = 0;
-    char tmparray[400000], *string= NULL;
+    char tmparray[TREE_LENGTH], *string= NULL;
 	double supers = 1, max = 1, min = 0, oldmin = 0, *path = NULL;
 	
 	for(i=4; i<=num_taxa; i++) supers*=((2*i)-5);
@@ -3970,13 +3970,13 @@ void alltrees_search(int user)
         for(i=0; i<number_of_taxa; i++) presenceof_SPRtaxa[i] = -1;
         /***** define the dynamic arrays  **********/
         
-        tree = malloc(400000*sizeof(char));
+        tree = malloc(TREE_LENGTH*sizeof(char));
         if(!tree) memory_error(25);
             
         tree[0] = '\0';
     
     
-        best_tree = malloc(400000*sizeof(char));
+        best_tree = malloc(TREE_LENGTH*sizeof(char));
         if(!best_tree)  memory_error(26);
             
         best_tree[0] = '\0';
@@ -4196,12 +4196,12 @@ float compare_trees(int spr)
     float total =0, temp = 0;
     char *pruned_tree, *tmp;
     /********** allocate dynamic arrays **************/
-    pruned_tree = malloc(400000*sizeof(char));
+    pruned_tree = malloc(TREE_LENGTH*sizeof(char));
     if(!pruned_tree)  memory_error(29);
         
     pruned_tree[0] = '\0';
     
-    tmp = malloc(400000*sizeof(char));
+    tmp = malloc(TREE_LENGTH*sizeof(char));
     if(!tmp)  memory_error(30);
     
     tmp[0] = '\0';
@@ -5178,7 +5178,7 @@ void bootstrap_search(void)
         
 		bootstrap_results = malloc(1*sizeof(char*));
 		score_of_bootstraps = malloc(1*sizeof(float));
-		bootstrap_results[0] = malloc(400000*sizeof(char));
+		bootstrap_results[0] = malloc(TREE_LENGTH*sizeof(char));
 		bootstrap_results[0][0] = '\0';
 
 		
@@ -5279,7 +5279,7 @@ void bootstrap_search(void)
 						score_of_bootstraps = realloc(score_of_bootstraps, (l+num_results)*sizeof(float));
 						for(j=num_results; j<l+num_results; j++) 
 								{
-								bootstrap_results[j] = malloc(400000*sizeof(char));
+								bootstrap_results[j] = malloc(TREE_LENGTH*sizeof(char));
 								bootstrap_results[j][0] = '\0';
 								}
 						while(scores_retained_supers[k] != -1)
@@ -5668,9 +5668,9 @@ void reallocate_retained_supers(void)
 
     for(i=number_retained_supers - 10; i<number_retained_supers; i++)
         {
-        retained_supers[i] = malloc(1000*sizeof(char));
+        retained_supers[i] = malloc(TREE_LENGTH*sizeof(char));
         if(!retained_supers[i]) memory_error(49);
-        best_topology[i] = malloc(1000*sizeof(char));
+        best_topology[i] = malloc(TREE_LENGTH*sizeof(char));
         if(!best_topology[i]) memory_error(89);
         best_topology[i][0] = '\0';
         best_topology_scores[i] = -1;
@@ -5685,7 +5685,7 @@ void usertrees_search(void)
     {
     FILE *userfile = NULL, *outfile = NULL, *sourcescoresfile = NULL;
     int keep = 0, nbest = 0, error = FALSE, i=0, tree_number = 0, j=0, k=0, prev = 0, print_source_scores = FALSE;
-    char *user_super = NULL, c = '\0', best_tree[400000], *temp = NULL;
+    char *user_super = NULL, c = '\0', best_tree[TREE_LENGTH], *temp = NULL;
     float score = 0, best_score = 0;
     
     if((userfile = fopen(parsed_command[1], "r")) == NULL)
@@ -5900,11 +5900,11 @@ void usertrees_search(void)
         psfile = fopen("supertree.ps", "w");
 
     
-        temp = malloc(400000*sizeof(char));
+        temp = malloc(TREE_LENGTH*sizeof(char));
         if(!temp) memory_error(50);
         temp[0] = '\0';
         
-        user_super = malloc(400000*sizeof(char));
+        user_super = malloc(TREE_LENGTH*sizeof(char));
         if(!user_super) memory_error(51);
         user_super[0] = '\0';
     
@@ -6225,11 +6225,11 @@ void heuristic_search(int user, int print, int sample, int nreps)
 	
 	for(i=0; i<number_of_taxa; i++) presenceof_SPRtaxa[i] = -1;
 	
-    best_tree = malloc(400000*sizeof(char));
+    best_tree = malloc(TREE_LENGTH*sizeof(char));
     if(!best_tree) memory_error(75);
     best_tree[0] = '\0';
     
-    temptree = malloc(400000*sizeof(char));
+    temptree = malloc(TREE_LENGTH*sizeof(char));
     if(!temptree) memory_error(76);
     temptree[0] = '\0';
     
@@ -6700,7 +6700,7 @@ void heuristic_search(int user, int print, int sample, int nreps)
             
             psfile = fopen("supertree.ps", "w");
             
-            tree = malloc(400000*sizeof(char));
+            tree = malloc(TREE_LENGTH*sizeof(char));
             if(!tree) memory_error(53);
             tree[0] = '\0';
 
@@ -7148,7 +7148,7 @@ int average_consensus(int nrep, int missing_method, char * useroutfile, FILE *pa
 	char *temptree = NULL;
 	
 	
-	temptree = malloc(400000*sizeof(char));
+	temptree = malloc(TREE_LENGTH*sizeof(char));
 	if(!temptree) printf("out of memory'n");
 	temptree[0] = '\0';
 	taxa_comp = malloc(number_of_taxa*sizeof(int*));
@@ -7313,7 +7313,7 @@ int average_consensus(int nrep, int missing_method, char * useroutfile, FILE *pa
 int do_search(char *tree, int user, int print, int maxswaps, FILE *outfile, int numspectries, int numgenetries)
     {
     int swaps = 0, i=0, better_score = TRUE;
-	char temporary_tree[1000];
+	char temporary_tree[TREE_LENGTH];
 	
 	
 	temporary_tree[0] = '\0';
@@ -7580,10 +7580,10 @@ int swapper(struct taxon * position,struct taxon * prev_pos, int stepstaken, str
 	struct taxon *start2 = NULL, *start1 = NULL;
         char *best_tree = NULL, *temptree = NULL;
         
-        temptree = malloc(400000*sizeof(char));
+        temptree = malloc(TREE_LENGTH*sizeof(char));
         if(!temptree) memory_error(66);
         temptree[0] = '\0';
-        best_tree = malloc(400000*sizeof(char));
+        best_tree = malloc(TREE_LENGTH*sizeof(char));
         if(!best_tree) memory_error(52);
         best_tree[0] = '\0';
 	
@@ -7762,7 +7762,7 @@ void yaptp_search(void)
     {
     int i=0, j=0, k=0, l=0, random_num = 0, error = FALSE, yaptp_method = 1;
     int Nreps = 100, search = 1;
-    char filename[1000], best_tree[1000];
+    char filename[1000], best_tree[TREE_LENGTH];
     FILE *yaptpfile = NULL;
 
     filename[0] = '\0';
@@ -8058,7 +8058,7 @@ void yaptp_search(void)
 void randomise_tree(char *tree)
     {
     int i=0, j=0, k=0, l=0, x=0, y=0, treecount = 0, random=0, supers = 0, actual_num = 0;
-    char **array = NULL, temptree[400000], *newtree = NULL, *tmp;
+    char **array = NULL, temptree[TREE_LENGTH], *newtree = NULL, *tmp;
     /** allocate the array **/
     array = malloc(number_of_taxa*sizeof(char *));
     if(!array) memory_error(56);
@@ -8073,7 +8073,7 @@ void randomise_tree(char *tree)
     temptree[0] = '\0';
     
     tmp = malloc(10*sizeof(char));
-    newtree = malloc(1000*sizeof(char));
+    newtree = malloc(TREE_LENGTH*sizeof(char));
     
     /** run through the tree recording the names of the taxa present into a dynamically allocated array */
     i=0;
@@ -8120,7 +8120,7 @@ void randomise_tree(char *tree)
     for(i=4; i<=j; i++) supers*=((2*i)-5);
     /* randomly pick a number between 1 and the number of taxa */
      random = (int)fmod(rand(), supers)+1;
-    for(i=0; i<1000; i++) newtree[i] = '\0';
+    for(i=0; i<TREE_LENGTH; i++) newtree[i] = '\0';
     /* now build the tree */
     intTotree(random, newtree, number_of_taxa);
 	
@@ -8173,7 +8173,7 @@ void randomise_tree(char *tree)
 void randomise_taxa(char *tree)
     {
     int i=0, j=0, k=0, l=0, x=0, y=0, treecount = 0, random=0, tottax;
-    char **array = NULL, temptree[400000];
+    char **array = NULL, temptree[TREE_LENGTH];
     
 
     /* Start by counting the number of taxa in the tree (there may be more then the variable "number_of_taxa" because of the recon criterion */
@@ -8300,7 +8300,7 @@ void random_star_decom(char *tree)
     for(i=0; i<number_of_taxa; i++)
         {
 		treearray[i] = NULL;
-        treearray[i] = malloc(1000*sizeof(char));
+        treearray[i] = malloc(TREE_LENGTH*sizeof(char));
         if(!treearray[i]) memory_error(59);
         treearray[i][0] = '\0';
         }
@@ -8381,7 +8381,7 @@ int check_if_diff_tree(char *tree)
     {
     int i=0, j=0, k=0, l=0, intname = -1, different = TRUE;
     int **scores1 = NULL, **scores2 = NULL, temp = 0;
-    char tree1[400000], tree2[400000], *name = NULL;
+    char tree1[TREE_LENGTH], tree2[TREE_LENGTH], *name = NULL;
     
     scores1 = malloc(number_of_taxa*sizeof(int *));
     if(!scores1) memory_error(62);
@@ -8531,7 +8531,7 @@ int check_if_diff_tree(char *tree)
 int coding(int nrep, int search, int ptpreps)
     {
     int i=0, j=0, k=0, nreps=10,  parenthesis = 0, count =0, *tracking = NULL, total = 0, **BR_coding = NULL, nodecount = 0, position = 0, split_count = 0, calculate_inhouse = FALSE;
-    char number[100], string[400000], filename[1000], **temptrees = NULL;
+    char number[100], string[TREE_LENGTH], filename[1000], **temptrees = NULL;
     int x=0, one_in_this = FALSE, zero_in_this = FALSE, swap=3, addseq=4, error=FALSE, *num_fund_taxa = NULL, njbuild = FALSE, weighted = FALSE;
 
     filename[0] = '\0';
@@ -8644,7 +8644,7 @@ int coding(int nrep, int search, int ptpreps)
 		temptrees = malloc(remainingtrees*sizeof(char *));
 		for(i=0; i<remainingtrees; i++)
 			{
-			temptrees[i] = malloc(400000*sizeof(char));
+			temptrees[i] = malloc(TREE_LENGTH*sizeof(char));
 			temptrees[i][0] = '\0';
 			}
 		j=0;
@@ -8784,7 +8784,7 @@ int coding(int nrep, int search, int ptpreps)
 int MRP_matrix(char **trees, int num_trees, int consensus)
 	{
 	int i=0, j=0, k=0, count =0, x=0, *tracking = NULL, total = 0, **BR_coding = NULL, nodecount = 0, position = 0, split_count = 0;
-    char number[100], string[400000];
+    char number[100], string[TREE_LENGTH];
 	int *num_fund_taxa = NULL, one_in_this = FALSE, zero_in_this = FALSE;
 	
 	num_fund_taxa = malloc(num_trees*sizeof(int));
@@ -9445,7 +9445,7 @@ int spr_new(struct taxon * master, int maxswaps, int numspectries, int numgenetr
 	int better_score = FALSE, lastinline = FALSE, numofsiblings = 0, donenextlevel = FALSE, i=0, j=0, x=0, y=0, q=0, r=0;
 	char *debugtree = NULL;
 	
-	debugtree = malloc(40000*sizeof(char));
+	debugtree = malloc(TREE_LENGTH*sizeof(char));
 	debugtree[0] = '\0';
     
 
@@ -9716,7 +9716,7 @@ int spr(struct taxon * position, int maxswaps, int numspectries, int numgenetrie
 	int better_score = FALSE, lastinline = FALSE, numofsiblings = 0, donenextlevel = FALSE, i=0, j=0;
 	char *debugtree = NULL;
 	
-	debugtree = malloc(40000*sizeof(char));
+	debugtree = malloc(TREE_LENGTH*sizeof(char));
 	debugtree[0] = '\0';
     
 		
@@ -10029,9 +10029,9 @@ int regraft(struct taxon * position, struct taxon * newbie, struct taxon * last,
 	char *best_tree = NULL, *temptree = NULL;
 
 	tmp_fund_scores = malloc(Total_fund_trees*sizeof(float));
-	best_tree = malloc(400000*sizeof(char));
+	best_tree = malloc(TREE_LENGTH*sizeof(char));
 	if(!best_tree) memory_error(72);
-	temptree = malloc(400000*sizeof(char));
+	temptree = malloc(TREE_LENGTH*sizeof(char));
 	if(!temptree) memory_error(73);
 	
 	
@@ -10674,7 +10674,7 @@ void generatetrees(void)
 	{
 	int i, j, k, ntrees = 100, error = FALSE, gen_method = 1, random = TRUE, n = 20, data = 1, tree_rand_method = 1, super = 1, print_all_scores = FALSE, saveideal = FALSE;
 	float *results = NULL;
-	char *temptree = NULL, *rand_tree = NULL, filename[100], *pruned_tree = NULL, tmp[1000], superfilename[1000], c;
+	char *temptree = NULL, *rand_tree = NULL, filename[100], *pruned_tree = NULL, tmp[TREE_LENGTH], superfilename[1000], c;
 	double min = -1, max = -1, a = 0.0, b = 1.0;
 	FILE *outfile = NULL, *superfile = NULL, *allscores = NULL, *idealfile = NULL;
 	
@@ -10838,13 +10838,13 @@ void generatetrees(void)
 		results = malloc(ntrees*sizeof(float));
 		if(!results) memory_error(96);
 		
-		temptree = malloc(400000*sizeof(char));
+		temptree = malloc(TREE_LENGTH*sizeof(char));
 		if(!temptree) memory_error(97);
 		temptree[0] = '\0';
 		
 		
 		
-		rand_tree = malloc(400000*(sizeof(char)));
+		rand_tree = malloc(TREE_LENGTH*(sizeof(char)));
 		if(!rand_tree) memory_error(98);
 		rand_tree[0] = '\0';
 		
@@ -10970,7 +10970,7 @@ void generatetrees(void)
 					}
 				else
 					{
-					pruned_tree = malloc(1000*sizeof(char));
+					pruned_tree = malloc(TREE_LENGTH*sizeof(char));
 					
 					/****** We now need to build the Supertree in memory *******/
 					if(tree_top != NULL)
@@ -11012,7 +11012,7 @@ void generatetrees(void)
 							{
 							prune_tree(tree_top, i);  /* Prune the supertree so that it has the same taxa as the fundamental tree i */
 							shrink_tree(tree_top);    /* Shrink the pruned tree by switching off any internal nodes that are not needed */
-							for(j=0; j<1000; j++) pruned_tree[j] = '\0';
+							for(j=0; j<TREE_LENGTH; j++) pruned_tree[j] = '\0';
 							pruned_tree[0] = '\0'; /* initialise the string */
 							if(print_pruned_tree(tree_top, 0, pruned_tree, FALSE) >1)
 								{
@@ -11295,7 +11295,7 @@ void draw_histogram(FILE *outfile, int bins, float *results, int num_results)
 void do_consensus(void)
 	{
 	int tree_type = 0, i, j, k, l,m, numtrees = 0, present = TRUE, number, error = FALSE, useguide = FALSE;
-	char **temptrees = NULL, c, tempname[1000], consensusfilename[1000], guidetreename[100]; 
+	char **temptrees = NULL, c, tempname[1000], consensusfilename[1000], guidetreename[1000]; 
 	float percentage = 0;
 	FILE *consensusfile = NULL, *guidetreefile = NULL;
 	
@@ -11399,7 +11399,7 @@ void do_consensus(void)
 				for(i=0; i<numtrees; i++)
 					{
 					score_of_bootstraps[i] = 1;
-					temptrees[i] = malloc(400000*sizeof(char));
+					temptrees[i] = malloc(TREE_LENGTH*sizeof(char));
 					temptrees[i][0] = '\0';
 					}
 				j=0; k=0;
@@ -11506,7 +11506,7 @@ void consensus(int num_trees, char **trees, int num_reps, float percentage, FILE
     {
     int i, j, k, q, r, same1 = FALSE, same2 = FALSE, same3 = FALSE, same4 = FALSE,same5 = FALSE,same6 = FALSE,same7 = FALSE,same8 = FALSE, l, **sets, *in, *tmpcoding = NULL, end = FALSE, found = -1;
 	/* The first thing needed is to create a Baum-Ragan coding scheme holding all the information from the bootstrapped trees */
-	char **string, *tmp = NULL, name[100], rest[400000], value[100];
+	char **string, *tmp = NULL, name[100], rest[TREE_LENGTH], value[100];
 	int count, first = -1, support = 0, **shorthand = NULL, subdivisions = ((int)(number_of_taxa/16))+1;
 	float tmpnumber = 0;
 	
@@ -11519,7 +11519,7 @@ void consensus(int num_trees, char **trees, int num_reps, float percentage, FILE
 		for(j=0; j<subdivisions; j++) shorthand[i][j] = 0;
 		}
 */		
-	tmp = malloc(400000*sizeof(char));
+	tmp = malloc(TREE_LENGTH*sizeof(char));
 	tmp[0] = '\0';
 	name[0] = '\0';
 	rest[0] = '\0';
@@ -11829,7 +11829,7 @@ void consensus(int num_trees, char **trees, int num_reps, float percentage, FILE
 		string = malloc(number_of_taxa*sizeof(char*));
 		for(i=0; i<number_of_taxa; i++)
 			{
-			string[i] = malloc(400000*sizeof(char));
+			string[i] = malloc(TREE_LENGTH*sizeof(char));
 			string[i][0] = '\0';
 			strcpy(string[i], taxa_names[i]);
 			}
@@ -12064,7 +12064,7 @@ void consensus(int num_trees, char **trees, int num_reps, float percentage, FILE
 void showtrees(void)
 	{
 	int worst = -2, best = -2,savetrees = FALSE, found = TRUE, taxachosen = 0, counter = 0, mode[5] = {TRUE, FALSE, FALSE, FALSE, FALSE}, start = 0, end = Total_fund_trees, error = FALSE, i=0, j=0, k=0, l=0, num=0, equalto = -1, greaterthan =3, lessthan = number_of_taxa, taxa_count = 0;
-	char *temptree, string_num[10], namecontains[100], **containstaxa = NULL, savedfile[100], temptree1[400000];
+	char *temptree, string_num[10], namecontains[100], **containstaxa = NULL, savedfile[100], temptree1[TREE_LENGTH];
 	FILE *showfile = NULL;
 	float bestscore =10000000, worstscore = 0, **tempscores = NULL;
 	int *tempsourcetreetag = NULL, display = TRUE, best_total = -1, total = 0;
@@ -12088,7 +12088,7 @@ void showtrees(void)
 		containstaxa[i] = malloc(1000*sizeof(char));
 		containstaxa[i][0] = '\0';
 		}
-	temptree = malloc(400000*sizeof(char));
+	temptree = malloc(TREE_LENGTH*sizeof(char));
 	temptree[0] = '\0';
 	temptree1[0] = '\0';
 	for(i=0; i<num_commands; i++)
@@ -12423,7 +12423,7 @@ void qs(float **items, int left, int right)
 void exclude(int do_all)
 	{
 	int worst = -2, best = -2,savetrees = FALSE, found = TRUE, taxachosen = 0, counter = 0, mode[5] = {FALSE, FALSE, FALSE, FALSE, FALSE}, start = 0, end = Total_fund_trees, error = FALSE, i=0, j=0, k=0, l=0, num=0, equalto = -1, greaterthan =number_of_taxa, lessthan = 3, taxa_count = 0;
-	char *temptree, string_num[10], namecontains[100], **containstaxa = NULL, savedfile[100], *command = NULL, tmp[400000];
+	char *temptree, string_num[10], namecontains[100], **containstaxa = NULL, savedfile[100], *command = NULL, tmp[TREE_LENGTH];
 	FILE *showfile = NULL, *tempfile = NULL;
 	float bestscore =10000000, worstscore = 0, **tempscores = NULL;
 	int *tempsourcetreetag = NULL, countedout =0, *temp_incidence = NULL;
@@ -12450,7 +12450,7 @@ void exclude(int do_all)
 		containstaxa[i] = malloc(1000*sizeof(char));
 		containstaxa[i][0] = '\0';
 		}
-	temptree = malloc(400000*sizeof(char));
+	temptree = malloc(TREE_LENGTH*sizeof(char));
 	temptree[0] = '\0';
 	for(i=0; i<num_commands; i++)
 		{
@@ -12504,7 +12504,7 @@ void exclude(int do_all)
 				{
 				equalto = toint(parsed_command[i+2]);
 				
-				if(equalto < 4 || equalto > number_of_taxa)
+				if(equalto > number_of_taxa)
 					{
 					error = TRUE;
 					printf("Error in size \"equalto\"\n\n");
@@ -12834,7 +12834,7 @@ void exclude(int do_all)
 
 void returntree(char *temptree)
 	{
-	char string_num[10], string[400000];
+	char string_num[10], string[TREE_LENGTH];
 	int i=0, j=0, k=0, l=0, num;
 	
 	string[0] = '\0';
@@ -12920,7 +12920,7 @@ void include(int do_all)
 		containstaxa[i] = malloc(1000*sizeof(char));
 		containstaxa[i][0] = '\0';
 		}
-	temptree = malloc(400000*sizeof(char));
+	temptree = malloc(TREE_LENGTH*sizeof(char));
 	temptree[0] = '\0';
 	for(i=0; i<num_commands; i++)
 		{
@@ -13211,7 +13211,7 @@ void include(int do_all)
 void sourcetree_dists(void)
 	{
 	int i=0, j=0, k=0, l=0, m=0, y=0, ***trees_coding = NULL, **included = NULL, *tracking = NULL, count = 0, x, total, *tree1 = NULL, *tree2 = NULL, *t1tag = NULL, *t2tag = NULL, *t1score = NULL, *t2score = NULL, same, same1, same2, same3;
-	char number[100], string[400000], RFfilename[100];
+	char number[100], string[TREE_LENGTH], RFfilename[100];
 	int p1 = 0, p2 = 0, counter = 0, remaining_taxa = 0, num_falsed = 0, error = FALSE, r = 0, **shared_taxa = NULL, output_format = 0, missing_method = 2, here = TRUE, found = TRUE;
 	float **results = NULL;
 	FILE *RFfile = NULL;
@@ -13698,14 +13698,14 @@ void sourcetree_dists(void)
 
 void exclude_taxa(int do_all)
 	{
-	char  *pruned_tree = NULL, tmp[400000], *command = NULL, tmpfilename[10000], previnputfilename[10000];
+	char  *pruned_tree = NULL, tmp[TREE_LENGTH], *command = NULL, tmpfilename[10000], previnputfilename[10000];
 	int i=0, j=0, q=0, error = FALSE, taxachosen = 0, found = FALSE, *tobeexcluded = NULL, k=0, l=0, done = FALSE, num_left = 0, min_taxa = 4;
 	FILE *tempfile = NULL;
 	
 	tmp[0] = '\0';
 	tmpfilename[0] = '\0';
 	previnputfilename[0] = '\0';
-	pruned_tree = malloc(400000*sizeof(char));
+	pruned_tree = malloc(TREE_LENGTH*sizeof(char));
 
 	tobeexcluded = malloc(number_of_taxa*sizeof(int));
 
@@ -13812,7 +13812,7 @@ void exclude_taxa(int do_all)
 					/***  prune the sourcetree of any of the taxa **/
 					prune_taxa_for_exclude(tree_top, tobeexcluded);
 					shrink_tree(tree_top);    /* Shrink the pruned tree by switching off any internal nodes that are not needed */
-					for(j=0; j<400000; j++)
+					for(j=0; j<TREE_LENGTH; j++)
 						{
 						pruned_tree[j] = '\0'; /* initialise the string */
 						tmp[j] = '\0';
@@ -13895,7 +13895,7 @@ void spr_dist(void)
 	{
 	float real_score = 0, sprscore = 0, bestreal = 0,  amountspr, previous, totalnow, bestfake = 0, *results = NULL;
 	int i=0, j=0, k=0, l=0, x=0, y=0, error = FALSE, diff, *originaldiff = NULL, numbersprs =0, nreps=100, bestnumSPR = 0, minsprs = 0, best = FALSE, now = 0, bestscore = -1, ***scores_original = NULL, **scores_changed = NULL;
-	char *pruned_tree = NULL, tmp[400000], ideal[400000], userinfile[1000], c, outputfile[1000], inputtree[400000];
+	char *pruned_tree = NULL, tmp[TREE_LENGTH], ideal[TREE_LENGTH], userinfile[1000], c, outputfile[1000], inputtree[TREE_LENGTH];
 	int starting_super = 0, randomisation = TRUE;
 	FILE *outfile = NULL, *infile = NULL;
 	
@@ -14071,7 +14071,7 @@ void spr_dist(void)
 			}
 		strcpy(inputtree, tmp);
 		/**** 3. Create ideal source trees ***/
-		pruned_tree = malloc(1000*sizeof(char));
+		pruned_tree = malloc(TREE_LENGTH*sizeof(char));
 		
 		/****** We now need to build the Supertree in memory *******/
 
@@ -14119,7 +14119,7 @@ void spr_dist(void)
 
 					prune_tree(tree_top, i);  /* Prune the supertree so that it has the same taxa as the fundamental tree i */
 					shrink_tree(tree_top);    /* Shrink the pruned tree by switching off any internal nodes that are not needed */
-					for(j=0; j<1000; j++) pruned_tree[j] = '\0';
+					for(j=0; j<TREE_LENGTH; j++) pruned_tree[j] = '\0';
 					pruned_tree[0] = '\0'; /* initialise the string */
 					if(print_pruned_tree(tree_top, 0, pruned_tree, FALSE) >1)
 						{
@@ -14310,9 +14310,12 @@ void spr_dist(void)
 int string_SPR(char * string)
 	{
 	int i=0, j=0, k=0, l=0, components = 0, random_num = 0, done = FALSE, found = FALSE, **scores_original = NULL, **scores_changed = NULL, attempts = 0;
-	char extracted[400000], *temptree = NULL, *tmp = NULL, original[400000];
+	char extracted[TREE_LENGTH], *temptree = NULL, *tmp = NULL, original[TREE_LENGTH], *string1 = NULL;
 	
-	
+	string1=malloc(TREE_LENGTH*sizeof(char));
+	string1[0] = '\0';
+	strcpy(string1, string);
+
 	scores_original = malloc(number_of_taxa*sizeof(int*));
 	scores_changed = malloc(number_of_taxa*sizeof(int*));
 	for(i=0; i<number_of_taxa; i++)
@@ -14323,22 +14326,22 @@ int string_SPR(char * string)
 			scores_original[i][j] = scores_changed[i][j] = 0;
 		}
 	
-	temptree = malloc(400000*sizeof(char));
+	temptree = malloc(TREE_LENGTH*sizeof(char));
 	temptree[0] = '\0';
-	tmp = malloc(400000*sizeof(char));
+	tmp = malloc(TREE_LENGTH*sizeof(char));
 	while(k == 0)
 		{
-		unroottree(string);
+		unroottree(string1);
 		attempts++;
 		tmp[0] = '\0';
 		extracted[0] = '\0';
 		/**** Step 1, count the number of components (internal beanches + taxa) in the tree */
 		original[0] = '\0';
-		strcpy(original, string);
+		strcpy(original, string1);
 		i=1;
-		while(string[i] != ';')
+		while(string1[i] != ';')
 			{
-			switch(string[i])
+			switch(string1[i])
 				{
 				case '(':
 					if(i!= 0)components++;
@@ -14348,7 +14351,7 @@ int string_SPR(char * string)
 				case ')':
 				case ':':
 					i++;
-					while(string[i] != ')' && string[i] != ':' && string[i] != ',' && string[i] != '(' && string[i] != ';')
+					while(string1[i] != ')' && string1[i] != ':' && string1[i] != ',' && string1[i] != '(' && string1[i] != ';')
 						i++;
 					break;
 					
@@ -14358,7 +14361,7 @@ int string_SPR(char * string)
 				
 				default:
 					components++;
-					while(string[i] != ')' && string[i] != ':' && string[i] != ',' && string[i] != '(' && string[i] != ';')
+					while(string1[i] != ')' && string1[i] != ':' && string1[i] != ',' && string1[i] != '(' && string1[i] != ';')
 						i++;
 					break;
 				}
@@ -14367,9 +14370,9 @@ int string_SPR(char * string)
 		 random_num = (int)fmod(rand(), components)+1;
 		 /**** find the component with that number **/
 		 i=1; components = 0;
-		while(string[i] != ';' && !found)
+		while(string1[i] != ';' && !found)
 			{
-			switch(string[i])
+			switch(string1[i])
 				{
 				case '(':
 					if(i!= 0)
@@ -14381,7 +14384,7 @@ int string_SPR(char * string)
 				case ')':
 				case ':':
 					i++;
-					while(string[i] != ')' && string[i] != ':' && string[i] != ',' && string[i] != '(' && string[i] != ';')
+					while(string1[i] != ')' && string1[i] != ':' && string1[i] != ',' && string1[i] != '(' && string1[i] != ';')
 						i++;
 					break;
 					
@@ -14394,7 +14397,7 @@ int string_SPR(char * string)
 					if(random_num == components) found = TRUE;
 					else
 						{
-						while(string[i] != ')' && string[i] != ':' && string[i] != ',' && string[i] != '(' && string[i] != ';')
+						while(string1[i] != ')' && string1[i] != ':' && string1[i] != ',' && string1[i] != '(' && string1[i] != ';')
 							i++;
 						}
 					break;
@@ -14402,62 +14405,62 @@ int string_SPR(char * string)
 			}
 		 /*** Now that we have the start of the component, extract it entirely */
 		j=0; k=0;
-		 if(string[i] == '(')
+		 if(string1[i] == '(')
 			{
-			if(string[i-1] == ',') 
+			if(string1[i-1] == ',') 
 				{
-				string[i-1] = '~';
+				string1[i-1] = '~';
 				done = TRUE;
 				}
-			extracted[k] = string[i];
-			string[i] = '~';
+			extracted[k] = string1[i];
+			string1[i] = '~';
 			i++; k++;
-			while(string[i] != ')' || j != 0 )
+			while(string1[i] != ')' || j != 0 )
 				{
-				if(string[i] == '(') j++;
-				if(string[i] == ')') j--;
-				extracted[k] = string[i];
-				string[i] = '~';
+				if(string1[i] == '(') j++;
+				if(string1[i] == ')') j--;
+				extracted[k] = string1[i];
+				string1[i] = '~';
 				i++; k++;
 				}
-			extracted[k] = string[i];
+			extracted[k] = string1[i];
 			k++;
-			string[i] = '~';
-			if(!done) string[i+1] = '~';
+			string1[i] = '~';
+			if(!done) string1[i+1] = '~';
 			}
 		else
 			{
-			if(string[i-1] == ',')
+			if(string1[i-1] == ',')
 				{
-				string[i-1] = '~';
+				string1[i-1] = '~';
 				done = TRUE;
 				}
-			while(string[i] != ')' && string[i] != ':' && string[i] != ',' && string[i] != '(' && string[i] != ';')
+			while(string1[i] != ')' && string1[i] != ':' && string1[i] != ',' && string1[i] != '(' && string1[i] != ';')
 				{
-				extracted[k] = string[i];
-				string[i] = '~';
+				extracted[k] = string1[i];
+				string1[i] = '~';
 				k++; i++;
 				}
-			if(!done) string[i] = '~';
+			if(!done) string1[i] = '~';
 			}
 		
 		extracted[k] = '\0';
 		/*** now delete the '~' characters from the original string */
 		k=0; l=0; i=0; j=0;
 		
-		while(string[i] != ';' && string[i] != '~')
+		while(string1[i] != ';' && string1[i] != '~')
 			i++;
 		j=i;
-		while(string[j] == '~')
+		while(string1[j] == '~')
 			j++;
 		
-		while(string[j] != ';')
+		while(string1[j] != ';')
 			{
-			string[i] = string[j];
+			string1[i] = string1[j];
 			i++;j++;
 			}
-		string[i] = ';';
-		string[i+1] = '\0';
+		string1[i] = ';';
+		string1[i+1] = '\0';
 		
 		/*** delete unwanted parts of the original tree ***/
 		
@@ -14469,7 +14472,7 @@ int string_SPR(char * string)
 			}
 		temp_top = NULL;
 		
-		tree_build(1, string, tree_top, FALSE, -1);
+		tree_build(1, string1, tree_top, FALSE, -1);
 
 		tree_top = temp_top;
 		temp_top = NULL;
@@ -14488,13 +14491,14 @@ int string_SPR(char * string)
 			}
 		strcat(temptree, ";");
 		unroottree(temptree);
-		strcpy(string, temptree);
+		strcpy(string1, temptree);
+
 		/** choose a position to put the extracted part back into */
 			/****  count the number of components (internal beanches + taxa) in the tree */
 		components = 0; i=1;
-		while(string[i] != ';')
+		while(string1[i] != ';')
 			{
-			switch(string[i])
+			switch(string1[i])
 				{
 				case '(':
 					if(i!= 0)components++;
@@ -14504,7 +14508,7 @@ int string_SPR(char * string)
 				case ')':
 				case ':':
 					i++;
-					while(string[i] != ')' && string[i] != ':' && string[i] != ',' && string[i] != '(' && string[i] != ';')
+					while(string1[i] != ')' && string1[i] != ':' && string1[i] != ',' && string1[i] != '(' && string1[i] != ';')
 						i++;
 					break;
 					
@@ -14514,7 +14518,7 @@ int string_SPR(char * string)
 				
 				default:
 					components++;
-					while(string[i] != ')' && string[i] != ':' && string[i] != ',' && string[i] != '(' && string[i] != ';')
+					while(string1[i] != ')' && string1[i] != ':' && string1[i] != ',' && string1[i] != '(' && string1[i] != ';')
 						i++;
 					break;
 				}
@@ -14523,9 +14527,9 @@ int string_SPR(char * string)
 		 random_num = (int)fmod(rand(), components)+1;
 		 /**** find the component with that number **/
 		 i=1; components = 0; found = FALSE;
-		while(string[i] != ';' && !found)
+		while(string1[i] != ';' && !found)
 			{
-			switch(string[i])
+			switch(string1[i])
 				{
 				case '(':
 					if(i!= 0)
@@ -14537,7 +14541,7 @@ int string_SPR(char * string)
 				case ')':
 				case ':':
 					i++;
-					while(string[i] != ')' && string[i] != ':' && string[i] != ',' && string[i] != '(' && string[i] != ';')
+					while(string1[i] != ')' && string1[i] != ':' && string1[i] != ',' && string1[i] != '(' && string1[i] != ';')
 						i++;
 					break;
 					
@@ -14550,7 +14554,7 @@ int string_SPR(char * string)
 					if(random_num == components) found = TRUE;
 					else
 						{
-						while(string[i] != ')' && string[i] != ':' && string[i] != ',' && string[i] != '(' && string[i] != ';')
+						while(string1[i] != ')' && string1[i] != ':' && string1[i] != ',' && string1[i] != '(' && string1[i] != ';')
 							i++;
 						}
 					break;
@@ -14559,49 +14563,51 @@ int string_SPR(char * string)
 		/** i is now pointing at the position in which we need to place the extracted subtree back into ***/
 		/** We will do this by making the extracted part a sister group of the component */
 		
-		if(string[i] == '(')
+		if(string1[i] == '(')
 			{
 			/*** find the end of this component **/
 			k=i; l=0;
 			k++;
-			while(string[k] != ')' || l != 0)
+			while(string1[k] != ')' || l != 0)
 				{
-				if(string[k] == '(') l++;
-				if(string[k] == ')') l--;
+				if(string1[k] == '(') l++;
+				if(string1[k] == ')') l--;
 				k++;
 				}
 			}
 		else
 			{
 			k=i+1;
-			while(string[k] != '(' && string[k] != ')' && string[k] != ',' && string[k] != ';')
+			while(string1[k] != '(' && string1[k] != ')' && string1[k] != ',' && string1[k] != ';')
 				k++;
 			k--;
 			}
-			
+		
+	
 		/* k now has the position of the end of this component */
 		/* put the close bracket in after the component */
-		l = strlen(string);
-		for(j=strlen(string)+1; j>k; j--)
-			string[j] = string[j-1];
-		string[k+1] = ')';
-		string[l+1] = '\0';
+		l = strlen(string1);
+		for(j=strlen(string1)+1; j>k; j--)
+			string1[j] = string1[j-1];
+		string1[k+1] = ')';
+		string1[l+1] = '\0';
+		
 		/* now put the extracted part before the component */
 		strcpy(tmp, "(");
 		strcat(tmp, extracted);
 		strcat(tmp, ",");
 		strcpy(extracted, tmp);
-		l = strlen(extracted)+strlen(string);
-		for(j=l; j>=i; j--)
-			string[j] = string[j-strlen(extracted)];
-		
+		l = strlen(extracted)+strlen(string1);
+		for(j=l; j>=i; j--) {
+			string1[j] = string1[j-strlen(extracted)];
+			}
 		for(j=0; j<strlen(extracted); j++)
-			string[i+j] = extracted[j];
+			string1[i+j] = extracted[j];
 			
-		string[l+1] = '\0';
+		string1[l+1] = '\0';
 		
 		
-		
+		strcpy(string, string1);
 		/*** lastly check to make sure that the new tree is actually different to the original tree */
 		pathmetric(original, scores_original);
 		pathmetric(string, scores_changed);
@@ -14628,6 +14634,7 @@ int string_SPR(char * string)
 	free(scores_changed);
 	free(temptree);
 	free(tmp);
+	free(string1);
 	
 	
 	return(attempts);
@@ -14640,7 +14647,7 @@ int string_SPR(char * string)
 void exhaustive_SPR(char * string)
 	{
 	int i, j, k, l, x, y, q, r=-1, labelonly = FALSE, exnum, components =0, pruned_components =0, num, *component_index = NULL, *pruned_component_index = NULL, **scores_original = NULL, **scores_changed = NULL;
-	char labeledtree[400000], taxaname[100], tmp_labeledtree[400000], filename[100], filename1[100], pasted_name[10000], cut_name[100], extractedpart[400000], tmp_tree[400000], pruned_tree[400000], tmp[400000];
+	char labeledtree[TREE_LENGTH], taxaname[100], tmp_labeledtree[TREE_LENGTH], filename[100], filename1[100], pasted_name[10000], cut_name[100], extractedpart[TREE_LENGTH], tmp_tree[TREE_LENGTH], pruned_tree[TREE_LENGTH], tmp[TREE_LENGTH];
 	FILE *sproutfile = NULL, *sprdescriptor = NULL, *labeledtreefile = NULL;
 	
 	 for(i=0; i<num_commands; i++)
@@ -15013,7 +15020,7 @@ void neighbor_joining(int brlens, char *tree, int names)
 	{
 	int num_nodes = number_of_taxa, *deleted = NULL, i, j, smallest_i = -1, smallest_j = -1;
 	float *transformed = NULL, smallest = 0, vi, vj, vtmp;
-	char **tree_structure = NULL, string[400000], tmp[400000], c;
+	char **tree_structure = NULL, string[TREE_LENGTH], tmp[TREE_LENGTH], c;
 	
 
 	string[0] = '\0'; tmp[0] = '\0';
@@ -15033,7 +15040,7 @@ void neighbor_joining(int brlens, char *tree, int names)
 	if(!tree_structure) memory_error(101);
 	for(i=0; i<number_of_taxa; i++)
 		{
-		tree_structure[i] = malloc(400000*sizeof(char));
+		tree_structure[i] = malloc(TREE_LENGTH*sizeof(char));
 		if(!tree_structure[i]) memory_error(102);
 		tree_structure[i][0] = '\0';
 		if(names)strcpy(tree_structure[i], taxa_names[i]);
@@ -15202,7 +15209,7 @@ void nj(void)
 		{
 		fakefilename = malloc(100*sizeof(char));
 		fakefilename[0] = '\0';
-		tree = malloc(400000*sizeof(char));
+		tree = malloc(TREE_LENGTH*sizeof(char));
 		printf("\n\nNeighbor-joining settings:\n\tDistance matrix generation by average consensus method\n\tEstimation of missing data using ");
 		if(missing_method == 1)
 			printf("4 point condition distances\n");
@@ -15235,7 +15242,7 @@ void reroot_tree(struct taxon *outgroup)
 	{
 	struct taxon *newbie = NULL, *temp_treetop = NULL, *position = NULL, *temp = NULL, *start = NULL, *parent_start = NULL, *next = NULL, *parent = NULL, *pointer = NULL;
 	char *temptree = NULL;
-	temptree = malloc(400000*sizeof(char));
+	temptree = malloc(TREE_LENGTH*sizeof(char));
 	temptree[0] = '\0';
 	newbie = make_taxon();
 	temp_treetop = newbie;
@@ -15630,7 +15637,7 @@ float tree_map(struct taxon * gene_top, struct taxon * species_top, int print)
 	int xnum =0, *presence = NULL, i, j, num_dups = 0, num_losses = 0, best = 0;
 	char *temptree = NULL, reconfilename[100], *treetmp = NULL;
 
-	treetmp = malloc(100000*sizeof(int));
+	treetmp = malloc(TREE_LENGTH*sizeof(int));
 	treetmp[0] = '\0';
 	
 	presence = malloc(2*number_of_taxa*sizeof(int));
@@ -16571,8 +16578,8 @@ void mapunknowns()
 	struct taxon *position = NULL, *species_tree = NULL, *gene_tree = NULL, *best_mapping = NULL, *unknown_fund = NULL, *pos = NULL,*copy = NULL;
 	int i, j, k, l,  *presence = NULL, basescore = 1;
 	float *overall_placements = NULL, biggest = -1, total, best_total = -1;
-	char *temptree, temptree1[400000];
-	temptree = malloc(400000*sizeof(char));
+	char *temptree, temptree1[TREE_LENGTH];
+	temptree = malloc(TREE_LENGTH*sizeof(char));
 	temptree[0] = '\0';
 	temptree1[0] = '\0';
 
@@ -16752,9 +16759,9 @@ float get_recon_score(char *giventree, int numspectries, int numgenetries)
 	struct taxon *position = NULL, *species_tree = NULL, *gene_tree = NULL, *best_mapping = NULL, *copy = NULL, *temp_top1 = NULL, *temp_top2 = NULL, *spec_copy = NULL;
 	int i, j, k, l, m, q, r, spec_start=0, spec_end, gene_start, gene_end, num_species_internal = 0, error = FALSE, num_species_roots = 0, basescore = 1, rand1=0, rand2=0, dospecrand = 1, dogenerand=1;
 	float *overall_placements = NULL, biggest = -1, total, best_total = -1, sum_of_totals = 0, rooting_score = -1;
-	char *temptree, temptree1[400000];
+	char *temptree, temptree1[TREE_LENGTH];
 
-	temptree = malloc(400000*sizeof(char));
+	temptree = malloc(TREE_LENGTH*sizeof(char));
 	temptree[0] = '\0';
 	temptree1[0] = '\0';
 
@@ -17023,7 +17030,7 @@ struct taxon * do_resolve_tricotomies(struct taxon * gene_tree, struct taxon * s
 	char *temper=NULL;
 	struct taxon * teeemp = NULL;
 	
-	temper = malloc(400000*sizeof(int));
+	temper = malloc(TREE_LENGTH*sizeof(int));
 	temper[0] = '\0';
 	
 	scores = malloc((2*number_of_taxa)*sizeof(int *));
@@ -17143,16 +17150,16 @@ void reconstruct(int print_settings)
 	struct taxon *position = NULL, *species_tree = NULL, *gene_tree = NULL, *best_mapping = NULL, *unknown_fund = NULL, *pos = NULL, *copy = NULL, *newbie = NULL;
 	int i, j, k, l, xnum=0, *presence = NULL, **label_results = NULL, num_species_internal = 0, error = FALSE, printfiles = TRUE, how_many = 0, diff_overall =0, dorecon = FALSE, basescore = 1;
 	float *overall_placements = NULL, biggest = -1, total, best_total = -1;
-	char *temptree, temptree1[400000], reconfilename[100], otherfilename[100], *tmp1 = NULL, c = '\0';
+	char *temptree, temptree1[TREE_LENGTH], reconfilename[100], otherfilename[100], *tmp1 = NULL, c = '\0';
 	FILE *reconstructionfile = NULL, *descendentsfile = NULL, *genebirthfile = NULL;
 	
-	temptree = malloc(400000*sizeof(char));
+	temptree = malloc(TREE_LENGTH*sizeof(char));
 	temptree[0] = '\0';
 	temptree1[0] = '\0';
 	reconfilename[0] ='\0';
 	otherfilename[0] = '\0';
 	
-	tmp1 = malloc(100000*sizeof(char));
+	tmp1 = malloc(TREE_LENGTH*sizeof(char));
 	tmp1[0] = '\0';
 	count_now = TRUE;
 
@@ -17555,11 +17562,11 @@ void hgt_reconstruction()
 	struct taxon *position = NULL, *species_tree = NULL, *gene_tree = NULL, *best_mapping = NULL, *best_mapping1 = NULL, *best_mapping2 = NULL, *unknown_fund = NULL, *posit = NULL,*copy = NULL, *copy1 = NULL, **parts = NULL, *test_part = NULL, *pos = NULL, *best_donor = NULL, *best_HGT = NULL, *attached = NULL;
 	int i, j, k, l,  *presence = NULL,*presence1 = NULL, *presence2 = NULL, hgt_receipient1, hgt_receipient2, **overall_presence = NULL, *overall_reconstruction = NULL, *overall_receptor = NULL, receptor, **tmp_presence1 = NULL, **tmp_presence2 = NULL, *before1 = NULL, *before2 = NULL, *after1 = NULL, *after2 = NULL, *temporary = NULL;
 	float *overall_placements = NULL, biggest = -1,  total, best_total = -1,  best_total1 = -1, best_total2 = -1, HGT1 = 0, HGT2 = 0, original = 0, best_HGT_recon = -1, best_reconstruction = -1, sum, HGT_score = -1, donor_score = -1, tmp_allow = FALSE;
-	char *temptree = NULL, temptree1[400000];
+	char *temptree = NULL, temptree1[TREE_LENGTH];
 	int **species_allowed = NULL, **dependent_species_allowed = NULL, *previous = NULL, xnum =0, x, y, z, partA, partB, q, r, s, allow_HGT1 = TRUE, allow_HGT2 = TRUE, numparts = 1,  place_marker = 1, found_better = FALSE, error = FALSE; 
 	int basescore = 1; /** see reconstrution command **/
 	
-	temptree = malloc(400000*sizeof(char));
+	temptree = malloc(TREE_LENGTH*sizeof(char));
 	temptree[0] = '\0';
 	temptree1[0] = '\0';
 	
@@ -18562,7 +18569,7 @@ void assign_ances_desc(struct taxon *position, int ** allowed_species, int * pre
 
 
 
-/* function for Konrand to automatically collapse clades that have an average branch length of less than X (user defined), it is to leave one randomly chosen taxa to represent the clade. */
+/* function for Konrad to automatically collapse clades that have an average branch length of less than X (user defined), it is to leave one randomly chosen taxa to represent the clade. */
 
 void random_prune(char *fund_tree)
 	{
@@ -18674,7 +18681,7 @@ float return_length(char *string)
 	{
 	int i=0, j=0;
 	float length = 0;
-	char flt_length[100];
+	char flt_length[TREE_LENGTH];
 	
 	while(i < strlen(string) && string[i] != ':' ) i++;
 	
@@ -18946,9 +18953,9 @@ void prune_monophylies(void)
     filename2[0]='\0';
     strcpy(filename2, "prunedtrees.txt");
     
-    tmp = malloc(10000000*sizeof(char));
+    tmp = malloc(TREE_LENGTH*sizeof(char));
     tmp[0] = '\0';
-    pruned_tree = malloc(10000000*sizeof(char));
+    pruned_tree = malloc(TREE_LENGTH*sizeof(char));
     pruned_tree[0] = '\0';
 
     for(i=0; i<num_commands; i++)
