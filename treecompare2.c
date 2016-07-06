@@ -399,7 +399,7 @@ int main(int argc, char *argv[])
                     if(num_commands > 1)
                         {
                         execute_command(parsed_command[1], TRUE);
-			
+							
 						/* test fulltaxaname allocations */
 						/*for(l=0; l<Total_fund_trees; l++)
 							{
@@ -2482,7 +2482,7 @@ int nexusparser(FILE *nexusfile)
 
 void input_file_summary(int do_all)
     {
-    int i=0, j=0, k=0, l=0, limit, previous_limit, limit_reached;
+    int i=0, j=0, k=0, l=0, limit, previous_limit, limit_reached, singlecopy=0;
     float *size_of_trees = NULL;
 	
 	size_of_trees = malloc((Total_fund_trees-num_excluded_trees)*sizeof(float));
@@ -2574,6 +2574,20 @@ void input_file_summary(int do_all)
 	draw_histogram(NULL, (largest_tree-smallest_tree)+1, size_of_trees, Total_fund_trees-num_excluded_trees);
 	
 	
+	for(l=0; l<Total_fund_trees; l++)
+		{
+		i=0;
+		for(k=0; k<number_of_taxa; k++)
+			{
+			/* count how many taxa are present more than once in each tree */
+			if(presence_of_taxa[l][k] > 1) i++;
+			}
+		if(i==0) singlecopy++;
+		}	
+
+	printf("\tNumber of single copy trees:\t%d\n", singlecopy);
+	printf("\tnumber of multicopy trees:\t%d\n", Total_fund_trees-singlecopy);
+
     printf("\t----------------------------------------------------\n");
 	
 	free(size_of_trees);
