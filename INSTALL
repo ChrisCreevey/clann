@@ -13,5 +13,5 @@ the use of "make install" may not work depending on write privileges
 "-bash: ./configure: Permission denied"
 # then do the following command: 
 "chmod +x configure"
-and then continue unto:
+and then continue on to:
 "make"
