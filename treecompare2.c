@@ -237,6 +237,7 @@ void identify_species_specific_clades(struct taxon * position);
 void prune_monophylies();
 void untag_nodes_below(struct  taxon * position);
 void untag_nodes_above(struct  taxon * position);
+void tips(int num);
 
 
 int spr_new(struct taxon * master, int maxswaps, int numspectries, int numgenetries);
@@ -269,7 +270,7 @@ int malloc_check =0, count_now = FALSE, another_check =0;
 int main(int argc, char *argv[])
     {
 	
-    int i = 0, j=0, k=0, l=0, m=0, error=FALSE, x, doexecute_command = FALSE, command_line = FALSE;
+    int i = 0, j=0, k=0, l=0, m=0, error=FALSE, x, doexecute_command = FALSE, command_line = FALSE, tipnum=0;
     char *command = NULL, HOME[1000], PATH[1000], exefilename[1000];
     time_t time1, time2;
     double diff=0;    
@@ -335,7 +336,7 @@ int main(int argc, char *argv[])
     if(!stored_commands) memory_error(62);
     for(i=0; i<100; i++)
         {
-        stored_commands[i] = malloc(1000*sizeof(char));
+        stored_commands[i] = malloc(10000*sizeof(char));
         if(!stored_commands[i]) memory_error(63);
         stored_commands[i][0] = '\0';
         }
@@ -357,16 +358,16 @@ int main(int argc, char *argv[])
     
     /* assign the parsed_command array */
     
-    parsed_command = malloc(1000*sizeof(char *));
+    parsed_command = malloc(10000*sizeof(char *));
     for(i=0; i<1000; i++)
         {
-        parsed_command[i] = malloc(1000*sizeof(char));
+        parsed_command[i] = malloc(10000*sizeof(char));
         parsed_command[i][0] = '\0';
         }
 
     printf("\n\n\n\n\n\t******************************************************************");
     printf("\n\t*                                                                *");
-    printf("\n\t*                          Clann  v4.0                           *");
+    printf("\n\t*                          Clann  v4.1.2                         *");
     printf("\n\t*                                                                *");
     printf("\n\t*                 web: http://www.creeveylab.org                 *");
     printf("\n\t*                 email: chris.creevey@gmail.com                 *");
@@ -849,8 +850,24 @@ int main(int argc, char *argv[])
                                                                                                                                     printf("Error: You need to load source trees before using this command\n"); 
                                                                                                                                 }
                                                                                                                             }
-                                                                                                                        else   
-																														  printf("Error: command not known.\n\tType help at the prompt to get a list of available commands.\n");
+                                                                                                                        else
+                                                                                                                        	{
+                                                                                                                        	if(strcmp(parsed_command[0], "tips") == 0)
+                                                                                                                            	{                                     
+                                                                                                                            	if(num_commands == 2 && parsed_command[1][0] == '?')
+	                                                                                                                                print_commands(26);
+	                                                                                                                            else
+	                                                                                                                            	{
+	                                                                                                                            	if(num_commands == 2 && (tipnum = atoi(parsed_command[1])) > 0 && tipnum < 11)	
+	                                                                                                                                	tips(tipnum-1);
+	                                                                                                                            	else
+	                                                                                                                            		tips((int)fmod(rand(), 10));
+	                                                                                                                            	}
+	                                                                                                                        	}
+	                                                                                                                        else
+	                                                                                                                        	printf("Error: command not known.\n\tType help at the prompt to get a list of available commands.\n");
+	                                                                                                                        }  
+
                                                                                                                         }
 																													}
 																												}
@@ -1041,6 +1058,7 @@ void print_commands(int num)
         printf("\trfdists\t\t- Calculate Robinson-Foulds distances between all source trees\n");
         printf("\tgeneratetrees\t- Generate random supertrees & assess  against source trees in memory\n");
         printf("\tyaptp\t\t- \"Yet another permutation-tail-probability\" test - performs a randomisation test\n");
+        printf("\ttips\t\t- Show tips and hints for better use of Clann\n");
 
 
 
@@ -1051,6 +1069,8 @@ void print_commands(int num)
 
         printf("\n\n\nType a command followed by '?' to get information on the options available i.e.: \"exe ?\"\n");
         printf("Full descriptions of the commands are available in the manual\n\n\n");
+
+
         }
    
         
@@ -1389,6 +1409,13 @@ void print_commands(int num)
         printf("\t===========================================================\n");
         printf("\n\tfilename\t<output file name>\t\t*prunedtrees.txt");
         printf("\n\tselection\trandom | length\t\t\t*random\n\n\tIf \"length\" is chosen, then name MUST have a number directly following the name of the species\n\t representing the sequence length. i.e.: \"Speces.length.XXXXXX\n\n" );
+        }
+    if(num == 26)
+        {
+        printf("\ntips \t\n\n");
+        printf("\tOptions\t\tSettings\t\t\tCurrent\n");
+        printf("\t===========================================================\n");
+        printf("\n\tnumber\t<value between 1 and 10>\t\trandom");
         }
 
 		
@@ -19196,4 +19223,68 @@ void untag_nodes_above(struct  taxon * position)
         }
     
     }
+
+
+void tips(int num)
+	{
+	switch(num)
+		{
+		case(0):
+			printf("\n\t1. Clann can be used to transform nexus formatted tree files into newick formatted files.\n\tThis is done by executing the nexus file as normal and then using the command: \"showtrees savetrees=yes\"\n\tIt is also possible to set the name of the file to which the trees are saved, and to stop clann from displaying a graphical representation of each source tree while this is done\n\n");
+			break;
 		
+		case(1):
+			printf("\n\t2. Clann can be told only to read the first few characters of each taxa name whenreading the source trees into memory\n\tThis is useful when it is necessary to have unique identifiers (for instance gene IDs) on the source trees\n\tThe option \'maxnamelen\' in the \"exe\" command sets this value\n\tIf the names are not fixed widths, the option \'maxnamelen=delimited\' tells Clann to look for the fist dot \".\" which will specifying the end of the taxon ID in the trees\n\n\t\tFor instance using \"exe maxnamelen=delimited\" on the following tree:\n\t\t(apple.00121,(orange.1435,lemon.3421),pear.1032);\n\t\tResults in clann ignoring the numbers after the dots in the taxa names\n");
+			break;
+
+		case(2):
+			printf("\n\t3. The equals sign (=), hyphen (-) and space ( ) are special characters in Clann and by default cannot be used in filenames to be read by clann\n\tIf a filename contain some of these characters Clann can only read the name of the file properly by putting the name in inverted commas.\n\t\tFor example: exe \"my-file.txt\"\n");
+			break;
+
+		case(3):
+			printf("\n\t4. The first command that you should run if you don’t know what to do is \"help\".\n\tThis will display the list of the commands that are available.\n\tCalling any of the commands followed by a question mark (for instance \"hs ?\"), will display the options and defaults associated with that command\n");
+			break;
+		
+		case(4):
+			printf("\n\t5. The command \"!\" runs a shell terminal on Unix and Mac operating systems allowing system commands can be run without having to quit Clann\n");
+			break;
+
+		case(5):
+			printf("\n\t6. Clann can assess supertrees created using other programs\n\tUsing the \"usertrees\" command, clann will read in the file specified and assess all the trees it contains\n\tThe best supertree found in the file is displayed along with its score\n");
+			break;
+
+		case(6):
+			printf("\n\t7. All commands in Clann should be written completely in lowercase, typing the command \"boot\" is not the same as \"Boot\" and only the first will be recognised as a valid command\n");
+			break;
+
+		case(7):
+			printf("\n\t8. Heuristic and exhaustive searches of supertree space can be interrupted using the key combination \"control-c\"\n\tThis dispays the score if the best tree found so far and give the user the option to stop the search now or continue.\n\tIf this is done during the random sampling phase of a heuristic search, it will allow the user to move straight to the heuristic search without completing the random sampling\n");
+			break;
+
+		case(8):
+			printf("\n\t9. Users can assess different configurations of their data by excluding (or including) certain source trees from subsequent commands using the \"excludetrees\" and \"includetrees\" commands\n\tSource trees can be selected based on their name,the taxa they contain, their size (number of taxa they contain) or their score when compared to a supertree\n");
+			break;
+
+		case(9):
+			printf("\n\t10. Individual (or multiple) taxa can be pruned from the source trees using the command \"deletetaxa\"\n\tBranch lengths are adjusted to take the deletion of thetaxa into account\n\tIf the deletion of taxa from a source tree means that there are less than 4 taxa remaining, that source tree is removed from the analysis\n\tClann will display the names of the source trees removed if this occurs\n");
+			break;
+
+		default:
+			printf("\n\t1. Clann can be used to transform nexus formatted tree files into newick formatted files.\n\tThis is done by executing the nexus file as normal and then using the command: \"showtrees savetrees=yes\"\n\tIt is also possible to set the name of the file to which the trees are saved, and to stop clann from displaying a graphical representation of each source tree while this is done\n\n");
+			printf("\n\t2. Clann can be told only to read the first few characters of each taxa name whenreading the source trees into memory\n\tThis is useful when it is necessary to have unique identifiers (for instance gene IDs) on the source trees\n\tThe option \'maxnamelen\' in the \"exe\" command sets this value\n\tIf the names are not fixed widths, the option \'maxnamelen=delimited\' tells Clann to look for the fist dot \".\" which will specifying the end of the taxon ID in the trees\n\n\t\tFor instance using \"exe maxnamelen=delimited\" on the following tree:\n\t\t(apple.00121,(orange.1435,lemon.3421),pear.1032);\n\t\tResults in clann ignoring the numbers after the dots in the taxa names\n");
+			printf("\n\t3. The equals sign (=), hyphen (-) and space ( ) are special characters in Clann and by default cannot be used in filenames to be read by clann\n\tIf a filename contain some of these characters Clann can only read the name of the file properly by putting the name in inverted commas.\n\t\tFor example: exe \"my-file.txt\"\n");
+			printf("\n\t4. The first command that you should run if you don’t know what to do is \"help\".\n\tThis will display the list of the commands that are available.\n\tCalling any of the commands followed by a question mark (for instance \"hs ?\"), will display the options and defaults associated with that command\n");
+			printf("\n\t5. The command \"!\" runs a shell terminal on Unix and Mac operating systems allowing system commands can be run without having to quit Clann\n");
+			printf("\n\t6. Clann can assess supertrees created using other programs\n\tUsing the \"usertrees\" command, clann will read in the file specified and assess all the trees it contains\n\tThe best supertree found in the file is displayed along with its score\n");
+			printf("\n\t7. All commands in Clann should be written completely in lowercase, typing the command \"boot\" is not the same as \"Boot\" and only the first will be recognised as a valid command\n");
+			printf("\n\t8. Heuristic and exhaustive searches of supertree space can be interrupted using the key combination \"control-c\"\n\tThis dispays the score if the best tree found so far and give the user the option to stop the search now or continue.\n\tIf this is done during the random sampling phase of a heuristic search, it will allow the user to move straight to the heuristic search without completing the random sampling\n");
+			printf("\n\t9. Users can assess different configurations of their data by excluding (or including) certain source trees from subsequent commands using the \"excludetrees\" and \"includetrees\" commands\n\tSource trees can be selected based on their name,the taxa they contain, their size (number of taxa they contain) or their score when compared to a supertree\n");
+			printf("\n\t10. Individual (or multiple) taxa can be pruned from the source trees using the command \"deletetaxa\"\n\tBranch lengths are adjusted to take the deletion of thetaxa into account\n\tIf the deletion of taxa from a source tree means that there are less than 4 taxa remaining, that source tree is removed from the analysis\n\tClann will display the names of the source trees removed if this occurs\n");
+			break;
+
+		}
+
+	}
+
+
+
