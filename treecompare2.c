@@ -578,7 +578,7 @@ int main(int argc, char *argv[])
                                                     }
                                                 else
                                                     {
-                                                    if(strcmp(parsed_command[0], "excludetrees") == 0)
+                                                    if(strcmp(parsed_command[0], "deletetrees") == 0)
                                                         {
                                                         if(num_commands == 2 && parsed_command[1][0] == '?')
                                                             print_commands(17);
@@ -592,7 +592,7 @@ int main(int argc, char *argv[])
 														}
                                                     else
                                                         {
-                                                        if(strcmp(parsed_command[0], "includetrees") == 0)
+                                                        if(strcmp(parsed_command[0], "1includetrees") == 0)
                                                             {
                                                             if(num_commands == 2 && parsed_command[1][0] == '?')
                                                                 print_commands(18);
@@ -1050,9 +1050,9 @@ void print_commands(int num)
 
         printf("\nSource tree selection and modification:\n");
         printf("\tshowtrees\t- Visualise selected source trees in ASCII format (also can save selected trees to file)\n");
-        printf("\texcludetrees\t- Specify trees to exclude from the analysis (based on a variety of criteria)\n");
-        printf("\tincludetrees\t- Specify trees for inclusion in the analysis (based on a variety of criteria)\n");
-        printf("\tdeletetaxa\t- Delete taxa from all source trees in memory (i.e. prune from the trees)\n");
+       printf("\tdeletetrees\t- Specify source trees to delete from memory (based on a variety of criteria)\n"); 
+      /*  printf("\tincludetrees\t- Specify trees for inclusion in the analysis (based on a variety of criteria)\n"); */ /* we are excluding the include command because it is problematic*/
+        printf("\tdeletetaxa\t- Specify taxa to delete from all source trees in memory (i.e. prune from the trees while preserving branch lengths)\n");
 
         printf("\nMiscellaneous calculations:\n");
         printf("\trfdists\t\t- Calculate Robinson-Foulds distances between all source trees\n");
@@ -1344,11 +1344,11 @@ void print_commands(int num)
 
 	 if(num == 17)
 		{
-		printf("\nexlcudetrees\trange | size | namecontains | containstaxa | score \n\n");
+		printf("\tdeletetrees\trange | size | namecontains | containstaxa | score \n\n");
 		printf("\tOptions\t\tSettings\t\t\tCurrent\n");
         printf("\t===========================================================\n");
 		
-		printf("\n\trange\t\t<integer value> - <integer value> \t*all\n\tsize\t\tequalto <integer value>\n\t\t\tlessthan <integer value>\n\t\t\tgreaterthan <integer value>\t\t*none\n\tnamecontains\t<character string>\t\t\t*none\n\tcontainstaxa\t<character string>\t\t\t*none\n\tscore\t\t<min score> - <max score>\t\t*none\n");
+		printf("\n\tsinglecopy\tN/A\n\tmulticopy\tN/A\n\trange\t\t<integer value> - <integer value> \t*all\n\tsize\t\tequalto <integer value>\n\t\t\tlessthan <integer value>\n\t\t\tgreaterthan <integer value>\t\t*none\n\tnamecontains\t<character string>\t\t\t*none\n\tcontainstaxa\t<character string>\t\t\t*none\n\tscore\t\t<min score> - <max score>\t\t*none\n");
 		}
 
 	 if(num == 18)
@@ -12463,7 +12463,7 @@ void qs(float **items, int left, int right)
 
 void exclude(int do_all)
 	{
-	int worst = -2, best = -2,savetrees = FALSE, found = TRUE, taxachosen = 0, counter = 0, mode[5] = {FALSE, FALSE, FALSE, FALSE, FALSE}, start = 0, end = Total_fund_trees, error = FALSE, i=0, j=0, k=0, l=0, num=0, equalto = -1, greaterthan =number_of_taxa, lessthan = 3, taxa_count = 0;
+	int worst = -2, best = -2,savetrees = FALSE, found = TRUE, taxachosen = 0, counter = 0, mode[10] = {FALSE, FALSE, FALSE, FALSE, FALSE, FALSE, FALSE, FALSE, FALSE, FALSE}, start = 0, end = Total_fund_trees, error = FALSE, i=0, j=0, k=0, l=0, num=0, equalto = -1, greaterthan =number_of_taxa, lessthan = 3, taxa_count = 0;
 	char *temptree, string_num[10], namecontains[100], **containstaxa = NULL, savedfile[100], *command = NULL, tmp[TREE_LENGTH];
 	FILE *showfile = NULL, *tempfile = NULL;
 	float bestscore =10000000, worstscore = 0, **tempscores = NULL;
@@ -12495,6 +12495,14 @@ void exclude(int do_all)
 	temptree[0] = '\0';
 	for(i=0; i<num_commands; i++)
 		{
+		if(strcmp(parsed_command[i], "singlecopy") == 0)
+			{
+			mode[5] = TRUE;
+			}	
+		if(strcmp(parsed_command[i], "multicopy") == 0)
+			{
+			mode[6] = TRUE;
+			}
 		if(strcmp(parsed_command[i], "range") == 0)
 			{
 			mode[0] = TRUE;
@@ -12595,6 +12603,17 @@ void exclude(int do_all)
 			error = TRUE;
 			}
 		}
+	if(mode[4])
+		{
+		if(trees_in_memory == 0)
+			{
+			printf("Error: There are no saved supertrees in memory from which to calculate scores\n");
+			error = TRUE;
+			}
+		}
+
+
+
 			
 	if(!error)
 		{
@@ -12714,9 +12733,24 @@ void exclude(int do_all)
 					}
 				}
 			}
+		if(mode[5] || mode[6])
+			{
+			for(l=0; l<Total_fund_trees; l++)
+				{
+				i=0;
+				for(k=0; k<number_of_taxa; k++)
+					{
+					/* count how many taxa are present more than once in each tree */
+					if(presence_of_taxa[l][k] > 1) i++;
+					}
+				if(mode[5] && i==0) tempsourcetreetag[l] = FALSE; /*exlude the singlecopy*/
+				if(mode[6] && i!=0) tempsourcetreetag[l] = FALSE; /*exlude the multicopy*/	
+				}	
+			}
 
 
-		if(mode[0] || mode[1] || mode[2] || mode[3] || mode[4])
+
+		if(mode[0] || mode[1] || mode[2] || mode[3] || mode[4] || mode[5] || mode[6])
 			{
 			for(i=0; i<number_of_taxa; i++) temp_incidence[i] = 0;
 			for(i=0; i<Total_fund_trees; i++)
@@ -12747,9 +12781,10 @@ void exclude(int do_all)
 				{
 				if(temp_incidence[i] == 0) l++;
 				}
+			l=1;
 			if(l> 0)
 				{
-				printf("\nWarning: %d Taxa are no longer represented in the included source trees\nThese taxa are as follows:\n", l);
+				/*printf("\nWarning: %d Taxa are no longer represented in the included source trees\nThese taxa are as follows:\n", l);
 				for(i=0; i<number_of_taxa; i++)
 					{
 					if(temp_incidence[i] == 0)
@@ -12760,7 +12795,7 @@ void exclude(int do_all)
 				xgets(command);
 				if(strcmp(command, "y") == 0 || strcmp(command, "Y") == 0 || strcmp(command, "yes") == 0 || strcmp(command, "Yes") == 0)
 					{
-					tempfile = fopen("tempclannfile164.chr", "w");
+				*/	tempfile = fopen("tempclannfile164.chr", "w");
 					tmp[0] = '\0';
 					countedout = 0;
 					for(i=0; i<Total_fund_trees; i++)
@@ -12794,12 +12829,12 @@ void exclude(int do_all)
 						}
 					execute_command("tempclannfile164.chr", do_all);
 					remove("tempclannfile164.chr");
-					}
+				/*	}
 				else
 					{
 					printf("\nAction aborted\n");
 					error = TRUE;
-					}
+					} */
 				}
 			else
 				{
@@ -12818,7 +12853,7 @@ void exclude(int do_all)
 					if(sourcetreetag[i])
 						countedout++;
 					}
-				num_excluded_trees +=counter;
+				/*num_excluded_trees +=counter; */
 				
 				for(i=0; i<number_of_taxa; i++)
 					{
@@ -13199,7 +13234,7 @@ void include(int do_all)
 			if(sourcetreetag[i])
 				countedout++;
 			}
-		num_excluded_trees -=counter;
+		/*num_excluded_trees -=counter; */
 		
 		}
 	l = 0;
