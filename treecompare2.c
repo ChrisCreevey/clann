@@ -443,7 +443,7 @@ int main(int argc, char *argv[])
                                     BR_file = fopen("coding.nex", "w");
                                     x = coding(0, 0, 0);
                                     fclose(BR_file);
-									if(x == 3)
+									if(x == FALSE)
 										{
 										if(system("paup coding.nex") != 0) printf("Error calling paup, please execute the file coding.nex in paup to perform the parsimony step\n");
 										}
@@ -5403,7 +5403,6 @@ void bootstrap_search(void)
             BR_file = fopen("coding.nex", "w");
             for(i=0; i<Nreps; i++)
                 {
-		printf("0\n");
                  /*** initialise everything **/
                 for(j=0; j<Total_fund_trees; j++)
                     {
@@ -5417,7 +5416,6 @@ void bootstrap_search(void)
                             }
                         }
                     }
-                printf("1\n");
                 
                 /***** Create the bootstrap replicate of fundamental trees  **********/
                 for(j=0; j<Total_fund_trees; j++)
@@ -5438,7 +5436,6 @@ void bootstrap_search(void)
                         }
                             
                     }
-                printf("2\n");
                     
                 /****** Test whether or not every taxa is represented in this replicate ******/
                 
@@ -5464,7 +5461,6 @@ void bootstrap_search(void)
                     }
                 
 
-                printf("3\n");
                 
                 /***** End Test *****/
                 
@@ -5524,7 +5520,6 @@ void bootstrap_search(void)
                     printf("\n\nError: This data may not be suitable for bootstrapping due to the low\noccurrences of some taxa in the source trees. Please check the\nCo-occurance summary to identify problematic taxa\n");
                     error = TRUE;
 		    }
-        	printf("Q\n");
                 }
             fclose(BR_file);
             if(!error && allpresent)
@@ -6721,7 +6716,7 @@ void heuristic_search(int user, int print, int sample, int nreps)
 				BR_file = fopen("coding.nex", "w");
 				error = coding(0, 1, 0);
 				fclose(BR_file);
-				if(error == 3)
+				if(error == FALSE)
 					{
 					if(system("paup coding.nex") != 0) printf("Error calling paup, please execute the file coding.nex in paup to perform the parsimony step\n");
 					}
@@ -7349,7 +7344,7 @@ int average_consensus(int nrep, int missing_method, char * useroutfile, FILE *pa
 					}
 				}
 			fprintf(paupfile, "\n;\nend;\n");
-			fprintf(paupfile, "begin paup;\nset increase=auto visnotify=none notifybeep=no errorbeep=no;\nset criterion = dist;\ndset objective = lsfit;\nhs;\nshowtrees;\n\nsavetrees file = %s brlens=yes format = nexus", useroutfile);
+			fprintf(paupfile, "begin paup;\nset increase=auto notifybeep=no errorbeep=no;\nset criterion = dist;\ndset objective = lsfit;\nhs;\nshowtrees;\n\nsavetrees file = %s brlens=yes format = nexus", useroutfile);
 			if(nrep==0) fprintf(paupfile," Append=no replace=yes;\n\tquit;\n\nend;\n");  /* if there is one 1 rep */
 			if(nrep==1) fprintf(paupfile," Append=no replace=yes;\n\nend;\n");     	/* if this is the forst of a few reps */
 			if(nrep==2) fprintf(paupfile," Append=yes;\n\nend;\n");			/* if this is a middle rep */
@@ -8590,7 +8585,6 @@ int coding(int nrep, int search, int ptpreps)
     int x=0, one_in_this = FALSE, zero_in_this = FALSE, swap=3, addseq=4, error=FALSE, *num_fund_taxa = NULL, njbuild = FALSE, weighted = FALSE;
 
     filename[0] = '\0';
-    printf("in\n");
     for(i=0; i<num_commands; i++)
         {       
         if(strcmp(parsed_command[i], "nreps") == 0 && (strcmp(parsed_command[0], "boot") != 0 && strcmp(parsed_command[0], "bootstrap") != 0))
@@ -8793,13 +8787,13 @@ int coding(int nrep, int search, int ptpreps)
 				
 				if(search==2) /* if instead we want to do a ptp test on our data */
 					{
-					fprintf(BR_file,"\tset increase=auto visnotify=none notifybeep=no errorbeep=no;\n\tconstraints one=(%s,%s,(%s,%s));\n\tpermute NReps=%d;\n\tquit;\n\tend;\n", taxa_names[0], taxa_names[1], taxa_names[2], taxa_names[3], ptpreps);
+					fprintf(BR_file,"\tset increase=auto notifybeep=no errorbeep=no;\n\tconstraints one=(%s,%s,(%s,%s));\n\tpermute NReps=%d;\n\tquit;\n\tend;\n", taxa_names[0], taxa_names[1], taxa_names[2], taxa_names[3], ptpreps);
 					}
 				else
 					{
 					if(search==1) 
 						{
-						fprintf(BR_file,"set increase=auto visnotify=none notifybeep=no errorbeep=no;\n");
+						fprintf(BR_file,"set increase=auto notifybeep=no errorbeep=no;\n");
 						if(!njbuild)
 							{
 							fprintf(BR_file,"\ths nreps=%d swap=", nreps );
@@ -8816,7 +8810,7 @@ int coding(int nrep, int search, int ptpreps)
 						}
 					if(search==0) 
 						{
-						fprintf(BR_file,"set increase=auto visnotify=none notifybeep=no errorbeep=no;\n\talltrees;\n\tshowtrees;\n\tsavetrees FILE=");
+						fprintf(BR_file,"set increase=auto notifybeep=no errorbeep=no;\n\talltrees;\n\tshowtrees;\n\tsavetrees FILE=");
 						if(strcmp(filename, "") == 0) fprintf(BR_file,"MRP.tree Format=Phylip");    
 						else fprintf(BR_file,"%s Format=Phylip", filename);
 						}
@@ -8832,7 +8826,6 @@ int coding(int nrep, int search, int ptpreps)
         }
 	fflush(BR_file);
 	/*if(calculate_inhouse == FALSE) error = 3; */
-    printf("out\n");
     return(error);
     }
 
@@ -9947,7 +9940,7 @@ int spr(struct taxon * position, int maxswaps, int numspectries, int numgenetrie
 										newbie->spr = TRUE;
 
 
-										printf("a\n");
+										printf("a=\n");
 										better_score = regraft(tmp, newbie, NULL, 1, maxswaps, numspectries, numgenetries);
 										
 										printf("b\n");
@@ -11162,7 +11155,6 @@ void generatetrees(void)
 					if(gen_method == 2)tree_build(1, rand_tree, tree_top, TRUE, -1);
 					tree_top = temp_top;
 					temp_top = NULL;
-					printf("made random tree\n");
 			/**** evaluate its fit to the source trees in memory *****/
 					temptree[0] = '\0';
 					if(criterion == 0) results[i] = compare_trees(FALSE);  /* calculate the distance from the super tree to all the fundamental trees */
@@ -11185,7 +11177,6 @@ void generatetrees(void)
 					/* Display results */
 					if(print_all_scores) fprintf(allscores, "%f\n", results[i]);
 					GC++;
-					printf("finished evaluating tree\n");
 					}
 				}
 			draw_histogram(outfile, n, results, GC);
@@ -15726,6 +15717,8 @@ float tree_map(struct taxon * gene_top, struct taxon * species_top, int print)
 		presence[i] = FALSE;
 	
 	/** 1) Label all internal and external taxa on the species tree ****/
+			printf("3\n");
+
 	xnum = number_tree1(species_top, number_of_taxa);
 	xnum--;
 	
@@ -16748,6 +16741,7 @@ void mapunknowns()
 			reroot_tree(position);
 			gene_tree = tree_top;
 			tree_top = NULL;
+			printf("a==\n");
 			total = tree_map(gene_tree, species_tree,0);
 			
 			
@@ -16857,7 +16851,8 @@ float get_recon_score(char *giventree, int numspectries, int numgenetries)
 		tree_build(1, temptree, species_tree, 1, -1);
 		species_tree = temp_top;
 		temp_top = NULL;
-		
+				printf("4\n");
+
 		num_species_roots = number_tree1(species_tree, number_of_taxa);
 
 		duplicate_tree(species_tree, NULL);
@@ -16895,6 +16890,7 @@ float get_recon_score(char *giventree, int numspectries, int numgenetries)
 			
 				position = get_branch(species_tree, m);
 				temp_top = species_tree;
+				/*printf("1\n");*/
 				reroot_tree(position);
 				species_tree = temp_top;
 				temp_top = NULL;
@@ -16929,7 +16925,7 @@ float get_recon_score(char *giventree, int numspectries, int numgenetries)
 						{
 						if(dogenerand > 0)
 							{
-							gene_start = (int)fmod(rand(), num_species_roots);
+							gene_start = (int)fmod(rand(), i);
 							gene_end = gene_start +1;
 							}
 						else
@@ -16941,13 +16937,14 @@ float get_recon_score(char *giventree, int numspectries, int numgenetries)
 					/*	for(j=0; j<i; j++)  */ /* For every rooting of the genetree */
 						for(j=gene_start; j<gene_end; j++)   
 							{
-				/*			printf("trying rooting %d of%d in the genetree\t score:", j, i); */
+							/*printf("trying rooting %d of %d in the genetree\t score:", j, i); */
 							position = get_branch(gene_tree, j);
 							temp_top = gene_tree;
+							/*printf("2\n"); */
 							reroot_tree(position);
 							gene_tree = temp_top;
 							temp_top = NULL;
-							
+							printf("b\n");
 							total = tree_map(gene_tree, species_tree,0);
 						/*	printf("%f\t",j, i, total); */
 							if(total < best_total || best_total == -1)
@@ -17127,6 +17124,8 @@ struct taxon * do_resolve_tricotomies(struct taxon * gene_tree, struct taxon * s
 	presence = malloc(2*number_of_taxa*sizeof(int));
 	for(i=0; i<(2*number_of_taxa); i++) presence[i] = FALSE;
 	/** 1) Label all internal and external taxa on the species tree ****/
+				printf("5\n");
+
 	xnum = number_tree1(species_tree, number_of_taxa);
 	xnum--;
 	/****2) label all the gene tree nodes (and taxa) with their equivalent on the species tree **/
@@ -17346,6 +17345,7 @@ void reconstruct(int print_settings)
 		species_tree->parent = temp_top;
 		species_tree = temp_top;
 		temp_top = NULL;
+		printf("1\n");
 		number_tree1(species_tree, number_of_taxa);
 		num_species_internal = count_internal_branches(species_tree, 0);
 		if(printfiles)
@@ -17412,6 +17412,7 @@ void reconstruct(int print_settings)
 					gene_tree = temp_top;
 					
 					diff_overall -= malloc_check;
+					printf("c\n");
 					total = tree_map(gene_tree, species_tree,1); 
 					diff_overall += malloc_check;
 					if(total < best_total || best_total == -1)
@@ -17450,6 +17451,7 @@ void reconstruct(int print_settings)
 				gene_tree->parent = newbie;
 				gene_tree = newbie;
 				newbie = NULL;
+				printf("d\n");
 				total = tree_map(gene_tree, species_tree,1);				
 				best_total = total;
 				best_mapping = gene_tree;
@@ -17723,6 +17725,8 @@ void hgt_reconstruction()
 	species_tree->parent = temp_top;
 	species_tree = temp_top;
 	temp_top = NULL;
+			printf("2\n");
+
 	xnum = number_tree1(species_tree, number_of_taxa); /* label the internal and external branches of the species tree */
 	assign_ances_desc(species_tree, species_allowed, previous);
 	free(previous);
@@ -17802,6 +17806,7 @@ void hgt_reconstruction()
 		
 			copy = tree_top;
 			tree_top = NULL;
+			printf("e\n");
 			total = tree_map(copy, species_tree,0);
 			if(total < best_total || best_total == -1) best_total = total;
 			dismantle_tree(copy);
@@ -17910,7 +17915,7 @@ void hgt_reconstruction()
 								posit = NULL;
 								} 
 							copy = tree_top;  
-							
+							printf("f\n");
 							HGT1 = tree_map(copy, species_tree,0); /* HGT1 no has the score for the tree "copy" */
 							hgt_receipient1 = copy->tag;  /* if this is the HGT part, then this is the hypothesised node on the species tree that received the HGT */
 
@@ -17923,6 +17928,7 @@ void hgt_reconstruction()
 						tree_top = NULL;
 						duplicate_tree(copy, NULL);
 						copy1 = tree_top;
+						printf("g\n");
 						best_total1 = tree_map(copy1, species_tree,0);
 						find_tagged(copy1, presence1);
 						best_mapping1 = copy1; /* this will be used later for checking HGT compatibilities (( this version is only used if k != 0 ))*/
@@ -17931,6 +17937,7 @@ void hgt_reconstruction()
 						tree_top = NULL;
 						duplicate_tree(test_part, NULL);
 						copy1 = tree_top;
+						printf("h\n");
 						HGT2 = tree_map(copy1, species_tree,0); /* HGT2 no has the score for the tree "test_part" */
 						hgt_receipient2 = copy1->tag; /* if this is the HGT part, then this is the hypothesised node on the species tree that received the HGT */
 						/*find_tagged(copy1, presence2); This is commented out because if k != 0 then test_part cannot be the donor */
@@ -17985,7 +17992,7 @@ void hgt_reconstruction()
 										copy1 = tree_top;
 										tree_top = NULL;
 										
-										
+										printf("I\n");
 										total = tree_map(copy1, species_tree,0);
 										if(total < best_total || best_total == -1)
 											{
@@ -18018,6 +18025,7 @@ void hgt_reconstruction()
 									}
 								else
 									{
+									printf("j\n");
 									best_total = tree_map(copy1, species_tree,0);
 									best_mapping = copy1;
 									copy1 = NULL;

@@ -102,3 +102,21 @@ t
 prunedtree.ph
 
 prunedtaxa.txt
+
+average_consensus.nex
+
+bootstrap.txt
+
+coding.nex
+
+consensus.ph
+
+histogram.txt
+
+MRP.tree
+
+robinson-foulds.txt
+
+top_alltrees.txt
+
+yaptp.txt

@@ -7,3 +7,14 @@ followed by:
 Clann will then be located in this directory
 
 the use of "make install" may not work depending on write privileges
+
+=======
+
+
+# Special Note: if you get this message when doing the "./configure" command:
+"-bash: ./configure: Permission denied"
+# then do the following command: 
+"chmod +x configure"
+and then continue on to:
+"make"
+
