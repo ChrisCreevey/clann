@@ -1037,6 +1037,7 @@ void print_commands(int num)
         printf("\tquit\t\t- Quit Clann\n");
         printf("\tset\t\t- Set the optimality criterion for carrying reconstructing a supertree\n");
         printf("\t!\t\t- Run a shell session, while preserving the current Clann session (type \'exit\' to return)\n");
+        printf("\ttips\t\t- Show tips and hints for better use of Clann\n");
 
         printf("\nThe following commands are only available when there are source trees in memory:\n");
 
@@ -1059,7 +1060,6 @@ void print_commands(int num)
         printf("\trfdists\t\t- Calculate Robinson-Foulds distances between all source trees\n");
         printf("\tgeneratetrees\t- Generate random supertrees & assess  against source trees in memory\n");
         printf("\tyaptp\t\t- \"Yet another permutation-tail-probability\" test - performs a randomisation test\n");
-        printf("\ttips\t\t- Show tips and hints for better use of Clann\n");
 
 
 
@@ -12579,11 +12579,6 @@ void exclude(int do_all)
 					{
 					greaterthan = toint(parsed_command[i+2]);
 					
-					if(greaterthan >= number_of_taxa)
-						{
-						error = TRUE;
-						printf("Error in size \"greaterthan\"\n\n");
-						}
 					}
 				else
 					{
@@ -12591,11 +12586,7 @@ void exclude(int do_all)
 						{
 						lessthan = toint(parsed_command[i+2]);
 						
-						if(lessthan < 5)
-							{
-							error = TRUE;
-							printf("Error in size \"lessthan\"\n\n");
-							}
+
 						}
 					else
 						{
@@ -19334,14 +19325,14 @@ void tips(int num)
 
 		default:
 			printf("\n\t1. Clann can be used to transform nexus formatted tree files into newick formatted files.\n\tThis is done by executing the nexus file as normal and then using the command: \"showtrees savetrees=yes\"\n\tIt is also possible to set the name of the file to which the trees are saved, and to stop clann from displaying a graphical representation of each source tree while this is done\n\n");
-			printf("\n\t2. Clann can be told only to read the first few characters of each taxa name whenreading the source trees into memory\n\tThis is useful when it is necessary to have unique identifiers (for instance gene IDs) on the source trees\n\tThe option \'maxnamelen\' in the \"exe\" command sets this value\n\tIf the names are not fixed widths, the option \'maxnamelen=delimited\' tells Clann to look for the fist dot \".\" which will specifying the end of the taxon ID in the trees\n\n\t\tFor instance using \"exe maxnamelen=delimited\" on the following tree:\n\t\t(apple.00121,(orange.1435,lemon.3421),pear.1032);\n\t\tResults in clann ignoring the numbers after the dots in the taxa names\n");
+			printf("\n\t2. Clann can be told only to read the first few characters of each taxa name when reading the source trees into memory\n\tThis is useful when it is necessary to have unique identifiers (for instance gene IDs) on the source trees\n\tThe option \'maxnamelen\' in the \"exe\" command sets this value\n\tIf the names are not fixed widths, the option \'maxnamelen=delimited\' tells Clann to look for the fist dot \".\" which will specify the end of the taxon ID in the trees\n\n\t\tFor instance using \"exe maxnamelen=delimited\" on the following tree:\n\t\t(apple.00121,(orange.1435,lemon.3421),pear.1032);\n\t\tResults in clann ignoring the numbers after the dots in the taxa names\n");
 			printf("\n\t3. The equals sign (=), hyphen (-) and space ( ) are special characters in Clann and by default cannot be used in filenames to be read by clann\n\tIf a filename contain some of these characters Clann can only read the name of the file properly by putting the name in inverted commas.\n\t\tFor example: exe \"my-file.txt\"\n");
 			printf("\n\t4. The first command that you should run if you don’t know what to do is \"help\".\n\tThis will display the list of the commands that are available.\n\tCalling any of the commands followed by a question mark (for instance \"hs ?\"), will display the options and defaults associated with that command\n");
 			printf("\n\t5. The command \"!\" runs a shell terminal on Unix and Mac operating systems allowing system commands can be run without having to quit Clann\n");
 			printf("\n\t6. Clann can assess supertrees created using other programs\n\tUsing the \"usertrees\" command, clann will read in the file specified and assess all the trees it contains\n\tThe best supertree found in the file is displayed along with its score\n");
 			printf("\n\t7. All commands in Clann should be written completely in lowercase, typing the command \"boot\" is not the same as \"Boot\" and only the first will be recognised as a valid command\n");
 			printf("\n\t8. Heuristic and exhaustive searches of supertree space can be interrupted using the key combination \"control-c\"\n\tThis dispays the score if the best tree found so far and give the user the option to stop the search now or continue.\n\tIf this is done during the random sampling phase of a heuristic search, it will allow the user to move straight to the heuristic search without completing the random sampling\n");
-			printf("\n\t9. Users can assess different configurations of their data by excluding (or including) certain source trees from subsequent commands using the \"excludetrees\" and \"includetrees\" commands\n\tSource trees can be selected based on their name,the taxa they contain, their size (number of taxa they contain) or their score when compared to a supertree\n");
+			printf("\n\t9. Users can assess different configurations of their data by deleting certain source trees using the \"deletetrees\" command\n\tSource trees can be selected based on their name,the taxa they contain, their size (number of taxa they contain) or their score when compared to a supertree\n");
 			printf("\n\t10. Individual (or multiple) taxa can be pruned from the source trees using the command \"deletetaxa\"\n\tBranch lengths are adjusted to take the deletion of thetaxa into account\n\tIf the deletion of taxa from a source tree means that there are less than 4 taxa remaining, that source tree is removed from the analysis\n\tClann will display the names of the source trees removed if this occurs\n");
 			break;
 
