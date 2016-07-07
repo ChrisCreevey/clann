@@ -367,7 +367,7 @@ int main(int argc, char *argv[])
 
     printf("\n\n\n\n\n\t******************************************************************");
     printf("\n\t*                                                                *");
-    printf("\n\t*                          Clann  v4.1.2                         *");
+    printf("\n\t*                          Clann  v4.1.3                         *");
     printf("\n\t*                                                                *");
     printf("\n\t*                 web: http://www.creeveylab.org                 *");
     printf("\n\t*                 email: chris.creevey@gmail.com                 *");
