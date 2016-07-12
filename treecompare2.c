@@ -398,6 +398,7 @@ int main(int argc, char *argv[])
                 
                     if(num_commands > 1)
                         {
+                        delimiter = FALSE;
                         execute_command(parsed_command[1], TRUE);
 							
 						/* test fulltaxaname allocations */
@@ -1507,6 +1508,7 @@ void execute_command(char *commandline, int do_all)
     int i = 0, j=0, k=0, printfundscores = FALSE, error = FALSE;
     char c = '\0', temp[NAME_LENGTH], filename[100], *newbietree, string_num[1000];
 	float num = 0;
+
     for(i=0; i<num_commands; i++)
         {
         if(strcmp(parsed_command[i], "print") == 0)
@@ -12110,7 +12112,7 @@ void consensus(int num_trees, char **trees, int num_reps, float percentage, FILE
 void showtrees(void)
 	{
 	int worst = -2, best = -2,savetrees = FALSE, found = TRUE, taxachosen = 0, counter = 0, mode[5] = {TRUE, FALSE, FALSE, FALSE, FALSE}, start = 0, end = Total_fund_trees, error = FALSE, i=0, j=0, k=0, l=0, num=0, equalto = -1, greaterthan =3, lessthan = number_of_taxa, taxa_count = 0;
-	char *temptree, string_num[10], namecontains[100], **containstaxa = NULL, savedfile[100], temptree1[TREE_LENGTH];
+	char *temptree, string_num[10], namecontains[100], **containstaxa = NULL, savedfile[100], temptree1[TREE_LENGTH], tmp[TREE_LENGTH];
 	FILE *showfile = NULL;
 	float bestscore =10000000, worstscore = 0, **tempscores = NULL;
 	int *tempsourcetreetag = NULL, display = TRUE, best_total = -1, total = 0;
@@ -12388,7 +12390,62 @@ void showtrees(void)
 					}
 				}
 			}
+	
+		for(j=0; j<Total_fund_trees; j++)
+	        {
+	        if(tempsourcetreetag[j] && sourcetreetag[i])
+				{
+				if(savetrees)
+					{	
+			        if(tree_top != NULL) dismantle_tree(tree_top);  /* Dismantle any trees already in memory */
+			        tree_top = NULL;
+			        
+			        temp_top = NULL;
+			        taxaorder=0;
+			        tree_build(1, fundamentals[j], tree_top, 0, j); /* build the tree passed to the function */
 
+			        tree_top = temp_top;
+			        temp_top = NULL;
+			        reset_tree(tree_top);
+
+			        identify_species_specific_clades(tree_top);  /* Call recursive function to travel down the tree looking for species-specific clades */
+			        shrink_tree(tree_top);    /* Shrink the pruned tree by switching off any internal nodes that are not needed */
+			        temptree[0] = '\0'; /* initialise the string */
+			        if(print_pruned_tree(tree_top, 0, temptree, TRUE) >1)
+			            {
+			            tmp[0] = '\0';
+			            strcpy(tmp, "(");
+			            strcat(tmp, temptree);
+			            strcat(tmp, ")");
+			            strcpy(temptree, tmp);
+			            }
+			        strcat(temptree, ";");
+
+			        if(strcmp(tree_names[j], "") != 0)
+			        	fprintf(showfile, "%s[%s", temptree, tree_names[j]);
+			        else
+			        	fprintf(showfile, "%s[%d", temptree, j);
+			        if(trees_in_memory > 0)
+						fprintf(showfile, " %f]\n", sourcetree_scores[i]);
+					else
+						fprintf(showfile, "]\n");
+					}
+				if(display)
+					{
+					temptree[0] = '\0';
+					strcpy(temptree, fundamentals[i]);
+					returntree(temptree);
+					printf("\n\n\nTree number %d\nTree name = %s\n", i+1, tree_names[i]);
+					printf("Weight = %f\n", tree_weights[i]);
+					if(trees_in_memory > 0)printf("Score = %f\n", sourcetree_scores[i]);
+					tree_coordinates(temptree, TRUE, TRUE, FALSE, -1);
+					}
+				counter++;
+		        }
+			}
+
+
+/*
 		for(i=0; i<Total_fund_trees; i++)
 			{
 			if(tempsourcetreetag[i] && sourcetreetag[i])
@@ -12397,7 +12454,6 @@ void showtrees(void)
 				returntree(temptree);
 				if(savetrees)
 					{
-					/*unroottree(temptree); */
 					fprintf(showfile, "%s ", temptree);
 					if(strcmp(tree_names[i], "") != 0)
 						fprintf(showfile, "[%s] ", tree_names[i]);
@@ -12415,7 +12471,7 @@ void showtrees(void)
 					}
 				counter++;
 				}
-			}
+			} */ /* Old save trees before names were delimited */
 		
 		printf("\n%d source trees met with the criteria specified\n", counter);
 		}
@@ -12794,7 +12850,49 @@ void exclude(int do_all)
 				*/	tempfile = fopen("tempclannfile164.chr", "w");
 					tmp[0] = '\0';
 					countedout = 0;
-					for(i=0; i<Total_fund_trees; i++)
+
+
+					for(j=0; j<Total_fund_trees; j++)
+					        {
+					        if(tempsourcetreetag[j])
+								{
+						        if(tree_top != NULL) dismantle_tree(tree_top);  /* Dismantle any trees already in memory */
+						        tree_top = NULL;
+						        
+						        temp_top = NULL;
+						        taxaorder=0;
+						        tree_build(1, fundamentals[j], tree_top, 0, j); /* build the tree passed to the function */
+
+						        tree_top = temp_top;
+						        temp_top = NULL;
+						        reset_tree(tree_top);
+
+						        identify_species_specific_clades(tree_top);  /* Call recursive function to travel down the tree looking for species-specific clades */
+						        shrink_tree(tree_top);    /* Shrink the pruned tree by switching off any internal nodes that are not needed */
+						        temptree[0] = '\0'; /* initialise the string */
+						        if(print_pruned_tree(tree_top, 0, temptree, TRUE) >1)
+						            {
+						            tmp[0] = '\0';
+						            strcpy(tmp, "(");
+						            strcat(tmp, temptree);
+						            strcat(tmp, ")");
+						            strcpy(temptree, tmp);
+						            }
+						        strcat(temptree, ";");
+
+						        if(strcmp(tree_names[j], "") != 0)
+						        	fprintf(tempfile, "%s[%s]\n", temptree, tree_names[j]);
+						        else
+						        	fprintf(tempfile, "%s[%d]\n", temptree, j);
+						        countedout++;
+						        }
+							else
+								{
+								if(sourcetreetag[i]) counter++;
+								}
+							}
+
+		/*			for(i=0; i<Total_fund_trees; i++)
 						{
 						if(tempsourcetreetag[i])
 							{
@@ -12813,7 +12911,7 @@ void exclude(int do_all)
 							{
 							if(sourcetreetag[i]) counter++;
 							}
-						}
+						}  */ /* Old printing code, before implementation of delimited names input */
 					fclose(tempfile);
 					for(i=0; i<number_of_taxa; i++)
 						{
