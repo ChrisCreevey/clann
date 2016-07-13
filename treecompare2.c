@@ -12111,7 +12111,7 @@ void consensus(int num_trees, char **trees, int num_reps, float percentage, FILE
 
 void showtrees(void)
 	{
-	int worst = -2, best = -2,savetrees = FALSE, found = TRUE, taxachosen = 0, counter = 0, mode[5] = {TRUE, FALSE, FALSE, FALSE, FALSE}, start = 0, end = Total_fund_trees, error = FALSE, i=0, j=0, k=0, l=0, num=0, equalto = -1, greaterthan =3, lessthan = number_of_taxa, taxa_count = 0;
+	int worst = -2, best = -2,savetrees = FALSE, found = TRUE, taxachosen = 0, counter = 0, mode[5] = {TRUE, FALSE, FALSE, FALSE, FALSE}, start = 0, end = Total_fund_trees, error = FALSE, i=0, j=0, k=0, l=0, num=0, equalto = -1, greaterthan =0, lessthan = 1000000000, taxa_count = 0;
 	char *temptree, string_num[10], namecontains[100], **containstaxa = NULL, savedfile[100], temptree1[TREE_LENGTH], tmp[TREE_LENGTH];
 	FILE *showfile = NULL;
 	float bestscore =10000000, worstscore = 0, **tempscores = NULL;
@@ -12524,7 +12524,7 @@ void qs(float **items, int left, int right)
 
 void exclude(int do_all)
 	{
-	int worst = -2, best = -2,savetrees = FALSE, found = TRUE, taxachosen = 0, counter = 0, mode[10] = {FALSE, FALSE, FALSE, FALSE, FALSE, FALSE, FALSE, FALSE, FALSE, FALSE}, start = 0, end = Total_fund_trees, error = FALSE, i=0, j=0, k=0, l=0, num=0, equalto = -1, greaterthan =number_of_taxa, lessthan = 3, taxa_count = 0;
+	int worst = -2, best = -2,savetrees = FALSE, found = TRUE, taxachosen = 0, counter = 0, mode[10] = {FALSE, FALSE, FALSE, FALSE, FALSE, FALSE, FALSE, FALSE, FALSE, FALSE}, start = 0, end = Total_fund_trees, error = FALSE, i=0, j=0, k=0, l=0, num=0, equalto = -1, greaterthan =1000000000, lessthan = , taxa_count = 0;
 	char *temptree, string_num[10], namecontains[100], **containstaxa = NULL, savedfile[100], *command = NULL, tmp[TREE_LENGTH];
 	FILE *showfile = NULL, *tempfile = NULL;
 	float bestscore =10000000, worstscore = 0, **tempscores = NULL;
