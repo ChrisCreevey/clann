@@ -12393,7 +12393,7 @@ void showtrees(void)
 	
 		for(j=0; j<Total_fund_trees; j++)
 	        {
-	        if(tempsourcetreetag[j] && sourcetreetag[i])
+	        if(tempsourcetreetag[j] && sourcetreetag[j])
 				{
 				if(savetrees)
 					{	
