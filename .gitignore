@@ -122,3 +122,17 @@ top_alltrees.txt
 yaptp.txt
 
 index.html~
+
+*.tree
+
+*.deletedtax
+
+examples/redo_delete/Remove_outlier_taxa.sh
+
+examples/redo_delete/remove_outliers.R
+
+examples/redo_delete/worked_example_1018.tree.pruned
+
+examples/trees_to_redo_pruning.tar.gz
+
+examples/redo_delete/showtrees.txt

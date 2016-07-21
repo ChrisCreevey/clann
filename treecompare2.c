@@ -367,7 +367,7 @@ int main(int argc, char *argv[])
 
     printf("\n\n\n\n\n\t******************************************************************");
     printf("\n\t*                                                                *");
-    printf("\n\t*                          Clann  v4.1.3                         *");
+    printf("\n\t*                          Clann  v4.1.4                         *");
     printf("\n\t*                                                                *");
     printf("\n\t*                 web: http://www.creeveylab.org                 *");
     printf("\n\t*                 email: chris.creevey@gmail.com                 *");
@@ -12112,7 +12112,7 @@ void consensus(int num_trees, char **trees, int num_reps, float percentage, FILE
 void showtrees(void)
 	{
 	int worst = -2, best = -2,savetrees = FALSE, found = TRUE, taxachosen = 0, counter = 0, mode[5] = {TRUE, FALSE, FALSE, FALSE, FALSE}, start = 0, end = Total_fund_trees, error = FALSE, i=0, j=0, k=0, l=0, num=0, equalto = -1, greaterthan =0, lessthan = 1000000000, taxa_count = 0;
-	char *temptree, string_num[10], namecontains[100], **containstaxa = NULL, savedfile[100], temptree1[TREE_LENGTH], tmp[TREE_LENGTH];
+	char *temptree, string_num[10], namecontains[NAME_LENGTH], **containstaxa = NULL, savedfile[100], temptree1[TREE_LENGTH], tmp[TREE_LENGTH];
 	FILE *showfile = NULL;
 	float bestscore =10000000, worstscore = 0, **tempscores = NULL;
 	int *tempsourcetreetag = NULL, display = TRUE, best_total = -1, total = 0;
@@ -12133,7 +12133,7 @@ void showtrees(void)
 	containstaxa = malloc(number_of_taxa*sizeof(char*));
 	for(i=0; i<number_of_taxa; i++)
 		{
-		containstaxa[i] = malloc(1000*sizeof(char));
+		containstaxa[i] = malloc(NAME_LENGTH*sizeof(char));
 		containstaxa[i][0] = '\0';
 		}
 	temptree = malloc(TREE_LENGTH*sizeof(char));
@@ -12426,18 +12426,18 @@ void showtrees(void)
 			        else
 			        	fprintf(showfile, "%s[%d", temptree, j);
 			        if(trees_in_memory > 0)
-						fprintf(showfile, " %f]\n", sourcetree_scores[i]);
+						fprintf(showfile, " %f]\n", sourcetree_scores[j]);
 					else
 						fprintf(showfile, "]\n");
 					}
 				if(display)
 					{
 					temptree[0] = '\0';
-					strcpy(temptree, fundamentals[i]);
+					strcpy(temptree, fundamentals[j]);
 					returntree(temptree);
-					printf("\n\n\nTree number %d\nTree name = %s\n", i+1, tree_names[i]);
-					printf("Weight = %f\n", tree_weights[i]);
-					if(trees_in_memory > 0)printf("Score = %f\n", sourcetree_scores[i]);
+					printf("\n\n\nTree number %d\nTree name = %s\n", i+1, tree_names[j]);
+					printf("Weight = %f\n", tree_weights[j]);
+					if(trees_in_memory > 0)printf("Score = %f\n", sourcetree_scores[j]);
 					tree_coordinates(temptree, TRUE, TRUE, FALSE, -1);
 					}
 				counter++;
@@ -12524,7 +12524,7 @@ void qs(float **items, int left, int right)
 
 void exclude(int do_all)
 	{
-	int worst = -2, best = -2,savetrees = FALSE, found = TRUE, taxachosen = 0, counter = 0, mode[10] = {FALSE, FALSE, FALSE, FALSE, FALSE, FALSE, FALSE, FALSE, FALSE, FALSE}, start = 0, end = Total_fund_trees, error = FALSE, i=0, j=0, k=0, l=0, num=0, equalto = -1, greaterthan =1000000000, lessthan = , taxa_count = 0;
+	int worst = -2, best = -2,savetrees = FALSE, found = TRUE, taxachosen = 0, counter = 0, mode[10] = {FALSE, FALSE, FALSE, FALSE, FALSE, FALSE, FALSE, FALSE, FALSE, FALSE}, start = 0, end = Total_fund_trees, error = FALSE, i=0, j=0, k=0, l=0, num=0, equalto = -1, greaterthan =1000000000, lessthan = 0, taxa_count = 0;
 	char *temptree, string_num[10], namecontains[100], **containstaxa = NULL, savedfile[100], *command = NULL, tmp[TREE_LENGTH];
 	FILE *showfile = NULL, *tempfile = NULL;
 	float bestscore =10000000, worstscore = 0, **tempscores = NULL;
