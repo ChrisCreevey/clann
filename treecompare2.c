@@ -367,7 +367,7 @@ int main(int argc, char *argv[])
 
     printf("\n\n\n\n\n\t******************************************************************");
     printf("\n\t*                                                                *");
-    printf("\n\t*                          Clann  v4.1.4                         *");
+    printf("\n\t*                          Clann  v4.1.5                         *");
     printf("\n\t*                                                                *");
     printf("\n\t*                 web: http://www.creeveylab.org                 *");
     printf("\n\t*                 email: chris.creevey@gmail.com                 *");
@@ -12408,7 +12408,6 @@ void showtrees(void)
 			        temp_top = NULL;
 			        reset_tree(tree_top);
 
-			        identify_species_specific_clades(tree_top);  /* Call recursive function to travel down the tree looking for species-specific clades */
 			        shrink_tree(tree_top);    /* Shrink the pruned tree by switching off any internal nodes that are not needed */
 			        temptree[0] = '\0'; /* initialise the string */
 			        if(print_pruned_tree(tree_top, 0, temptree, TRUE) >1)
@@ -12801,7 +12800,7 @@ void exclude(int do_all)
 			}
 
 
-
+/*
 		if(mode[0] || mode[1] || mode[2] || mode[3] || mode[4] || mode[5] || mode[6])
 			{
 			for(i=0; i<number_of_taxa; i++) temp_incidence[i] = 0;
@@ -12811,9 +12810,9 @@ void exclude(int do_all)
 					{
 					strcpy(temptree, fundamentals[i]);
 					returntree(temptree);
-					/* build the tree in memory */
+				*/	/* build the tree in memory */
 					/****** We now need to build the Supertree in memory *******/
-					if(tree_top != NULL)
+				/*	if(tree_top != NULL)
 						{
 						dismantle_tree(tree_top);
 						tree_top = NULL;
@@ -12833,6 +12832,7 @@ void exclude(int do_all)
 				{
 				if(temp_incidence[i] == 0) l++;
 				}
+				*/
 			l=1;
 			if(l> 0)
 				{
@@ -12867,7 +12867,6 @@ void exclude(int do_all)
 						        temp_top = NULL;
 						        reset_tree(tree_top);
 
-						        identify_species_specific_clades(tree_top);  /* Call recursive function to travel down the tree looking for species-specific clades */
 						        shrink_tree(tree_top);    /* Shrink the pruned tree by switching off any internal nodes that are not needed */
 						        temptree[0] = '\0'; /* initialise the string */
 						        if(print_pruned_tree(tree_top, 0, temptree, TRUE) >1)
@@ -12985,7 +12984,7 @@ void exclude(int do_all)
 				{
 				printf("\n%d source trees were excluded, %d trees remain in memory\n", counter, countedout );	
 				}
-			}
+			/*} */
 		}
 	
 	free(temptree);
@@ -19133,7 +19132,7 @@ void check_treeisok(struct taxon *position)
 
 void prune_monophylies(void)
     {
-    int i=0, j=0;
+    int i=0, j=0, num_nodes=0, trees_included=0, trees_excluded=0;
     char *pruned_tree = NULL, *tmp = NULL, filename2[1000];
     FILE *pm_outfile = NULL; 
     select_longest=FALSE;
@@ -19190,13 +19189,25 @@ void prune_monophylies(void)
             }
         strcat(pruned_tree, ";");
 
-        if(strcmp(tree_names[j], "") != 0)
-        	fprintf(pm_outfile, "%s[%s]\n", pruned_tree, tree_names[j]);
+        num_nodes=0;
+        for(i=0; i<strlen(pruned_tree); i++)
+        	{if(pruned_tree[i] == ',') num_nodes++;	}
+    	if(num_nodes > 2) /* if the remaining tree has more then 3 taxa */
+    		{    
+	        if(strcmp(tree_names[j], "") != 0)
+	        	fprintf(pm_outfile, "%s[%s]\n", pruned_tree, tree_names[j]);
+	        else
+	        	fprintf(pm_outfile, "%s[%d]\n", pruned_tree, j);
+	        trees_included++;
+        	}
         else
-        	fprintf(pm_outfile, "%s[%d]\n", pruned_tree, j);
+        	{	
+        	trees_excluded++;
+        	}
         }
     
-    printf("\nPruning finished. All pruned trees written to the file \"%s\"\n", filename2);
+    printf("\nPruning finished. %d pruned trees with 4 or more taxa written to the file \"%s\"\n", trees_included, filename2);
+    printf("%d pruned trees with less than 4 taxa were excluded\n",trees_excluded );
     free(tmp);
     free(pruned_tree);
     fclose(pm_outfile);
