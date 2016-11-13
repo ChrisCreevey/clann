@@ -140,3 +140,17 @@ examples/redo_delete/showtrees.txt
 examples/redo_delete/29599_trees_pruned_of_copies_and_outliers.txt
 
 examples/redo_delete/29599_trees_pruned_of_copies_and_outliers.txt.zip
+
+examples/Clann_small_source_trees.ph
+
+examples/NJ-tree.ph.txt
+
+examples/sourcetree_scores_dfit.txt
+
+examples/sourcetree_scores.txt
+
+examples/testtree.ph
+
+examples/testtree.ph~
+
+examples/Usertrees_result.txt

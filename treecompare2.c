@@ -17,7 +17,8 @@
 #include <time.h>
 #include <math.h>
 #include <signal.h>
-#include <unistd.h>
+#include <unistd.h> /* For Unix Systems Builds */
+/*#include <process.h> */ /*  For Windows systems Builds */
 
 #ifdef HAVE_READLINE /* from config.h */
 #include <readline/readline.h>
@@ -256,7 +257,7 @@ FILE * infile = NULL, *BR_file = NULL, *psfile = NULL, *logfile = NULL, *distrib
 char **taxa_names = NULL, ***fulltaxanames = NULL, **parsed_command = NULL, **fundamentals = NULL, **stored_funds = NULL, **retained_supers = NULL, **stored_commands = NULL, *tempsuper = NULL, **best_topology = NULL, **tree_names = NULL;
 int  *numtaxaintrees = NULL, fullnamesnum = 0, fullnamesassignments = 1, fundamental_assignments = 0, tree_length_assignments = 1, parsed_command_assignments = 1, name_assignments = 0, *taxa_incidence = NULL, number_of_taxa = 0, Total_fund_trees = 0, *same_tree = NULL, **Cooccurrance = NULL, NUMSWAPS = 0;
 int ***fund_scores = NULL, ***stored_fund_scores = NULL, **super_scores = NULL, *number_of_comparisons = NULL, *stored_num_comparisons = NULL, **presence_of_taxa = NULL, **stored_presence_of_taxa = NULL, *presenceof_SPRtaxa = NULL;
-int num_commands = 0, number_retained_supers = 10, number_of_steps = 3, largest_tree = 0, smallest_tree = 1000000, criterion = 0, parts = 0, **total_coding = NULL, total_nodes = 0, quartet_normalising = 3, splits_weight = 2, dweight =1, *from_tree = NULL, method = 2, tried_regrafts = 0, hsprint = TRUE, max_name_length = NAME_LENGTH, got_weights = FALSE, num_excluded_trees = 0, num_excluded_taxa = 0, calculated_fund_scores = FALSE, select_longest=FALSE;
+int num_commands = 0, number_retained_supers = 10, number_of_steps = 3, largest_tree = 0, smallest_tree = 1000000, criterion = 0, parts = 0, **total_coding = NULL, *coding_from_tree = NULL, total_nodes = 0, quartet_normalising = 3, splits_weight = 2, dweight =1, *from_tree = NULL, method = 2, tried_regrafts = 0, hsprint = TRUE, max_name_length = NAME_LENGTH, got_weights = FALSE, num_excluded_trees = 0, num_excluded_taxa = 0, calculated_fund_scores = FALSE, select_longest=FALSE;
 struct taxon *tree_top = NULL, *temp_top = NULL, *temp_top2 = NULL, *branchpointer = NULL, *longestseq = NULL;
 float *scores_retained_supers = NULL, *partition_number = NULL, num_partitions = 0, total_partitions = 0, sprscore = -1, *best_topology_scores = NULL, **weighted_scores = NULL, *sourcetree_scores = NULL, *tree_weights = NULL;
 float *score_of_bootstraps = NULL, *yaptp_results = NULL, largest_length = 0, dup_weight = 1, loss_weight = 1, hgt_weight = 1, BESTSCORE = -1;
@@ -298,7 +299,7 @@ int main(int argc, char *argv[])
 	
 	/********** START OF READLINE STUFF ***********/
 	#ifdef HAVE_READLINE    
-	if(!command_line)
+	if(command_line == FALSE)
 		{
 		PATH[0] ='\0'; HOME[0] = '\0'; 
 		
@@ -306,7 +307,7 @@ int main(int argc, char *argv[])
 		tmpclann = fopen("clann5361temp1023", "r");
 		fscanf(tmpclann, "%s", HOME);
 		fclose(tmpclann);
-		remove("clann5361temp1023");
+		remove("clann5361temp1023"); 
 		strcpy(PATH, HOME);
 		strcat(PATH, "/.clannhistory");
 		read_history(PATH);
@@ -367,7 +368,7 @@ int main(int argc, char *argv[])
 
     printf("\n\n\n\n\n\t******************************************************************");
     printf("\n\t*                                                                *");
-    printf("\n\t*                          Clann  v4.1.5                         *");
+    printf("\n\t*                          Clann  v4.1.6                         *");
     printf("\n\t*                                                                *");
     printf("\n\t*                 web: http://www.creeveylab.org                 *");
     printf("\n\t*                 email: chris.creevey@gmail.com                 *");
@@ -954,7 +955,7 @@ int main(int argc, char *argv[])
                 strcat(command, ";");  
             
 			#ifdef HAVE_READLINE
-            if(strcmp(command, ";") != 0 && command_line == TRUE)   /* if the command is not just a blank line */
+            if(strcmp(command, ";") != 0 && command_line == FALSE)   /* if the command is not just a blank line */
                 {
 /******/                add_history(command);
                 }
@@ -984,7 +985,7 @@ int main(int argc, char *argv[])
     free(command);
     free(tempsuper);
 	#ifdef HAVE_READLINE
-/****/ if(command_line == TRUE) write_history(PATH);  /* write the history of commands to file */
+/****/ if(command_line == FALSE) write_history(PATH);  /* write the history of commands to file */
 	#endif
 /*	printf("malloc_check = %d x (%d)\n", malloc_check, sizeof(taxon_type));
  */   
@@ -1133,7 +1134,7 @@ void print_commands(int num)
             printf("\n\tweight\t\tequal | taxa | quartets\t\t");
             if(quartet_normalising == 1) printf("equal\n");if(quartet_normalising == 2) printf("taxa\n");if(quartet_normalising == 3) printf("quartets\n");
             }
-		printf("\n\tprintscourcescores\tyes | no\t\t*no\n");
+		printf("\n\tprintsourcescores\tyes | no\t\t*no\n");
         }
     if(num == 4)
         {
@@ -2884,6 +2885,11 @@ void clean_exit(int error)
         tree_top = NULL;
         }
     temp_top = NULL;
+    if(coding_from_tree != NULL) 
+		{
+		free(coding_from_tree);
+		coding_from_tree=NULL;
+		}
     if(total_coding != NULL)
         {
         for(i=0; i<total_nodes; i++)
@@ -6092,7 +6098,8 @@ void usertrees_search(void)
 			
 			while(scores_retained_supers[i] != -1)
 				{
-				if(print_source_scores && criterion==0)
+				/*if(print_source_scores && criterion==0) */
+				if(print_source_scores)
 					{
 					fprintf(sourcescoresfile, "Scores of sources trees compared to best User Supertree %d\n\n", i+1);
 					if(tree_top != NULL)
@@ -8841,6 +8848,12 @@ int MRP_matrix(char **trees, int num_trees, int consensus)
 	if(!num_fund_taxa) memory_error(68);
 	for(i=0; i<num_trees; i++) num_fund_taxa[i] = 0;
 	
+	if(coding_from_tree != NULL) 
+		{
+		free(coding_from_tree);
+		coding_from_tree=NULL;
+	}
+
 	if(total_coding != NULL)
 		{
 		for(i=0; i<total_nodes; i++)
@@ -8861,6 +8874,11 @@ int MRP_matrix(char **trees, int num_trees, int consensus)
 	for(i=0;i<total_nodes; i++)
 			for(j=0; j<number_of_taxa; j++)
 				total_coding[i][j] =0;
+
+	/* Allcoate an aray that records which tree each partition comes from */
+	coding_from_tree= malloc(total_nodes*sizeof(int));
+	for(i=0; i<total_nodes ; i++) coding_from_tree=0;
+
 	/* for this we need a new array that holds the number of times that any partition is repeated in the array */
 	if(partition_number != NULL) free(partition_number);
 	partition_number = malloc(total_nodes*sizeof(float));
@@ -9365,6 +9383,7 @@ float quartet_compatibility(char * supertree)
                                         allsame2 = TRUE;
                                         }
                                     }
+
                                 }
                             }
                         }
