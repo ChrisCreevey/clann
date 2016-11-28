@@ -25,9 +25,6 @@
 #include <readline/history.h>
 #endif
 
-/*#include "readline.h"
-#include "history.h"
-*/
 
 /****** Define  ********/
 
@@ -96,7 +93,7 @@ int texttoint(char c);
 void cal_fund_scores(int printfundscores);
 void pathmetric(char *string, int **scores);
 void weighted_pathmetric(char *string, float **scores, int fund_num);
-void unroottree(char * tree);
+int unroottree(char * tree);
 void alltrees_search(int user);
 float compare_trees(int spr);
 struct taxon * make_taxon(void);
@@ -257,7 +254,7 @@ FILE * infile = NULL, *BR_file = NULL, *psfile = NULL, *logfile = NULL, *distrib
 char **taxa_names = NULL, ***fulltaxanames = NULL, **parsed_command = NULL, **fundamentals = NULL, **stored_funds = NULL, **retained_supers = NULL, **stored_commands = NULL, *tempsuper = NULL, **best_topology = NULL, **tree_names = NULL;
 int  *numtaxaintrees = NULL, fullnamesnum = 0, fullnamesassignments = 1, fundamental_assignments = 0, tree_length_assignments = 1, parsed_command_assignments = 1, name_assignments = 0, *taxa_incidence = NULL, number_of_taxa = 0, Total_fund_trees = 0, *same_tree = NULL, **Cooccurrance = NULL, NUMSWAPS = 0;
 int ***fund_scores = NULL, ***stored_fund_scores = NULL, **super_scores = NULL, *number_of_comparisons = NULL, *stored_num_comparisons = NULL, **presence_of_taxa = NULL, **stored_presence_of_taxa = NULL, *presenceof_SPRtaxa = NULL;
-int num_commands = 0, number_retained_supers = 10, number_of_steps = 3, largest_tree = 0, smallest_tree = 1000000, criterion = 0, parts = 0, **total_coding = NULL, *coding_from_tree = NULL, total_nodes = 0, quartet_normalising = 3, splits_weight = 2, dweight =1, *from_tree = NULL, method = 2, tried_regrafts = 0, hsprint = TRUE, max_name_length = NAME_LENGTH, got_weights = FALSE, num_excluded_trees = 0, num_excluded_taxa = 0, calculated_fund_scores = FALSE, select_longest=FALSE;
+int seed, num_commands = 0, number_retained_supers = 10, number_of_steps = 3, largest_tree = 0, smallest_tree = 1000000, criterion = 0, parts = 0, **total_coding = NULL, *coding_from_tree = NULL, total_nodes = 0, quartet_normalising = 3, splits_weight = 2, dweight =1, *from_tree = NULL, method = 2, tried_regrafts = 0, hsprint = TRUE, max_name_length = NAME_LENGTH, got_weights = FALSE, num_excluded_trees = 0, num_excluded_taxa = 0, calculated_fund_scores = FALSE, select_longest=FALSE;
 struct taxon *tree_top = NULL, *temp_top = NULL, *temp_top2 = NULL, *branchpointer = NULL, *longestseq = NULL;
 float *scores_retained_supers = NULL, *partition_number = NULL, num_partitions = 0, total_partitions = 0, sprscore = -1, *best_topology_scores = NULL, **weighted_scores = NULL, *sourcetree_scores = NULL, *tree_weights = NULL;
 float *score_of_bootstraps = NULL, *yaptp_results = NULL, largest_length = 0, dup_weight = 1, loss_weight = 1, hgt_weight = 1, BESTSCORE = -1;
@@ -319,9 +316,11 @@ int main(int argc, char *argv[])
     time1 = time(NULL);
     /*seed the rand number with the calander time + the PID of the process ---- used for bootstrapping and others */
     #ifdef HAVE_READLINE
-    srand((unsigned) (time(NULL)/2)+getpid());
+    seed=(int)((time(NULL)/2)+getpid());
+    srand((unsigned) (seed));
     #else
-    srand((unsigned) (time(NULL)/2));
+    seed=(int)(time(NULL)/2);
+    srand((unsigned) (seed));
     #endif
 
     command = malloc(10000*sizeof(char));
@@ -1037,7 +1036,7 @@ void print_commands(int num)
         printf("\texecute\t\t- Read in a file of source trees\n");
         printf("\thelp\t\t- Display this message\n");
         printf("\tquit\t\t- Quit Clann\n");
-        printf("\tset\t\t- Set the optimality criterion for carrying reconstructing a supertree\n");
+        printf("\tset\t\t- Set global parameters such as optimality criterion for carrying reconstructing a supertree\n");
         printf("\t!\t\t- Run a shell session, while preserving the current Clann session (type \'exit\' to return)\n");
         printf("\ttips\t\t- Show tips and hints for better use of Clann\n");
 
@@ -1285,6 +1284,7 @@ void print_commands(int num)
         if(criterion == 3) printf("qfit");
         if(criterion == 4) printf("avcon");
         printf("\n");
+        printf("\n\tseed\t\t<integer number>\t\t\t%d", seed);
 /*        printf("\n\n\t\t\tdfit = best Distance Fit\n\t\t\tsfit = maximum Splits Fit\n\t\t\tqfit = maximum Quartet Fit\n\t\t\tmrp = Matrix representation using parsimony\n");
   */      }
     if(num == 9)
@@ -3385,9 +3385,9 @@ void weighted_pathmetric(char *string, float **scores, int fund_num)
 
 
 
-void unroottree(char * tree)
+int unroottree(char * tree)
     {
-    int i=0, j=0, k=0, l=0, m=0, basecount = 0, parentheses=0;
+    int i=0, j=0, k=0, l=0, m=0, basecount = 0, parentheses=0, did_unrooting=FALSE;
     int foundopen = FALSE, foundclose = FALSE;
 	float del_nodelen = 0;
 	char length[100], restof[TREE_LENGTH];
@@ -3422,6 +3422,7 @@ void unroottree(char * tree)
         
     if(basecount <2)  /* if the base of the tree is rooted */
         {
+        did_unrooting=TRUE;
         i=0;
         parentheses = 0;
         while(tree[i] != ';')  /* delete the two parentheses to make the tree unrooted */
@@ -3563,6 +3564,7 @@ void unroottree(char * tree)
         tree[i+1] = '\0';
         
         }
+    return(did_unrooting);
     }
 
     
@@ -6879,6 +6881,7 @@ void heuristic_search(int user, int print, int sample, int nreps)
             
                     strcpy(best_tree, "");
                     print_named_tree(tree_top, best_tree);
+                    while(unroottree(best_tree));
                     strcat(best_tree, ";");
                     /* evaluate the random tree */
                     if(criterion == 0) distance = compare_trees(FALSE);  /* calculate the distance from the super tree to all the fundamental trees */
@@ -6938,7 +6941,6 @@ void heuristic_search(int user, int print, int sample, int nreps)
                 /******* FInished pre-evaulating trees ********/
                 swaps+=i;
 				NUMSWAPS+= i;
-				printf("\nsofar: %d\n", swaps);
 				
                 if(signal(SIGINT, controlc2) == SIG_ERR)
 					{
@@ -7032,6 +7034,7 @@ void heuristic_search(int user, int print, int sample, int nreps)
 						strcpy(best_tree, "");
 						print_named_tree(tree_top, best_tree);
 						strcat(best_tree, ";");
+						while(unroottree(best_tree)==TRUE);
 						/*  printf("!:assigned tree: %s\n", best_tree); */
 								
 								
@@ -7057,7 +7060,8 @@ void heuristic_search(int user, int print, int sample, int nreps)
 							strcpy(temptree, "");
 							print_tree(tree_top, temptree);
 							strcat(temptree, ";");
-							unroottree(temptree);
+
+							while(unroottree(temptree)==TRUE);
 							distance = get_recon_score(temptree, numspectries, numgenetries);
 							}
 
@@ -7086,6 +7090,7 @@ void heuristic_search(int user, int print, int sample, int nreps)
 								strcpy(best_tree, "");
 								print_named_tree(tree_top, best_tree);
 								strcat(best_tree, ";");
+								while(unroottree(best_tree)== TRUE);
 								retained_supers[0] = realloc(retained_supers[0], (strlen(best_tree)+10)*sizeof(char));
 								strcpy(retained_supers[0], best_tree);
 								scores_retained_supers[0] = distance;
@@ -7100,6 +7105,7 @@ void heuristic_search(int user, int print, int sample, int nreps)
 									strcpy(best_tree, "");
 									print_named_tree(tree_top, best_tree);
 									strcat(best_tree, ";");
+									while(unroottree(best_tree)== TRUE);
 									if(!check_if_diff_tree(best_tree))
 										different = FALSE; /* This is here to check if this tree with the same score actually has a different topology from those already stroed */
 
@@ -7716,7 +7722,7 @@ int swapper(struct taxon * position,struct taxon * prev_pos, int stepstaken, str
 												strcpy(temptree, "");
 												print_tree(tree_top, temptree);
 												strcat(temptree, ";");
-												unroottree(temptree);
+												while(unroottree(temptree));
 												distance = get_recon_score(temptree, numspectries, numgenetries);
 												}
 
@@ -9078,7 +9084,7 @@ int MRP_matrix(char **trees, int num_trees, int consensus)
         
  void set_parameters(void)
     {
-    int i=0;
+    int i=0, j=0, isdigit=TRUE, this=FALSE;
     for(i=0; i<num_commands; i++)
         {
         if(strcmp(parsed_command[i], "criterion") == 0)
@@ -9131,6 +9137,26 @@ int MRP_matrix(char **trees, int num_trees, int consensus)
                     }
                 }
             }
+        if(strcmp(parsed_command[i], "seed") == 0)
+        	{
+        	isdigit=TRUE;
+        	for(j=0; j<strlen(parsed_command[i+1]); j++)
+        		{
+        		this=FALSE;
+        		if( parsed_command[i+1][j] == '0' || parsed_command[i+1][j] == '1' || parsed_command[i+1][j] == '2' || parsed_command[i+1][j] == '3' || parsed_command[i+1][j] == '4' || parsed_command[i+1][j] == '5' || parsed_command[i+1][j] == '6' || parsed_command[i+1][j] == '7' || parsed_command[i+1][j] == '8' || parsed_command[i+1][j] == '9' ) this=TRUE;
+        		if(this == FALSE) isdigit=FALSE;
+        		}
+      		if(isdigit==FALSE)
+  				{
+      			printf("ERROR: the value you entered (%s) is not an integer\n", parsed_command[i+1] );		
+  				}
+  			else
+  				{	
+  				seed=atoi(parsed_command[i+1]);
+  				srand((unsigned) (seed));
+  				printf("The seed value for the randome number generator has been set to %d\n", seed);
+  				}
+        	}
         }
     
     }
@@ -9163,7 +9189,7 @@ float MRC(char *supertree)
     
     
     /** unroot the supertree (if necessary )  **/
-    unroottree(supertree);
+    while(unroottree(supertree));
     
     i=0;j=0;k=0;
     /*** first we need to calculate the coding scheme for the supertree ***/
@@ -10157,6 +10183,8 @@ int regraft(struct taxon * position, struct taxon * newbie, struct taxon * last,
 				position->next_sibling = NULL;
 				position->parent = NULL;
 
+
+
 				/* the new tree is complete, so now score this new super tree */
 
                                 for(i=0; i<Total_fund_trees; i++) tmp_fund_scores[i] = sourcetree_scores[i];
@@ -10200,6 +10228,7 @@ int regraft(struct taxon * position, struct taxon * newbie, struct taxon * last,
 										strcpy(temptree, "");
 										print_tree(tree_top, temptree);
 										strcat(temptree, ";");
+										while(unroottree(temptree));
 										tmpscore = get_recon_score(temptree, numspectries, numgenetries);
 										}
 
@@ -15459,7 +15488,8 @@ void reroot_tree(struct taxon *outgroup)
 	outgroup->next_sibling = NULL;
 	outgroup->prev_sibling = NULL;
 	
-	parent = start->parent;
+	if(start!=NULL)parent = start->parent;
+	else parent=NULL;
 	
 	/** create new pointer on first level */
 	pointer = make_taxon();
@@ -15493,10 +15523,10 @@ void reroot_tree(struct taxon *outgroup)
 	/**** Now we need to remove any pointer taxa that are nolonger pointing to anything **/
 	clean_pointer_taxa(temp_top);
 	/*** Finally we need to put an extra node at the top */
-	newbie = make_taxon();
+/*	newbie = make_taxon();
 	newbie->daughter = temp_top;
 	temp_top->parent = newbie;
-	temp_top = newbie;
+	temp_top = newbie; */
 	free(temptree);
 	}
 	
@@ -15534,8 +15564,8 @@ void clean_pointer_taxa(struct taxon *position)
 					(position->parent)->daughter = NULL;
 				position->parent = NULL;
 				}
-			if(position == tree_top)
-				 tree_top = position->next_sibling;
+			if(position == temp_top)
+				 temp_top = position->next_sibling;
 			if(position == start) start = position->next_sibling;
 			free(position);
 			position = tmp;
@@ -15567,7 +15597,7 @@ void clean_pointer_taxa(struct taxon *position)
 				(position->daughter)->prev_sibling = position->prev_sibling;
 				(position->daughter)->parent = position->parent;
 				if(position->parent != NULL) (position->parent)->daughter = position->daughter;
-				if(position == tree_top) tree_top = position->daughter;
+				if(position == temp_top) temp_top = position->daughter;
 				if(position->fullname != NULL) free(position->fullname);
 				free(position);
 				position = tmp;
@@ -15833,7 +15863,6 @@ float tree_map(struct taxon * gene_top, struct taxon * species_top, int print)
 		presence[i] = FALSE;
 	
 	/** 1) Label all internal and external taxa on the species tree ****/
-			printf("3\n");
 
 	xnum = number_tree1(species_top, number_of_taxa);
 	xnum--;
@@ -16967,7 +16996,6 @@ float get_recon_score(char *giventree, int numspectries, int numgenetries)
 		tree_build(1, temptree, species_tree, 1, -1);
 		species_tree = temp_top;
 		temp_top = NULL;
-				printf("4\n");
 
 		num_species_roots = number_tree1(species_tree, number_of_taxa);
 
@@ -17053,16 +17081,13 @@ float get_recon_score(char *giventree, int numspectries, int numgenetries)
 					/*	for(j=0; j<i; j++)  */ /* For every rooting of the genetree */
 						for(j=gene_start; j<gene_end; j++)   
 							{
-							/*printf("trying rooting %d of %d in the genetree\t score:", j, i); */
 							position = get_branch(gene_tree, j);
 							temp_top = gene_tree;
 							/*printf("2\n"); */
 							reroot_tree(position);
 							gene_tree = temp_top;
 							temp_top = NULL;
-							printf("b\n");
 							total = tree_map(gene_tree, species_tree,0);
-						/*	printf("%f\t",j, i, total); */
 							if(total < best_total || best_total == -1)
 								{
 								best_total = total;
@@ -17240,7 +17265,6 @@ struct taxon * do_resolve_tricotomies(struct taxon * gene_tree, struct taxon * s
 	presence = malloc(2*number_of_taxa*sizeof(int));
 	for(i=0; i<(2*number_of_taxa); i++) presence[i] = FALSE;
 	/** 1) Label all internal and external taxa on the species tree ****/
-				printf("5\n");
 
 	xnum = number_tree1(species_tree, number_of_taxa);
 	xnum--;
