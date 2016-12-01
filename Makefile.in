@@ -76,7 +76,7 @@ am__include = @am__include@
 am__quote = @am__quote@
 install_sh = @install_sh@
 bin_PROGRAMS = clann
-clann_SOURCES = discrete.c pars.c phylip.c treecompare2.c
+clann_SOURCES = treecompare2.c
 clann_LDADD = $(LDADD) $(LIBREADLINE) -lm
 subdir = .
 ACLOCAL_M4 = $(top_srcdir)/aclocal.m4
@@ -86,8 +86,7 @@ CONFIG_CLEAN_FILES =
 bin_PROGRAMS = clann$(EXEEXT)
 PROGRAMS = $(bin_PROGRAMS)
 
-am_clann_OBJECTS = discrete.$(OBJEXT) pars.$(OBJEXT) phylip.$(OBJEXT) \
-	treecompare2.$(OBJEXT)
+am_clann_OBJECTS = treecompare2.$(OBJEXT)
 clann_OBJECTS = $(am_clann_OBJECTS)
 clann_DEPENDENCIES =
 clann_LDFLAGS =
@@ -99,8 +98,8 @@ LDFLAGS = @LDFLAGS@
 LIBS = @LIBS@
 depcomp = $(SHELL) $(top_srcdir)/depcomp
 am__depfiles_maybe = depfiles
-@AMDEP_TRUE@DEP_FILES = ./$(DEPDIR)/discrete.Po ./$(DEPDIR)/pars.Po \
-@AMDEP_TRUE@	./$(DEPDIR)/phylip.Po ./$(DEPDIR)/treecompare2.Po
+@AMDEP_TRUE@DEP_FILES =  \
+@AMDEP_TRUE@	./$(DEPDIR)/treecompare2.Po
 COMPILE = $(CC) $(DEFS) $(DEFAULT_INCLUDES) $(INCLUDES) $(AM_CPPFLAGS) \
 	$(CPPFLAGS) $(AM_CFLAGS) $(CFLAGS)
 CCLD = $(CC)
@@ -184,9 +183,6 @@ mostlyclean-compile:
 distclean-compile:
 	-rm -f *.tab.c
 
-@AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/discrete.Po@am__quote@
-@AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/pars.Po@am__quote@
-@AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/phylip.Po@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/treecompare2.Po@am__quote@
 
 distclean-depend:
