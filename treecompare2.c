@@ -260,7 +260,7 @@ float *scores_retained_supers = NULL, *partition_number = NULL, num_partitions =
 float *score_of_bootstraps = NULL, *yaptp_results = NULL, largest_length = 0, dup_weight = 1, loss_weight = 1, hgt_weight = 1, BESTSCORE = -1;
 time_t interval1, interval2;
 double sup=1;
-char saved_supertree[TREE_LENGTH],  *test_array, inputfilename[100];
+char saved_supertree[TREE_LENGTH],  *test_array, inputfilename[100], delimiter_char = '.';
 int trees_in_memory = 0, *sourcetreetag = NULL, remainingtrees = 0, GC, user_break = FALSE, delimiter = FALSE, print_log = FALSE, num_gene_nodes, testarraypos = 0, taxaorder=0;
 int malloc_check =0, count_now = FALSE, another_check =0;
 
@@ -367,10 +367,10 @@ int main(int argc, char *argv[])
 
     printf("\n\n\n\n\n\t******************************************************************");
     printf("\n\t*                                                                *");
-    printf("\n\t*                          Clann  v4.1.6                         *");
+    printf("\n\t*                          Clann  v%s                         *", VERSION);
     printf("\n\t*                                                                *");
-    printf("\n\t*                 web: http://www.creeveylab.org                 *");
-    printf("\n\t*                 email: chris.creevey@gmail.com                 *");
+    printf("\n\t*                 lab: http://www.creeveylab.org                 *");
+    printf("\n\t*                 email: %s                 *", PACKAGE_BUGREPORT);
     printf("\n\t*                                                                *");
     printf("\n\t*                Copyright Chris Creevey 2003-2016               *");
     printf("\n\t*                                                                *");
@@ -1084,6 +1084,7 @@ void print_commands(int num)
 		 printf("\tOptions\t\tSettings\t\t\tCurrent\n");
         printf("\t===========================================================\n");
 		printf("\n\tmaxnamelen\t<integer number> | delimited\t*none");
+		printf("\n\tdelimiter_char\t<character>\t\t\t'.'");
 		printf("\n\tsummary\t\tshort | long\t\t\t*long");
         }
     if(num == 2)
@@ -1538,8 +1539,27 @@ void execute_command(char *commandline, int do_all)
 					printf("Error: value %s not valid for maxnamelen\n\n", parsed_command[i+1]);
 					}
 				}
-            } 
+            }
+        if(strcmp(parsed_command[i], "delimiter_char") == 0)
+            {
+            max_name_length = toint(parsed_command[i+1]);
+            if(max_name_length == 0)
+                {
+                if(parsed_command[i+1][0] != '\0')
+					{
+					delimiter_char=parsed_command[i+1][0];
+					}					
+				else
+					{
+					error = TRUE;
+					printf("Error: A character must be provided as a delimiter\n");
+					}
+				}
+            }  
         }
+
+    if(delimiter == TRUE) printf("\nDelimiter for recognising species names set to '%c'\n", delimiter_char);
+
     /********** open the input file ************/
     filename[0] = '\0';
  
@@ -2618,7 +2638,7 @@ int assign_taxa_name(char *name,int fund)
 	char *delim = NULL;
 	
 	delim = malloc(10*sizeof(char));
-	delim[0] = '.';
+	delim[0] = delimiter_char;
 	delim[1] = '\0';
 
         /* Reallocate memory if the number of taxa exceeds that originally defined */
@@ -2694,7 +2714,7 @@ int assign_taxa_name(char *name,int fund)
         i=0;
 	if(delimiter)
 		{
-		while(name[i] != '.' && name[i] != '\0') i++;
+		while(name[i] != delimiter_char && name[i] != '\0') i++;
 		name[i] = '\0';
 		}
 	i=0;
@@ -13049,7 +13069,7 @@ void exclude(int do_all)
 	
 	}
 
-void returntree(char *temptree)
+void returntree(char *temptree) /* returns the tree with the names of the taxa included */
 	{
 	char string_num[10], string[TREE_LENGTH];
 	int i=0, j=0, k=0, l=0, num;
@@ -13545,6 +13565,7 @@ void sourcetree_dists(void)
 		y=0;
 		for(x=0; x<Total_fund_trees; x++)
 			{
+				printf("x=%d\ty=%d\n", x, y);
 			unroottree(fundamentals[x]);
 			if(sourcetreetag[x])
 				{
@@ -13627,8 +13648,10 @@ void sourcetree_dists(void)
 				}
 			}
 		x = y = 0;
+		printf("here\n");
 		for(i=0; i<Total_fund_trees; i++)
 			{
+			printf("y=%d\n", y);
 			if(sourcetreetag[i])
 				{
 				
@@ -15549,6 +15572,10 @@ void clean_pointer_taxa(struct taxon *position)
 		{
 		if(position->name == -1 && position->daughter == NULL)
 			{
+			if(start->parent != NULL) 
+				{
+				if(strcmp(position->weight, "") != 0) strcpy((start->parent)->weight, position->weight); /* copy weight to parent ponter node */
+				}
 			tmp = position->next_sibling;
 			if(position->next_sibling != NULL) (position->next_sibling)->prev_sibling = position->prev_sibling;
 			if(position->prev_sibling != NULL) (position->prev_sibling)->next_sibling = position->next_sibling;
@@ -15576,6 +15603,7 @@ void clean_pointer_taxa(struct taxon *position)
 	position = start;
 	
 	/*** Count the number of children of each pointer taxa, if any only have 1 then delete that pointer taxa and replace it with its daughter ***/
+	/** however if there are any weights (like branch lenghs or bootstraps) they need to be assigned to the parent of this level  (Aug 17)**/
 	
 	while(position != NULL)
 		{
@@ -16279,7 +16307,11 @@ void print_tree_labels(struct taxon *position, int **results, int treenum, struc
 	int onetoone;
 	while(position != NULL)
 		{
-		if(position->loss >= 1) results[1][position->tag]++;
+		if(position->loss >= 1) 
+			{
+			results[1][position->tag]++;
+			if(strcmp(position->weight, "") != 0) results[5][position->tag]++;
+			}
 		else
 			{
 			if(position->loss == -1) results[2][position->tag]++;
@@ -17435,8 +17467,8 @@ void reconstruct(int print_settings)
 	for(i=0; i<2*number_of_taxa; i++)
 		overall_placements[i] = 0;
 	
-	label_results = malloc(5*sizeof(int*));
-	for(i=0; i<5; i++)
+	label_results = malloc(6*sizeof(int*));
+	for(i=0; i<6; i++)
 		{
 		label_results[i] = malloc((2*number_of_taxa)*sizeof(int));
 		for(j=0; j<(2*number_of_taxa); j++)
@@ -17552,7 +17584,6 @@ void reconstruct(int print_settings)
 					gene_tree = temp_top;
 					
 					diff_overall -= malloc_check;
-					printf("c\n");
 					total = tree_map(gene_tree, species_tree,1); 
 					diff_overall += malloc_check;
 					if(total < best_total || best_total == -1)
@@ -17591,7 +17622,7 @@ void reconstruct(int print_settings)
 				gene_tree->parent = newbie;
 				gene_tree = newbie;
 				newbie = NULL;
-				printf("d\n");
+				
 				total = tree_map(gene_tree, species_tree,1);				
 				best_total = total;
 				best_mapping = gene_tree;
@@ -17612,11 +17643,12 @@ void reconstruct(int print_settings)
 					label_results[2] = number of losses at this internal branch
 					label_results[3] = number of 1:1 orthologs after this internal branch (allowing duplications and losses in external taxa)
 					label_results[4] = number of strict 1:1 orthologs after this internal branch (not allowing any duplications and losses)
+					label_results[5] = (added Aug 17) Number of Duplications at this internal branch supported by splits in the orignal gene tree (Does not include those inferred from polytomies)
 			****/
 
 			if(printfiles)
 				{	
-				for(i=0; i<5; i++)
+				for(i=0; i<6; i++)
 					{
 					for(j=0; j<(2*number_of_taxa); j++)
 						{
@@ -17638,7 +17670,7 @@ void reconstruct(int print_settings)
 				for(j=0; j<(2*number_of_taxa)-1; j++)
 					{
 					
-					fprintf(reconstructionfile, "%5d (%5d+ %5d- %5d 1:1 %5d 1:1S)\t", label_results[0][j], label_results[1][j], label_results[2][j], label_results[3][j], label_results[4][j]);
+					fprintf(reconstructionfile, "%5d (%5d+ %5d+S %5d- %5d 1:1 %5d 1:1S)\t", label_results[0][j], label_results[1][j], label_results[5][j], label_results[2][j], label_results[3][j], label_results[4][j]);
 					}
 				fprintf(reconstructionfile, "\n");
 				}
@@ -17700,7 +17732,7 @@ void reconstruct(int print_settings)
 	free(overall_placements);
 	if(label_results != NULL)
 		{
-		for(i=0; i<5; i++)
+		for(i=0; i<6; i++)
 			{
 			free(label_results[i]);
 			label_results[i] = NULL;
@@ -19204,7 +19236,7 @@ void prune_monophylies(void)
 
 
     printf("input trees will be pruned where clans of single species exist\nOne remaining representative will be chosen by ");
-    if(select_longest == TRUE) printf ("the length of the sequence (in the name, after the species (delimited with a \".\")\n");
+    if(select_longest == TRUE) printf ("the length of the sequence (in the name, after the species (delimited with a \"%c\")\n", delimiter_char);
         else printf("random\n");
 
     for(j=0; j<Total_fund_trees; j++)
