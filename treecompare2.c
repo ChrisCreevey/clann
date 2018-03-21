@@ -102,7 +102,7 @@ int tree_build (int c, char *treestring, struct taxon *parent, int fromfile, int
 void prune_tree(struct taxon * super_pos, int fund_num);
 int treeToInt(char *array);
 int shrink_tree (struct taxon * position);
-int print_pruned_tree(struct taxon * position, int count, char *pruned_tree, int fullname);
+int print_pruned_tree(struct taxon * position, int count, char *pruned_tree, int fullname, int treenum);
 void reset_tree(struct	taxon * position);
 int count_taxa(struct taxon * position, int count);
 void check_tree(struct taxon * position, int tag_id, FILE *reconstructionfile);
@@ -159,6 +159,7 @@ int comment(FILE *file);
 void showtrees(void);
 void exclude(int do_all);
 void returntree(char *temptree);
+void returntree_fullnames(char *temptree, int treenum);
 void quick(float ** items, int count);
 void qs(float **items, int left, int right);
 void include(int do_all);
@@ -236,7 +237,9 @@ void prune_monophylies();
 void untag_nodes_below(struct  taxon * position);
 void untag_nodes_above(struct  taxon * position);
 void tips(int num);
-
+void get_taxa_details(struct taxon *position);
+int basic_tree_build (int c, char *treestring, struct taxon *parent, int fullnames);
+int sort_tree(struct taxon *position);
 
 int spr_new(struct taxon * master, int maxswaps, int numspectries, int numgenetries);
 
@@ -1508,7 +1511,7 @@ int parse_command(char *command)
 void execute_command(char *commandline, int do_all)
     {
     int i = 0, j=0, k=0, printfundscores = FALSE, error = FALSE;
-    char c = '\0', temp[NAME_LENGTH], filename[100], *newbietree, string_num[1000];
+    char c = '\0', temp[NAME_LENGTH], filename[10000], *newbietree, string_num[1000];
 	float num = 0;
 
     for(i=0; i<num_commands; i++)
@@ -2292,13 +2295,25 @@ int nexusparser(FILE *nexusfile)
 											while(((c = getc(nexusfile)) == ' ' || c == '\t' || c == '\n' || c == '\r') && !feof(nexusfile));
 											i=1;
 											string[0] = c;
-											while((c = getc(nexusfile)) != ']' &&!feof(nexusfile))
+											while((c = getc(nexusfile)) != ']' && c != '/' &&!feof(nexusfile))
 												{
 												string[i] = c;
 												if(string[i] != ' ') i++;
 												}
 											string[i] = '\0';
-											tree_weights[Total_fund_trees] = tofloat(string);
+											if(c == '/') /* if PAUP has saved tree weights as a fraction (i.e. 1/2 or 4/5 etc) */
+												{
+												tree_weights[Total_fund_trees] = tofloat(string);
+												i=0;
+												while((c = getc(nexusfile)) != ']' &&!feof(nexusfile))
+													{
+													string[i] = c;
+													if(string[i] != ' ') i++;
+													}
+												string[i] = '\0';
+												tree_weights[Total_fund_trees] = tree_weights[Total_fund_trees]/tofloat(string);
+												}												
+											
 											}
 										else
 											while((c = getc(nexusfile)) != ']' &&!feof(nexusfile));
@@ -2632,14 +2647,15 @@ void input_file_summary(int do_all)
 
 
 
-int assign_taxa_name(char *name,int fund)
+int assign_taxa_name(char *inputname,int fund)
 	{
 	int i =0, j=0, k=0, answer = -1, taxa_on_tree = 0;
-	char *delim = NULL;
+	char *delim = NULL, name[NAME_LENGTH];
 	
 	delim = malloc(10*sizeof(char));
 	delim[0] = delimiter_char;
 	delim[1] = '\0';
+	name[0] = '\0';
 
         /* Reallocate memory if the number of taxa exceeds that originally defined */
         if(number_of_taxa+1 == TAXA_NUM*name_assignments)
@@ -2714,8 +2730,16 @@ int assign_taxa_name(char *name,int fund)
         i=0;
 	if(delimiter)
 		{
-		while(name[i] != delimiter_char && name[i] != '\0') i++;
+		while(inputname[i] != delimiter_char && inputname[i] != '\0')
+			{
+			name[i]=inputname[i];
+			i++;
+			}
 		name[i] = '\0';
+		}
+	else
+		{
+		strcpy(name, inputname);
 		}
 	i=0;
 	while(answer == -1)
@@ -3627,22 +3651,60 @@ int texttoint(char c)
 
     
     /* This function returns the number that represents the given tree */
-int treeToInt(char *array)
+int treeToInt(char *tree)
     {
     int i;
+    struct taxon *sorted_tree = NULL;
+
+    /* The first part is to order the taxa in the tree so that they are in the order that they would if the tree was produced by "intTOtree"
+       This is done by starting at the the highest-level componenets of the tree and  find the lowest taxon in each, and reorder the compoentes so the taxa IDs are in order.
+       Then go to each of the sub-components and continue the process.
+
+       for example:
+       (1,(3,0),(4,2));
+       As usual, each component is eiather a taxon or a set of parired parentheses. 
+       To re-order this tree, start with the first component, which is the outer-most pair of parentheses. 
+       This has 3 components:
+       		1
+       		(3,0)
+       		(4,2)
+		These components ordered by the lowest taxon ID in each, would be:
+			(3,2) - because it hosts taxon 0.
+			1	  - because it has taxon 1.
+			(4,2) - because it has taxon 2.
+		This results in: ((3,0), 1, (4,2));
+
+		Next take the next component (3,0). The two sub-components are 3 and 0 (obviously).
+		These ordered result in (0,3) (obviuosly:)
+		The tree now looks like: ((0,3),1,(4,2));
+
+		Do this to the final component with more than one taxa (4,2) and you finally end up with the tree:
+
+		((0,3),1,(2,4));
+
+	*/
+
+
     /* The first part is to calculate the path of the tree, given the tree in nested parenthesis format */
     /*  this part of the code assumes that the tree being tested has been created using the intToTree function. The reason for this
         is that that function always puts the position of a new taxon after the parenthesis or taxon it is to be paired with.
         If a tree to be tested is made in any other way, it will lead to these assumptions to be violated and the function may crash or
         the wrong number may be calculated. cc 16/06/2003    */
-        
-    for(i=number_of_taxa; i>-3; i--)
-        {
-        
-        
-        
-        }
+
+    /* Step 1 Buid the tree in memory */
+
+    temp_top = NULL;
+    tree_build(1, tree, sorted_tree, FALSE, -1);
+    sorted_tree = temp_top;
+    temp_top = NULL;
+
+
+    /* Step 2: carry out a recursive depth-first search of the tree, finding and labelling each clade with the lowest taxon ID */
+
+    sort_tree (sorted_tree);
     
+
+    /* Step 3: reverse the tree build, noting the path taken */
     
     
     
@@ -3652,7 +3714,37 @@ int treeToInt(char *array)
     
     return(1);
     }
-    
+ 
+ int sort_tree(struct taxon *position)   
+ 	{
+    	/* This function will take as input a tree built in memory */
+ 		/* It will return the same tree, but where the compoenents have been ordered so that they are in the numberical order that would have arose from the intTOtree */
+
+ 	struct taxon *start = position;
+ 	int mintaxon = number_of_taxa;
+
+ 	while(position != NULL)
+ 		{	
+ 		if(position -> daughter != NULL)
+ 			{
+ 			position->tag = sort_tree(position->daughter);
+ 			}
+ 		else
+ 			{	
+ 			position->tag = position->name;
+ 			}
+ 		position = position->next_sibling;
+ 		}
+ 	position = start;
+
+	while(position != NULL)
+ 		{
+ 		if(position->tag < mintaxon) mintaxon = position->tag;
+ 		}
+
+ 	/* now sort the sibliing on this level based on the number in the tags */
+ 	return(1);
+    }
     
     
     /* this function builds a tree given its number and the number of taxa */
@@ -4319,7 +4411,7 @@ float compare_trees(int spr)
 				shrink_tree(tree_top);    /* Shrink the pruned tree by switching off any internal nodes that are not needed */
 				
 				pruned_tree[0] = '\0'; /* initialise the string */
-				if(print_pruned_tree(tree_top, 0, pruned_tree, FALSE) >1)
+				if(print_pruned_tree(tree_top, 0, pruned_tree, FALSE, 0) >1)
 					{
 					tmp[0] = '\0';
 					strcpy(tmp, "(");
@@ -4407,7 +4499,7 @@ int tree_build (int c, char *treestring, struct taxon *parent, int fromfile, int
 		(position->parent)->daughter = position;
 		}
 		
-	
+	taxaorder=0;
 	out = FALSE;
 	while(!out && treestring[c] != ';')
 		{
@@ -4478,7 +4570,7 @@ int tree_build (int c, char *treestring, struct taxon *parent, int fromfile, int
 						i++;
 						c++;
 					}while(treestring[c] != ')' && treestring[c] != ',' && treestring[c] != '(' && treestring[c] != ':');
-					
+				temp[i] = '\0';
 
 
 				if(fromfile)  /* if the tree has come from a file, then the tree will contain the actual taxa names, unlike if it was created by all_trees, where the tree will contain taxa numbers */
@@ -4513,6 +4605,127 @@ int tree_build (int c, char *treestring, struct taxon *parent, int fromfile, int
         c++;
         return(c);
 	}
+
+/* Basic_Tree_build:
+	This function builds a tree in memory withouth incrementing the number of taxa etc in, bascially this is for building a tree where do don;t needall the bells and whistles. This gets used in Exclude taxa to help deal with gene names */
+
+int basic_tree_build (int c, char *treestring, struct taxon *parent, int fullnames)
+	{
+	
+	char temp[NAME_LENGTH], tmptag[100];
+	struct taxon *position = NULL, *extra = NULL;
+	int i = 0, j =0, end = FALSE, out = FALSE, onlylength = FALSE;
+	position = make_taxon();  /* make a new instance of the taxon for this level */
+
+	tmptag[0] = '\0';
+	for(i=0; i<NAME_LENGTH; i++)
+		temp[i] = '\0';
+	
+	if(parent == NULL) temp_top = position;  /* assign the pointer in the array to the top of this tree */
+	else
+		{
+		position->parent = parent;
+		(position->parent)->daughter = position;
+		}
+		
+	out = FALSE;
+	while(!out && treestring[c] != ';')
+		{
+		switch (treestring[c])
+			{
+			case '(':
+				/* If we assigned this taxon before */
+				if(position->daughter != NULL || position->name != -1)
+					{
+					/* make a new taxon */
+					extra = make_taxon();
+					position->next_sibling = extra;
+					extra->prev_sibling = position;
+					position = extra;
+					}
+                                c++;
+				c = basic_tree_build(c, treestring, position, fullnames);
+				i=0;
+				onlylength = FALSE;
+				if(treestring[c] == ':') onlylength=TRUE;
+				while(treestring[c+i] != ')' && treestring[c+i] != ',' && treestring[c+i] != ';')
+					{
+					position->weight[i] = treestring[c+i];
+					i++;
+					}
+				c += i;
+				position->weight[i] = '\0';
+				break;
+				
+			case ',':
+				c++;
+				break;
+				
+			case ')':
+				out = TRUE;
+				break;
+			
+			case ':':
+				i=0;
+				while(treestring[c] != ')' && treestring[c] != '(' && treestring[c] != ',' && treestring[c] != ';')
+					{
+					position->weight[i] = treestring[c];
+					i++;
+					c++;
+					}
+				position->weight[i] = '\0';
+				break;
+			case ';':
+				break;
+				
+			default:
+					
+				/* If we assigned this taxon before */
+				if(position->daughter != NULL || position->name != -1)
+					{
+					/* make a new taxon */
+					extra = make_taxon();
+					position->next_sibling = extra;
+					extra->prev_sibling = position;
+					position = extra;
+					}
+                                        
+				for(i=0; i<NAME_LENGTH; i++) temp[i] = '\0';
+				i=0;
+				end = FALSE;
+				do{
+					temp[i] = treestring[c];
+						i++;
+						c++;
+					}while(treestring[c] != ')' && treestring[c] != ',' && treestring[c] != '(' && treestring[c] != ':');
+				temp[i] = '\0';
+
+
+				if(fullnames == TRUE)  /* if the tree has come from a file, then the tree will contain the actual taxa names, unlike if it was created by all_trees, where the tree will contain taxa numbers */
+					{
+					/* assign the name to the taxon */
+					position->name = assign_taxa_name(temp, FALSE);
+					position->fullname = malloc((strlen(temp)+10)*sizeof(char));
+					position->fullname[0] = '\0';
+					strcpy(position->fullname,temp);
+					}
+				else  /* if the neame is a taxon ID (i.e. a number) */
+					{
+					/* now need to change the string to an integer number */
+					position->name = 0;
+					for(j=i; j>0; j--)
+						{
+						position->name += ( pow(10, (i-j)) * (texttoint(temp[j-1])));
+						}
+					}
+				break;		
+			}
+		}
+        c++;
+        return(c);
+	}
+
+
 
 
 /* This makes the taxon structure when we need it so I don't have to keep typing the assignments all the time */
@@ -4735,13 +4948,14 @@ int shrink_tree (struct taxon * position)
 	
 
 /* This function is only used to print the pruned supertree */
-int print_pruned_tree(struct taxon * position, int count, char *pruned_tree, int fullname)
+int print_pruned_tree(struct taxon * position, int count, char *pruned_tree, int fullname, int treenum)
     {
     char *name =NULL, temper[100];
     int i=0;
     
     name = malloc(1000000*sizeof(char));
     if(!name) memory_error(33);
+    name[0] = '\0';
     
     while(position != NULL)
         {
@@ -4755,12 +4969,12 @@ int print_pruned_tree(struct taxon * position, int count, char *pruned_tree, int
                     } 
                 strcat(pruned_tree, "(");
                 count++;
-                print_pruned_tree(position->daughter, 0, pruned_tree, fullname);
+                print_pruned_tree(position->daughter, 0, pruned_tree, fullname, treenum);
                 strcat(pruned_tree, ")");
 				}
             else
                 {
-                count = print_pruned_tree(position->daughter, count, pruned_tree, fullname);
+                count = print_pruned_tree(position->daughter, count, pruned_tree, fullname, treenum);
                 }
             }
         else
@@ -5436,7 +5650,7 @@ void bootstrap_search(void)
                  /*** initialise everything **/
                 for(j=0; j<Total_fund_trees; j++)
                     {
-                    strcpy(fundamentals[i], "");
+                    strcpy(fundamentals[j], "");
                     for(k=0; k<number_of_taxa; k++)
                         {
                         presence_of_taxa[j][k] = FALSE;
@@ -5446,7 +5660,6 @@ void bootstrap_search(void)
                             }
                         }
                     }
-                
                 /***** Create the bootstrap replicate of fundamental trees  **********/
                 for(j=0; j<Total_fund_trees; j++)
                     {
@@ -5466,7 +5679,6 @@ void bootstrap_search(void)
                         }
                             
                     }
-                    
                 /****** Test whether or not every taxa is represented in this replicate ******/
                 
                 allpresent = TRUE;
@@ -5480,7 +5692,6 @@ void bootstrap_search(void)
                             taxa_present[k] = TRUE;
                         }
                     }
-                
                 for(j=0; j<number_of_taxa; j++)
                     {
                     if(taxa_present[j] == FALSE)
@@ -5491,7 +5702,6 @@ void bootstrap_search(void)
                     }
                 
 
-                
                 /***** End Test *****/
                 
                 if(allpresent)
@@ -8840,14 +9050,14 @@ int coding(int nrep, int search, int ptpreps)
 						else
 							fprintf(BR_file, "nj;\n");
 						fprintf(BR_file, "\tsavetrees FILE=");
-						if(strcmp(filename, "") == 0) fprintf(BR_file,"MRP.tree Format=Phylip");    
-						else fprintf(BR_file,"%s Format=Phylip", filename);
+						if(strcmp(filename, "") == 0) fprintf(BR_file,"MRP.tree Format=nexus treeWts=yes");    
+						else fprintf(BR_file,"%s Format=nexus treeWts=yes", filename);
 						}
 					if(search==0) 
 						{
 						fprintf(BR_file,"set increase=auto notifybeep=no errorbeep=no;\n\talltrees;\n\tshowtrees;\n\tsavetrees FILE=");
-						if(strcmp(filename, "") == 0) fprintf(BR_file,"MRP.tree Format=Phylip");    
-						else fprintf(BR_file,"%s Format=Phylip", filename);
+						if(strcmp(filename, "") == 0) fprintf(BR_file,"MRP.tree Format=nexus treeWts=yes");    
+						else fprintf(BR_file,"%s Format=nexus treeWts=yes", filename);
 						}
 					if(nrep==0) fprintf(BR_file," Append=no replace=yes;\n\tquit;\n\nend;\n");  /* if there is one 1 rep */
 					if(nrep==1) fprintf(BR_file," Append=no replace=yes;\n\nend;\n");     	/* if this is the forst of a few reps */
@@ -11132,7 +11342,7 @@ void generatetrees(void)
 							shrink_tree(tree_top);    /* Shrink the pruned tree by switching off any internal nodes that are not needed */
 							for(j=0; j<TREE_LENGTH; j++) pruned_tree[j] = '\0';
 							pruned_tree[0] = '\0'; /* initialise the string */
-							if(print_pruned_tree(tree_top, 0, pruned_tree, FALSE) >1)
+							if(print_pruned_tree(tree_top, 0, pruned_tree, FALSE, 0) >1)
 								{
 								tmp[0] = '\0';
 								strcpy(tmp, "(");
@@ -12183,7 +12393,7 @@ void showtrees(void)
 	char *temptree, string_num[10], namecontains[NAME_LENGTH], **containstaxa = NULL, savedfile[100], temptree1[TREE_LENGTH], tmp[TREE_LENGTH];
 	FILE *showfile = NULL;
 	float bestscore =10000000, worstscore = 0, **tempscores = NULL;
-	int *tempsourcetreetag = NULL, display = TRUE, best_total = -1, total = 0;
+	int *tempsourcetreetag = NULL, display = TRUE, best_total = -1, total = 0, display_fullnames = FALSE;
 	struct taxon *position = NULL, *species_tree = NULL, *gene_tree = NULL, *best_mapping = NULL, *unknown_fund = NULL, *pos = NULL,*copy = NULL;
 	
 	tempscores = malloc(Total_fund_trees*sizeof(float *));
@@ -12209,6 +12419,23 @@ void showtrees(void)
 	temptree1[0] = '\0';
 	for(i=0; i<num_commands; i++)
 		{
+		if(strcmp(parsed_command[i], "fullnames") == 0)
+			{
+			if(strcmp(parsed_command[i+1], "no") == 0)
+				display_fullnames = FALSE;
+			else
+				{
+				if(strcmp(parsed_command[i+1], "yes") == 0)
+					{
+					display_fullnames = TRUE;
+					}
+				else
+					{
+					printf("ERROR: %s not valid modifier of \"fullnames\"\n", parsed_command[i+1]);
+					error = TRUE;
+					}
+				}
+			}
 		if(strcmp(parsed_command[i], "display") == 0)
 			{
 			if(strcmp(parsed_command[i+1], "no") == 0)
@@ -12218,7 +12445,6 @@ void showtrees(void)
 				if(strcmp(parsed_command[i+1], "yes") == 0)
 					{
 					display = TRUE;
-					savetrees = TRUE;
 					}
 				else
 					{
@@ -12470,7 +12696,10 @@ void showtrees(void)
 			        
 			        temp_top = NULL;
 			        taxaorder=0;
-			        tree_build(1, fundamentals[j], tree_top, 0, j); /* build the tree passed to the function */
+			        temptree[0] = '\0';
+			        strcpy(temptree, fundamentals[j]);
+					returntree_fullnames(temptree, j);
+			        basic_tree_build(1, temptree, tree_top, TRUE);
 
 			        tree_top = temp_top;
 			        temp_top = NULL;
@@ -12478,7 +12707,7 @@ void showtrees(void)
 
 			        shrink_tree(tree_top);    /* Shrink the pruned tree by switching off any internal nodes that are not needed */
 			        temptree[0] = '\0'; /* initialise the string */
-			        if(print_pruned_tree(tree_top, 0, temptree, TRUE) >1)
+			        if(print_pruned_tree(tree_top, 0, temptree, TRUE, j) >1)
 			            {
 			            tmp[0] = '\0';
 			            strcpy(tmp, "(");
@@ -12929,7 +13158,11 @@ void exclude(int do_all)
 						        
 						        temp_top = NULL;
 						        taxaorder=0;
-						        tree_build(1, fundamentals[j], tree_top, 0, j); /* build the tree passed to the function */
+						        strcpy(temptree, fundamentals[j]);
+								returntree_fullnames(temptree, j);
+			                    basic_tree_build(1, temptree, tree_top, TRUE);
+
+						       /*  tree_build(1, fundamentals[j], tree_top, 0, j); build the tree passed to the function */
 
 						        tree_top = temp_top;
 						        temp_top = NULL;
@@ -12937,7 +13170,7 @@ void exclude(int do_all)
 
 						        shrink_tree(tree_top);    /* Shrink the pruned tree by switching off any internal nodes that are not needed */
 						        temptree[0] = '\0'; /* initialise the string */
-						        if(print_pruned_tree(tree_top, 0, temptree, TRUE) >1)
+						        if(print_pruned_tree(tree_top, 0, temptree, TRUE, j) >1)
 						            {
 						            tmp[0] = '\0';
 						            strcpy(tmp, "(");
@@ -13126,6 +13359,71 @@ void returntree(char *temptree) /* returns the tree with the names of the taxa i
 		}
 	temptree[k] = ';';
 	temptree[k+1] = '\0';
+
+	
+	}
+
+void returntree_fullnames(char *temptree, int treenum) /* returns the tree with the names of the taxa included */
+	{
+	char string_num[10], string[TREE_LENGTH];
+	int i=0, j=0, k=0, l=0, num;
+	
+	string[0] = '\0';
+	strcpy(string, temptree);
+	strcpy(temptree, "");
+	string_num[0] = '\0';
+	taxaorder=0;
+	j=0; k=0;
+	while(string[j] != ';')
+		{
+		switch(string[j])
+			{
+			case ')':
+				temptree[k] = ')';
+				j++; k++;
+				while(string[j] != '(' && string[j] != ')' && string[j] != ',' && string[j] != ';' && string[j] != ':')
+					{
+					temptree[k] = string[j];
+					j++; k++;
+					}
+				break;
+			case '(':
+			case ',':
+				temptree[k] = string[j];
+				j++; k++;
+				break;
+			case ':':
+				while(string[j] != '(' && string[j] != ')' && string[j] != ',' && string[j] != ';')
+					{
+					temptree[k] = string[j];
+					j++; k++;
+					}
+				break;
+			default:
+				for(l=0; l<10; l++) string_num[l] = '\0';
+				l=0;
+				while(string[j] != '(' && string[j] != ')' && string[j] != ',' && string[j] != ';' && string[j] != ':')
+					{
+					string_num[l] = string[j];
+					l++; j++;
+					}
+				string_num[l] = '\0';
+				num = atoi(string_num);
+				l=0;
+				
+				while(fulltaxanames[treenum][taxaorder][l] != '\0')
+					{
+					temptree[k] = fulltaxanames[treenum][taxaorder][l];
+					k++;
+					l++;
+					}
+				taxaorder++;
+				break;
+			}
+		}
+	temptree[k] = ';';
+	temptree[k+1] = '\0';
+
 
 	
 	}
@@ -13938,7 +14236,7 @@ void sourcetree_dists(void)
 
 void exclude_taxa(int do_all)
 	{
-	char  *pruned_tree = NULL, tmp[TREE_LENGTH], *command = NULL, tmpfilename[10000], previnputfilename[10000];
+	char *temptree, *pruned_tree = NULL, tmp[TREE_LENGTH], *command = NULL, tmpfilename[10000], previnputfilename[10000];
 	int i=0, j=0, q=0, error = FALSE, taxachosen = 0, found = FALSE, *tobeexcluded = NULL, k=0, l=0, done = FALSE, num_left = 0, min_taxa = 4;
 	FILE *tempfile = NULL;
 	
@@ -13949,6 +14247,8 @@ void exclude_taxa(int do_all)
 
 	tobeexcluded = malloc(number_of_taxa*sizeof(int));
 
+	temptree = malloc(TREE_LENGTH*sizeof(char));
+	temptree[0] = '\0';
 
 	for(i=0; i<number_of_taxa; i++) tobeexcluded[i] = FALSE;
 	for(i=0; i<num_commands; i++)
@@ -14037,6 +14337,10 @@ void exclude_taxa(int do_all)
 				if(l>= min_taxa)
 					{
 					num_left++;
+					strcpy(temptree, fundamentals[i]);
+					returntree_fullnames(temptree, i);
+					/*printf("%s\n", temptree); */
+					
 					/***  build the sourcetree in memory ***/
 					if(tree_top != NULL)
                         {
@@ -14044,20 +14348,25 @@ void exclude_taxa(int do_all)
                         tree_top = NULL;
                         }
                     temp_top = NULL;
-                    tree_build(1, fundamentals[i], tree_top, FALSE, -1);
+                    basic_tree_build(1, temptree, tree_top, TRUE);
                     tree_top = temp_top;
                     temp_top = NULL;
+                   
 
 					
 					/***  prune the sourcetree of any of the taxa **/
 					prune_taxa_for_exclude(tree_top, tobeexcluded);
 					shrink_tree(tree_top);    /* Shrink the pruned tree by switching off any internal nodes that are not needed */
+
 					for(j=0; j<TREE_LENGTH; j++)
 						{
 						pruned_tree[j] = '\0'; /* initialise the string */
 						tmp[j] = '\0';
 						}
-					if(print_pruned_tree(tree_top, 0, pruned_tree, FALSE) >1)
+					/*get_taxa_details(tree_top);
+                   printf("--\n"); */
+					
+					if(print_pruned_tree(tree_top, 0, pruned_tree, TRUE, i) >1)
 						{
 						tmp[0] = '\0';
 						strcpy(tmp, "(");
@@ -14065,11 +14374,7 @@ void exclude_taxa(int do_all)
 						strcat(tmp, ")");
 						strcpy(pruned_tree, tmp);
 						}
-					strcat(pruned_tree, ";");
-					/*** print the pruned sourcetree to the output file ***/
-					returntree(pruned_tree);
-					strncpy(tmp, pruned_tree, strlen(pruned_tree)-1);
-					strcpy(pruned_tree, tmp);
+					
 					fprintf(tempfile, "%s", pruned_tree);
 					fprintf(tempfile, " [%f]; [ %s]\n", tree_weights[i], tree_names[i]);
 					}
@@ -14086,6 +14391,7 @@ void exclude_taxa(int do_all)
 		
 	free(tobeexcluded);
 	free(pruned_tree);
+	free(temptree);
 	
 	if(!error)
 		{
@@ -14361,7 +14667,7 @@ void spr_dist(void)
 					shrink_tree(tree_top);    /* Shrink the pruned tree by switching off any internal nodes that are not needed */
 					for(j=0; j<TREE_LENGTH; j++) pruned_tree[j] = '\0';
 					pruned_tree[0] = '\0'; /* initialise the string */
-					if(print_pruned_tree(tree_top, 0, pruned_tree, FALSE) >1)
+					if(print_pruned_tree(tree_top, 0, pruned_tree, FALSE, 0) >1)
 						{
 						tmp[0] = '\0';
 						strcpy(tmp, "(");
@@ -14721,7 +15027,7 @@ int string_SPR(char * string)
 		shrink_tree(tree_top);
 		temptree[0] = '\0';
 		/** printf the result **/
-		if(print_pruned_tree(tree_top, 0, temptree, FALSE) >1)
+		if(print_pruned_tree(tree_top, 0, temptree, FALSE, 0) >1)
 			{
 			tmp[0] = '\0';
 			strcpy(tmp, "(");
@@ -15093,7 +15399,7 @@ void exhaustive_SPR(char * string)
 			pruned_tree[0] = '\0';
 			
 			/** print the result **/
-			if(print_pruned_tree(tree_top, 0, pruned_tree, FALSE) >1)
+			if(print_pruned_tree(tree_top, 0, pruned_tree, FALSE, 0) >1)
 				{
 				tmp[0] = '\0';
 				strcpy(tmp, "(");
@@ -15669,6 +15975,26 @@ struct taxon * get_branch(struct taxon *position, int name)
 		}
 	return(answer);
 	}
+
+void get_taxa_details(struct taxon *position)
+	{
+	struct taxon *start = position;
+	
+	
+	while(position != NULL)
+		{
+		if(position->daughter != NULL)
+			{
+			get_taxa_details(position->daughter);
+			}
+		else
+			{
+			printf("Taxon %d Fullname %s\n", position->name, position->fullname);
+			}
+		position = position->next_sibling;
+		}	
+	}
+
 
 struct taxon * get_taxon(struct taxon *position, int name)
 	{
@@ -19208,10 +19534,11 @@ void check_treeisok(struct taxon *position)
 void prune_monophylies(void)
     {
     int i=0, j=0, num_nodes=0, trees_included=0, trees_excluded=0;
-    char *pruned_tree = NULL, *tmp = NULL, filename2[1000];
+    char *pruned_tree = NULL, *tmp = NULL, filename2[1000], temptree[TREE_LENGTH];
     FILE *pm_outfile = NULL; 
     select_longest=FALSE;
     filename2[0]='\0';
+    temptree[0] = '\0';
     strcpy(filename2, "prunedtrees.txt");
     
     tmp = malloc(TREE_LENGTH*sizeof(char));
@@ -19246,7 +19573,19 @@ void prune_monophylies(void)
         
         temp_top = NULL;
         taxaorder=0;
-        tree_build(1, fundamentals[j], tree_top, 0, j); /* build the tree passed to the function */
+        strcpy(temptree, fundamentals[j]);
+		returntree_fullnames(temptree, j);
+
+		/***  build the sourcetree in memory ***/
+		if(tree_top != NULL)
+	        {
+	        dismantle_tree(tree_top);
+	        tree_top = NULL;
+	        }
+	    temp_top = NULL;
+	    basic_tree_build(1, temptree, tree_top, TRUE);
+
+       /* tree_build(1, fundamentals[j], tree_top, 0, j);  build the tree passed to the function */
         tree_top = temp_top;
         temp_top = NULL;
         reset_tree(tree_top);
@@ -19254,7 +19593,7 @@ void prune_monophylies(void)
         identify_species_specific_clades(tree_top);  /* Call recursive function to travel down the tree looking for species-specific clades */
         shrink_tree(tree_top);    /* Shrink the pruned tree by switching off any internal nodes that are not needed */
         pruned_tree[0] = '\0'; /* initialise the string */
-        if(print_pruned_tree(tree_top, 0, pruned_tree, TRUE) >1)
+        if(print_pruned_tree(tree_top, 0, pruned_tree, TRUE, j) >1)
             {
             tmp[0] = '\0';
             strcpy(tmp, "(");
