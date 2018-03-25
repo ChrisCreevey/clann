@@ -20,7 +20,7 @@
     <header>
       <div class="inner">
         <h1>Clann</h1>
-        <h2>CLANN: Software for inferring phylogenetic supertrees.</h2>
+        <h2>Clann: Investigating phylogenetic information through supertree analyses.</h2>
         <a href="https://github.com/ChrisCreevey/clann" class="button"><small>View project on</small> GitHub</a>
       </div>
     </header>
@@ -31,7 +31,10 @@
           <h3>
 <a id="what-is-clann" class="anchor" href="#what-is-clann" aria-hidden="true"><span aria-hidden="true" class="octicon octicon-link"></span></a>What is Clann?.</h3>
 
-<p>Clann (the Irish word for "family"), is a free software program designed and written by <a href="https://github.com/ChrisCreevey">Chris Creevey</a> with <a href="http://mcinerneylab.com/">James McInerney</a>. The purpose of the program is to implement methods of determining the optimal phylogenetic supertree, given a set of input source trees.</p>
+<p>Clann (the Irish word for "family"), is a free software program designed and written by <a href="https://github.com/ChrisCreevey">Chris Creevey</a> with <a href="http://mcinerneylab.com/">James McInerney</a>.</p>
+
+<p>Clann constructs supertrees and allows exploration of the underlying phylogenomic information in gene trees. Clann implements several well known supertree methods (including the ability to apply bootstrapping to them) can calculate consensus trees and provides methods to manage sets of gene trees, pruning selected taxa, filtering based on a number of criteria, automatically pruning species-specific duplicates and more. Also implemented is a gene-tree reconciliation approach to try to utilise genetic information from more than just single-copy gene-trees, this can be used as a criterion for estimating species trees. Feed back on these approaches are welcome! Finally, Clann can also calculate Robinson-Doulds (RF) and SPR distances between sets of trees, create randomised versions of sets of trees and implementes a PTP test for informativeness (the YAPTP test) of a set of trees provided. Clann has been continually developed since 2003 and suggestions for new features and tools are welcome.</p>
+          
 <p>You can see a list of the many papers that have used Clann at <a href="https://scholar.google.co.uk/citations?view_op=view_citation&hl=en&user=7JkjEd4AAAAJ&citation_for_view=7JkjEd4AAAAJ:UeHWp8X0CEIC" target="_blank">Clanns Google Scholar Page</a><p>
 
 <h3>
@@ -59,6 +62,22 @@
 
 <p>Having trouble with Clann? Check out our <a href="https://github.com/ChrisCreevey/clann/blob/master/Docs/Clann3%20manual.pdf" target="_blank">documentation</a> or contact Chris <a href="http://www.creeveylab.org/2014/06/contact.html" target="_blank">here</a>.</p>
 
+<h3>
+<a id="Using Clann" class="anchor" href="#using-clann" aria-hidden="true"><span aria-hidden="true" class="octicon octicon-link"></span></a>Using Clann</h3>
+<p>
+<pre>
+  <code>
+   Usage: "clann -lnh [-c commands file] [tree file]"
+  </code>
+</pre>
+
+Where [tree file] is an optional Nexus or Phylip formatted file of phylogenetic trees
+-l turn on logging of screen output to file "clann.log"
+-n turns off interactive mode - requires commands to be provided in a nexus 'clann block' or with '-c'
+-c <file name> specifies a file with commands to be executed (each seperated by ';')
+-h prints this message
+          
+ 
 
         </section>
 
