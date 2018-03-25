@@ -33,7 +33,7 @@
 
 <p>Clann (the Irish word for "family"), is a free software program designed and written by <a href="https://github.com/ChrisCreevey">Chris Creevey</a> with <a href="http://mcinerneylab.com/">James McInerney</a>.</p>
 
-<p><em>Clann constructs supertrees and allows exploration of the underlying phylogenomic information in gene trees.</em></p><p> Clann implements several well known supertree methods (including the ability to apply bootstrapping to them) can calculate consensus trees and provides methods to manage sets of gene trees, pruning selected taxa, filtering based on a number of criteria, automatically pruning species-specific duplicates and more.</p><p>Also implemented is a gene-tree reconciliation approach to try to utilise genetic information from more than just single-copy gene-trees, this can be used as a criterion for estimating species trees. Feed back on these approaches are welcome!</p><p>Finally, Clann can also calculate Robinson-Doulds (RF) and SPR distances between sets of trees, create randomised versions of sets of trees and implementes a PTP test for informativeness (the YAPTP test) of a set of trees provided.</p><p> Clann has been continually developed since 2003 and suggestions for new features and tools are welcome.</p>
+<p><b>Clann constructs supertrees and allows exploration of the underlying phylogenomic information in gene trees.</b></p><p> Clann implements several well known supertree methods (including the ability to apply bootstrapping to them) can calculate consensus trees and provides methods to manage sets of gene trees, pruning selected taxa, filtering based on a number of criteria, automatically pruning species-specific duplicates and more.</p><p>Also implemented is a gene-tree reconciliation approach to try to utilise genetic information from more than just single-copy gene-trees, this can be used as a criterion for estimating species trees. Feed back on these approaches are welcome!</p><p>Finally, Clann can also calculate Robinson-Doulds (RF) and SPR distances between sets of trees, create randomised versions of sets of trees and implementes a PTP test for informativeness (the YAPTP test) of a set of trees provided.</p><p> Clann has been continually developed since 2003 and suggestions for new features and tools are welcome.</p>
           
 <p>You can see a list of the many papers that have used Clann at <a href="https://scholar.google.co.uk/citations?view_op=view_citation&hl=en&user=7JkjEd4AAAAJ&citation_for_view=7JkjEd4AAAAJ:UeHWp8X0CEIC" target="_blank">Clanns Google Scholar Page</a><p>
 
@@ -52,12 +52,6 @@
 <p>Creevey, C.J. and McInerney, J.O. (2009) Trees from Trees: Constructing Phylogenetic Supertrees Using CLANN. In: DNA sequence analysis, Ed. David Posada. Humana Press. 537:139-161.<a href="McInerney-chapter.pdf" target="_blank"> pdf</a></p>
 
 <h3>
-<a id="authors-and-further-infomration" class="anchor" href="#authors-and-further-infomration" aria-hidden="true"><span aria-hidden="true" class="octicon octicon-link"></span></a>Authors and further information</h3>
-
-<p>Chris Creevey, Aberystwyth Univeristy, UK. (<a href="https://github.com/ChrisCreevey" class="user-mention">@ChrisCreevey</a>) <a href="http://www.creeveylab.org" target="_blank"> Lab website</a></p>
-<p>James McInerney, Manchester University, UK.<a href="http://mcinerneylab.com/" target="_blank"> Lab website</a></p>
-
-<h3>
 <a id="support-or-contact" class="anchor" href="#support-or-contact" aria-hidden="true"><span aria-hidden="true" class="octicon octicon-link"></span></a>Support or Contact</h3>
 
 <p>Having trouble with Clann? Check out our <a href="https://github.com/ChrisCreevey/clann/blob/master/Docs/Clann3%20manual.pdf" target="_blank">documentation</a> or contact Chris <a href="http://www.creeveylab.org/2014/06/contact.html" target="_blank">here</a>.</p>
@@ -68,11 +62,13 @@
   to install type:
    "./configure"
   followed by:
-	 "make"
+	 "make
+	 
+   Clann will then be located in this directory, this can then be copied to a directory on your path (like '~/bin'). 
+   The use of "make install" may not work depending on write privileges
   </code>
  </pre>
 
-<p>Clann will then be located in this directory, this can then be copied to a directory on your path (like '~/bin'). The use of "make install" may not work depending on write privileges</p>
 
 <h3>
 <a id="Using Clann" class="anchor" href="#using-clann" aria-hidden="true"><span aria-hidden="true" class="octicon octicon-link"></span></a>Using Clann</h3>
