@@ -14,7 +14,8 @@
 
 # Aim
 
-To construct supertrees and explore the underlying phylogenomic information from partially overlapping datasets. The program Clann has been developed to provide implementations of several supertree methods. The methods implemented all allow the investigation of data in a phylogenomic context. It is important that the user understands the advantages and limitations of these methods. It is also important for the user to know that the software is designed to perform a number of different tasks, however the interpretation of the results is left entirely to the user.
+To construct supertrees and explore the underlying phylogenomic information from gene trees. Clann implements several well known supertree methods (including the ability to apply bootstrapping to them) can calculate consensus trees and provides methods to manage sets of gene trees, pruning selected taxa, filtering based on a number of criteria, automatically pruning species-specific duplicates and more. Also implemented is a gene-tree reconciliation approach to try to utilise genetic information from more than just single-copy gene-trees, this can be used as a criterion for estimating species trees. Feed back on these approaches are welcome! Finally, Clann can also calculate Robinson-Doulds (RF) and SPR distances between sets of trees, create randomised versions of sets of trees and implementes a PTP test for informativeness (the YAPTP test) of a set of trees provided. Clann has been continually developed since 2003 and suggestions for new features and tools are welcome.
+
 
 # Referencing Clann
 
@@ -27,6 +28,8 @@ The Bootstrapping and YAPTP methods and the DFIT (most similar supertree algorit
 Creevey C.J., Fitzpatrick, D.A., Philip, G.A., Kinsella, R.J., O’Connell M.J., Travers, S.A, Wilkinson M. and McInerney J.O. 2004 Does a tree-like phylogeny only exist at the tips in the prokaryotes? Proceedings of the Royal Society London, B series: Biological Sciences 271(1557): 2551-8. [Link](http://rspb.royalsocietypublishing.org/content/271/1557/2551)
 
 Either or both of these publications should be cited if you use Clann in published work. 
+
+For a list of papers that have cited Clann in their work see the [Clann google scholar page](https://scholar.google.co.uk/citations?view_op=view_citation&hl=en&citation_for_view=7JkjEd4AAAAJ:UeHWp8X0CEIC)
 
 # Usage
 
