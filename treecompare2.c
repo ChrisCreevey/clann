@@ -14,6 +14,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stddef.h>
+#include <stdarg.h>
 #include <time.h>
 #include <math.h>
 #include <signal.h>
@@ -240,8 +241,10 @@ void tips(int num);
 void get_taxa_details(struct taxon *position);
 int basic_tree_build (int c, char *treestring, struct taxon *parent, int fullnames);
 int sort_tree(struct taxon *position);
-
 int spr_new(struct taxon * master, int maxswaps, int numspectries, int numgenetries);
+void do_log(void);
+void printf2(char *format, ...);
+void print_splash(void);
 
 
 
@@ -253,8 +256,8 @@ void controlc4(int signal);
 void controlc5(int signal);
 
 /****************** Global variable definitions ****************/
-FILE * infile = NULL, *BR_file = NULL, *psfile = NULL, *logfile = NULL, *distributionreconfile = NULL, *onetoonefile = NULL, *strictonetoonefile = NULL;
-char **taxa_names = NULL, ***fulltaxanames = NULL, **parsed_command = NULL, **fundamentals = NULL, **stored_funds = NULL, **retained_supers = NULL, **stored_commands = NULL, *tempsuper = NULL, **best_topology = NULL, **tree_names = NULL;
+FILE * infile = NULL, *BR_file = NULL, *commands_file=NULL, *psfile = NULL, *logfile = NULL, *distributionreconfile = NULL, *onetoonefile = NULL, *strictonetoonefile = NULL;
+char **taxa_names = NULL, *commands_filename = NULL, ***fulltaxanames = NULL, **parsed_command = NULL, **fundamentals = NULL, **stored_funds = NULL, **retained_supers = NULL, **stored_commands = NULL, *tempsuper = NULL, **best_topology = NULL, **tree_names = NULL;
 int  *numtaxaintrees = NULL, fullnamesnum = 0, fullnamesassignments = 1, fundamental_assignments = 0, tree_length_assignments = 1, parsed_command_assignments = 1, name_assignments = 0, *taxa_incidence = NULL, number_of_taxa = 0, Total_fund_trees = 0, *same_tree = NULL, **Cooccurrance = NULL, NUMSWAPS = 0;
 int ***fund_scores = NULL, ***stored_fund_scores = NULL, **super_scores = NULL, *number_of_comparisons = NULL, *stored_num_comparisons = NULL, **presence_of_taxa = NULL, **stored_presence_of_taxa = NULL, *presenceof_SPRtaxa = NULL;
 int seed, num_commands = 0, number_retained_supers = 10, number_of_steps = 3, largest_tree = 0, smallest_tree = 1000000, criterion = 0, parts = 0, **total_coding = NULL, *coding_from_tree = NULL, total_nodes = 0, quartet_normalising = 3, splits_weight = 2, dweight =1, *from_tree = NULL, method = 2, tried_regrafts = 0, hsprint = TRUE, max_name_length = NAME_LENGTH, got_weights = FALSE, num_excluded_trees = 0, num_excluded_taxa = 0, calculated_fund_scores = FALSE, select_longest=FALSE;
@@ -263,16 +266,17 @@ float *scores_retained_supers = NULL, *partition_number = NULL, num_partitions =
 float *score_of_bootstraps = NULL, *yaptp_results = NULL, largest_length = 0, dup_weight = 1, loss_weight = 1, hgt_weight = 1, BESTSCORE = -1;
 time_t interval1, interval2;
 double sup=1;
-char saved_supertree[TREE_LENGTH],  *test_array, inputfilename[100], delimiter_char = '.';
+char saved_supertree[TREE_LENGTH],  *test_array, inputfilename[10000], delimiter_char = '.', logfile_name[10000], system_call[100000];
 int trees_in_memory = 0, *sourcetreetag = NULL, remainingtrees = 0, GC, user_break = FALSE, delimiter = FALSE, print_log = FALSE, num_gene_nodes, testarraypos = 0, taxaorder=0;
 int malloc_check =0, count_now = FALSE, another_check =0;
+
 
 
 int main(int argc, char *argv[])
     {
 	
     int i = 0, j=0, k=0, l=0, m=0, error=FALSE, x, doexecute_command = FALSE, command_line = FALSE, tipnum=0;
-    char *command = NULL, HOME[1000], PATH[1000], exefilename[1000];
+    char c, s, *command = NULL, *prev_command = NULL, HOME[1000], PATH[1000], exefilename[1000], string[10000];
     time_t time1, time2;
     double diff=0;    
     FILE *tmpclann = NULL;
@@ -280,22 +284,13 @@ int main(int argc, char *argv[])
 	exefilename[0] = '\0';
 	inputfilename[0] = '\0';
     saved_supertree[0] = '\0';
+    logfile_name[0] = '\0';
+	strcpy(logfile_name, "clann.log");
+	system_call[0] ='\0';
+
 	test_array = malloc(TREE_LENGTH*sizeof(int));
 	test_array[0] = '\0';
-    
-	if(argc > 1)
-		{
-		for(i=1; i<argc; i++)
-			{
-			if(strcmp(argv[i], "-n") == 0)
-				command_line = TRUE;
-			else
-				{
-				doexecute_command = TRUE;
-				strcpy(exefilename, argv[i]);
-				}
-			}
-		}
+
 	
 	/********** START OF READLINE STUFF ***********/
 	#ifdef HAVE_READLINE    
@@ -326,9 +321,13 @@ int main(int argc, char *argv[])
     srand((unsigned) (seed));
     #endif
 
-    command = malloc(10000*sizeof(char));
+    command = malloc(1000000*sizeof(char));
     if(!command) memory_error(74);
     command[0] = '\0';
+
+    prev_command = malloc(1000000*sizeof(char));
+    if(!prev_command) memory_error(74);
+    prev_command[0] = '\0';
 
     tempsuper = malloc(TREE_LENGTH*sizeof(char));
     tempsuper[0] = '\0';
@@ -362,23 +361,94 @@ int main(int argc, char *argv[])
     /* assign the parsed_command array */
     
     parsed_command = malloc(10000*sizeof(char *));
-    for(i=0; i<1000; i++)
+    for(i=0; i<10000; i++)
         {
         parsed_command[i] = malloc(10000*sizeof(char));
         parsed_command[i][0] = '\0';
         }
 
-    printf("\n\n\n\n\n\t******************************************************************");
-    printf("\n\t*                                                                *");
-    printf("\n\t*                          Clann  v%s                         *", VERSION);
-    printf("\n\t*                                                                *");
-    printf("\n\t*                 lab: http://www.creeveylab.org                 *");
-    printf("\n\t*                 email: %s                 *", PACKAGE_BUGREPORT);
-    printf("\n\t*                                                                *");
-    printf("\n\t*                Copyright Chris Creevey 2003-2016               *");
-    printf("\n\t*                                                                *");
-    printf("\n\t*         HINT: Type \"help\" to see all available commands        *");
-    printf("\n\t******************************************************************\n\n");
+
+	if(argc > 1)
+		{
+		while ((c = getopt(argc, argv, "nlhc:")) != -1)
+		    {   
+			switch (c) 
+			      {
+			      case 'n':
+				        command_line = TRUE;
+						printf("\nNon-Internactive mode entered - commands must be provided in a nexus \'clann block\' or with \'-c\'\n");
+				        break;
+			      case 'l':
+				        printf2("opening logfile %s\n", logfile_name);	
+			        	if((logfile = fopen(logfile_name, "w")) == NULL)
+			        		{	
+			        		printf2("Error opening log file named %s\n", logfile_name);
+			        		}
+			        	else
+			        		{
+			        		printf2("starting logging to logfile %s\n", logfile_name );
+			        		print_log = TRUE;
+			        		}
+				        break;
+				  case 'c':
+				  		commands_filename = optarg;
+				  		printf2("opening commands file %s\n", commands_filename);
+
+			        	if((commands_file = fopen(commands_filename, "r")) == NULL)
+			        		{	
+			        		printf2("Error opening commands file named %s\n", commands_filename);
+			        		}
+			        	else
+			        		{
+			        		s = getc(commands_file);
+							while(!feof(commands_file) && !error)
+								{
+								i=0;
+								while((s == ' ' || s == '\n' || s == '\r' || s == '\t' || s == ';') && !feof(commands_file)) s = getc(commands_file);
+								while(s != ';' && !feof(commands_file))
+									{
+									string[i] = s;
+									i++;
+									s = getc(commands_file);
+									}
+								string[i] = ';';
+								string[i+1] = '\0';
+								strcpy(stored_commands[parts], string);
+								parts++;
+								}
+							fclose(commands_file);
+			        		}
+			        	break;
+			      case 'h':
+			      		print_splash();
+			      		
+
+			      		printf("\nUsage: \"clann -lnh [-c commands file] [tree file]\"\n");
+			      		printf("\n\tWhere [tree file] is an optional Nexus or Phylip formatted file of phylogenetic trees\n");
+			      		printf("\t-l turn on logging of screen output to file \"clann.log\"\n");
+			      		printf("\t-n turns off interactive mode - requires commands to be provided in a nexus \'clann block\' or with \'-c\'\n");
+			      		printf("\t-c <file name> specifies a file with commands to be executed (each seperated by \';\')\n");
+			      		printf("\t-h prints this message\n\n");
+
+				        print_commands(0);
+
+				        clean_exit(0);
+				        break;
+			      }
+		 	}
+		for (i = optind; i < argc; i++)
+			{
+			doexecute_command = TRUE;
+			strcpy(exefilename, argv[i]);
+			}
+		}
+	if(command_line == TRUE)
+		{
+		strcpy(stored_commands[parts], "quit");
+		parts++;
+		}
+
+    print_splash(); /* Print the Clann splash screen */
 
      
     if(doexecute_command) /* if the user has specified an input file at the command line */
@@ -386,6 +456,7 @@ int main(int argc, char *argv[])
         execute_command(exefilename, TRUE);
         }
     
+
     i=0;
     while(strcmp(parsed_command[0], "quit") != 0)  /* while the user has not chosen to quit */
         {
@@ -407,21 +478,16 @@ int main(int argc, char *argv[])
 						/* test fulltaxaname allocations */
 						/*for(l=0; l<Total_fund_trees; l++)
 							{
-							printf("fund tree number: %d\n", l);
+							printf2("fund tree number: %d\n", l);
 							for(m=0; m<numtaxaintrees[l]; m++)
 								{
-								printf("\ttaxa %d: %s\n", m, fulltaxanames[l][m]);
+								printf2("\ttaxa %d: %s\n", m, fulltaxanames[l][m]);
 								}
 							}
-							printf("here\n"); */
+							printf2("here\n"); */
 							
 						/*spr_dist(); */ 
                         }
-                    else
-						{
-                        printf("Error: no file name specified\n");
-						if(print_log) fprintf(logfile, "Error: no file name specified\n");
-						}
                     }
                 }
             else
@@ -449,7 +515,16 @@ int main(int argc, char *argv[])
                                     fclose(BR_file);
 									if(x == FALSE)
 										{
-										if(system("paup coding.nex") != 0) printf("Error calling paup, please execute the file coding.nex in paup to perform the parsimony step\n");
+										if(print_log == FALSE) 
+											strcpy(system_call, "paup coding.nex");
+										else
+											{
+											strcpy(system_call, "paup coding.nex");
+											strcat(system_call, " | tee -a ");
+											strcat(system_call, logfile_name);
+											}
+
+										if(system(system_call) != 0) printf2("Error calling paup, please execute the file coding.nex in paup to perform the parsimony step\n");
 										}
 									if(x == FALSE)
 										{
@@ -463,7 +538,7 @@ int main(int argc, char *argv[])
                                 }
                             else
                                 {
-                                printf("Error: You need to load source trees before using this command\n");
+                                printf2("Error: You need to load source trees before using this command\n");
                                 }
                             }
                         }
@@ -478,13 +553,13 @@ int main(int argc, char *argv[])
                                 if(number_of_taxa > 0)
                                     {
                                     if(criterion == 1)
-                                        printf("Error: You cannont do a user tree search in MRP\n");
+                                        printf2("Error: You cannont do a user tree search in MRP\n");
                                     else
                                         usertrees_search();
                                     }
                                 else
                                     {
-                                    printf("Error: You need to load source trees before using this command\n");
+                                    printf2("Error: You need to load source trees before using this command\n");
                                     }
                                 }
                             }
@@ -503,7 +578,7 @@ int main(int argc, char *argv[])
                                         }
                                     else
                                         {
-                                        printf("Error: You need to load source trees before using this command\n");
+                                        printf2("Error: You need to load source trees before using this command\n");
                                         }
                                     }
                                 }
@@ -521,7 +596,7 @@ int main(int argc, char *argv[])
                                             }
                                         else
                                             {
-                                            printf("Error: You need to load source trees before using this command\n");
+                                            printf2("Error: You need to load source trees before using this command\n");
                                             }
                                         }
                                     }
@@ -539,7 +614,7 @@ int main(int argc, char *argv[])
                                                 }
                                             else
                                                 {
-                                                printf("Error: You need to load source trees before using this command\n");
+                                                printf2("Error: You need to load source trees before using this command\n");
                                                 }
                                             }
                                         }
@@ -557,7 +632,7 @@ int main(int argc, char *argv[])
                                                     }
                                                 else
                                                     {
-                                                    printf("Error: You need to load source trees before using this command\n");
+                                                    printf2("Error: You need to load source trees before using this command\n");
                                                     }
                                                 }
                                             }
@@ -591,7 +666,7 @@ int main(int argc, char *argv[])
 															if(number_of_taxa > 0)
 																exclude(TRUE);
 															else
-																printf("Error: You need to load source trees before using this command\n");
+																printf2("Error: You need to load source trees before using this command\n");
 															}
 														}
                                                     else
@@ -605,7 +680,7 @@ int main(int argc, char *argv[])
 																if(number_of_taxa > 0)
 																		include(TRUE);
 																else
-																	printf("Error: You need to load source trees before using this command\n");
+																	printf2("Error: You need to load source trees before using this command\n");
 																}
                                                             }
                                                         else
@@ -616,8 +691,8 @@ int main(int argc, char *argv[])
                                                                     print_commands(12);
                                                                 else
                                                                     {
-                                                                    printf("\n\tType exit to return to Clann\n\n");
-                                                                    system("csh");
+                                                                    printf2("\n\tType exit to return to Clann\n\n");
+                                                                    system("bash");
                                                                     }
                                                                 }
 															else
@@ -631,7 +706,7 @@ int main(int argc, char *argv[])
 																		if(number_of_taxa > 0)
 																				generatetrees();
 																		else
-																			printf("Error: You need to load source trees before using this command\n");
+																			printf2("Error: You need to load source trees before using this command\n");
 																		}
 																	}
 																else
@@ -645,7 +720,7 @@ int main(int argc, char *argv[])
 																			if(number_of_taxa > 0)
 																					showtrees();
 																			else
-																				printf("Error: You need to load source trees before using this command\n");
+																				printf2("Error: You need to load source trees before using this command\n");
 																			}
 																		}
 																	else
@@ -659,7 +734,7 @@ int main(int argc, char *argv[])
 																				if(number_of_taxa > 0)
 																					sourcetree_dists();
 																				else
-																					printf("Error: You need to load source trees before using this command\n");
+																					printf2("Error: You need to load source trees before using this command\n");
 																				}
 																			}
 																		else
@@ -675,7 +750,7 @@ int main(int argc, char *argv[])
 																						exclude_taxa(TRUE);
 																						}
 																					else
-																						printf("Error: You need to load source trees before using this command\n");
+																						printf2("Error: You need to load source trees before using this command\n");
 																					}
 																				}
 
@@ -690,7 +765,7 @@ int main(int argc, char *argv[])
 																						if(number_of_taxa > 0)
 																							do_consensus();
 																						else
-																							printf("Error: You need to load source trees before using this command\n");
+																							printf2("Error: You need to load source trees before using this command\n");
 																						}
 																					}
 																				else
@@ -704,7 +779,7 @@ int main(int argc, char *argv[])
 																							if(number_of_taxa > 0)
 																								nj();
 																							else
-																								printf("Error: You need to load source trees before using this command\n");
+																								printf2("Error: You need to load source trees before using this command\n");
 																							}
 																						}
 																					else
@@ -718,7 +793,7 @@ int main(int argc, char *argv[])
 																								if(number_of_taxa > 0)
 																									spr_dist();
 																								else
-																									printf("Error: You need to load source trees before using this command\n");	
+																									printf2("Error: You need to load source trees before using this command\n");	
 																								}
 																							}
 																						else
@@ -732,7 +807,7 @@ int main(int argc, char *argv[])
 																									if(number_of_taxa > 0)
 																										mapunknowns();
 																									else
-																										printf("Error: You need to load source trees before using this command\n");	
+																										printf2("Error: You need to load source trees before using this command\n");	
 																									}
 																								}
 																							else
@@ -746,7 +821,7 @@ int main(int argc, char *argv[])
 																										if(number_of_taxa > 0)
 																											reconstruct(TRUE);
 																										else
-																											printf("Error: You need to load source trees before using this command\n");	
+																											printf2("Error: You need to load source trees before using this command\n");	
 																										}
 																									}
 																								else
@@ -760,7 +835,7 @@ int main(int argc, char *argv[])
 																											if(number_of_taxa > 0)
 																												hgt_reconstruction();
 																											else
-																												printf("Error: You need to load source trees before using this command\n");	
+																												printf2("Error: You need to load source trees before using this command\n");	
 																											}
 																										}
 																									else
@@ -774,7 +849,7 @@ int main(int argc, char *argv[])
 																												if(number_of_taxa > 0)
 																													exhaustive_SPR(fundamentals[0]);
 																												else
-																													printf("Error: You need to load source trees before using this command\n");	
+																													printf2("Error: You need to load source trees before using this command\n");	
 																												}
 																											}
 																										else
@@ -795,7 +870,7 @@ int main(int argc, char *argv[])
 																														
 																														}
 																													else
-																														printf("Error: You need to load source trees before using this command\n");	
+																														printf2("Error: You need to load source trees before using this command\n");	
 																													}
 																												}
 																											else
@@ -812,10 +887,10 @@ int main(int argc, char *argv[])
 																																{
 																																randomise_tree(fundamentals[j]); /*equiprobable */
 																																}
-																															printf("The source trees have now been randomised\n");
+																															printf2("The source trees have now been randomised\n");
 																															}
 																														else
-																															printf("Error: You need to load source trees before using this command\n");	
+																															printf2("Error: You need to load source trees before using this command\n");	
 																														}
 																													}
 																												else
@@ -835,7 +910,7 @@ int main(int argc, char *argv[])
 																																
 																																}
 																															else
-																																printf("Error: You need to load source trees before using this command\n");	
+																																printf2("Error: You need to load source trees before using this command\n");	
 																															}
 																														}
 																													else
@@ -851,7 +926,7 @@ int main(int argc, char *argv[])
                                                                                                                                     prune_monophylies();
                                                                                                                                     }
                                                                                                                                 else
-                                                                                                                                    printf("Error: You need to load source trees before using this command\n"); 
+                                                                                                                                    printf2("Error: You need to load source trees before using this command\n"); 
                                                                                                                                 }
                                                                                                                             }
                                                                                                                         else
@@ -869,9 +944,20 @@ int main(int argc, char *argv[])
 	                                                                                                                            	}
 	                                                                                                                        	}
 	                                                                                                                        else
-	                                                                                                                        	printf("Error: command not known.\n\tType help at the prompt to get a list of available commands.\n");
+	                                                                                                                        	{
+	                                                                                                                        	if(strcmp(parsed_command[0], "log") == 0)
+	                                                                                                                            	{                                     
+	                                                                                                                            	if(num_commands == 2 && parsed_command[1][0] == '?')
+		                                                                                                                                print_commands(29);
+		                                                                                                                            else
+		                                                                                                                            	{
+		                                                                                                                            	do_log();
+		                                                                                                                            	}
+		                                                                                                                        	}
+		                                                                                                                        else
+	                                                                                                                        		printf2("Error: command not known.\n\tType help at the prompt to get a list of available commands.\n");
+	                                                                                                                        	}
 	                                                                                                                        }  
-
                                                                                                                         }
 																													}
 																												}
@@ -905,29 +991,31 @@ int main(int argc, char *argv[])
         diff = difftime(time2, time1);
         if(diff > 0)
             {
-            printf("\nTime taken:"); 
+            printf2("\nTime taken:"); 
             if(diff > 60)
                 {
                 if(diff > 3600)
                     {
                     if(diff > 86400)
                         {
-                        printf(" %0.0lf Day", diff/86400);
-                        if(diff/86400 > 1) printf("s");
+                        printf2(" %0.0lf Day", diff/86400);
+                        if(diff/86400 > 1) printf2("s");
                         diff = diff- (86400 * ((int)diff/86400));
                         }
-                    printf(" %0.0lf Hour", diff/3600);
-                    if(diff/3600 > 1) printf("s");
+                    printf2(" %0.0lf Hour", diff/3600);
+                    if(diff/3600 > 1) printf2("s");
                     diff = diff - (3600 * ((int)diff/3600));
                     }
-                printf(" %0.0lf Minute", diff/60);
-                if(diff/60 > 1) printf("s");
+                printf2(" %0.0lf Minute", diff/60);
+                if(diff/60 > 1) printf2("s");
                 diff = diff - (60 * ((int)diff/60));
                 }
-            printf(" %0.0lf second", diff);
-            if(diff > 1) printf("s");
-            printf("\n\n");
+            printf2(" %0.0lf second", diff);
+            if(diff > 1) printf2("s");
+            printf2("\n\n");
             }
+
+        if(logfile!=NULL) fflush(logfile);
 
         if(i == parts)
             {
@@ -938,28 +1026,34 @@ int main(int argc, char *argv[])
 			user_break = FALSE;
 			if(signal(SIGINT, controlc4) == SIG_ERR)
 				{
-				printf("An error occurred while setting a signal handler\n");
+				printf2("An error occurred while setting a signal handler\n");
 				}
 		   #ifdef HAVE_READLINE
 /*****/    command = readline("clann> "); 
 /*****/    command = realloc(command, 10000*sizeof(char));
 		   #else
- 	        printf("clann> ");
+ 	        printf2("clann> ");
  	        fflush(stdout);
  	        command = xgets(command);
 		   #endif
-          
+          	 if(print_log && strcmp(command, "") != 0) fprintf(logfile, "clann> %s\n", command);
            
             /* if the commmand doesn't end in a ";" then put one on */
             k=0;
             while(command[k] != '\0') k++;
             if(command[k-1] != ';')
                 strcat(command, ";");  
+
+            
             
 			#ifdef HAVE_READLINE
             if(strcmp(command, ";") != 0 && command_line == FALSE)   /* if the command is not just a blank line */
                 {
-/******/                add_history(command);
+            	if(strcmp(prev_command, command) != 0)  /* This gets rid of multiple instances of the exact same command in a row being recorded */
+            		{
+/******/            add_history(command);
+            		strcpy(prev_command, command);  
+            		}
                 }
 			#endif
             parts = seperate_commands(command); /* if there is more than one command, break each of them up */
@@ -982,14 +1076,17 @@ int main(int argc, char *argv[])
         num_commands = parse_command(command);  /* parse each individual part of the command */
         i++;
         time1 = time(NULL);
-    
+    	
+
         } /* end while */
+    
     free(command);
+    free(prev_command);
     free(tempsuper);
 	#ifdef HAVE_READLINE
 /****/ if(command_line == FALSE) write_history(PATH);  /* write the history of commands to file */
 	#endif
-/*	printf("malloc_check = %d x (%d)\n", malloc_check, sizeof(taxon_type));
+/*	printf2("malloc_check = %d x (%d)\n", malloc_check, sizeof(taxon_type));
  */   
 	clean_exit(0);
     return(0);
@@ -1026,7 +1123,22 @@ int seperate_commands(char *command)
     return(numcommands);
     }
 
+void print_splash(void)
+	{
+	printf2("\n\n\t*********************************************************************");
+    printf2("\n\t*                                                                   *");
+    printf2("\n\t*                           Clann  v%s                           *", VERSION);
+    printf2("\n\t* Investigating phylogenetic information through supertree analyses *");
+    printf2("\n\t*                                                                   *");
+    printf2("\n\t*                  lab: http://www.creeveylab.org                   *");
+    printf2("\n\t*                  email: %s                   *", PACKAGE_BUGREPORT);
+    printf2("\n\t*                                                                   *");
+    printf2("\n\t*                 Copyright Chris Creevey 2003-2018                 *");
+    printf2("\n\t*                                                                   *");
+    printf2("\n\t*          HINT: Type \"help\" to see all available commands          *");
+    printf2("\n\t*********************************************************************\n\n");
 
+	}
  
     
 void print_commands(int num)
@@ -1034,46 +1146,47 @@ void print_commands(int num)
     
     if(num == 0)
         {
-        printf("\nAvailable Commands:\n\n");
-        printf("\nThe following commands are always available:\n\n");
-        printf("\texecute\t\t- Read in a file of source trees\n");
-        printf("\thelp\t\t- Display this message\n");
-        printf("\tquit\t\t- Quit Clann\n");
-        printf("\tset\t\t- Set global parameters such as optimality criterion for carrying reconstructing a supertree\n");
-        printf("\t!\t\t- Run a shell session, while preserving the current Clann session (type \'exit\' to return)\n");
-        printf("\ttips\t\t- Show tips and hints for better use of Clann\n");
+        printf2("\nAvailable Commands:\n\n");
+        printf2("\nThe following commands are always available:\n\n");
+        printf2("\texecute\t\t- Read in a file of source trees\n");
+        printf2("\thelp\t\t- Display this message\n");
+        printf2("\tquit\t\t- Quit Clann\n");
+        printf2("\tset\t\t- Set global parameters such as optimality criterion for carrying reconstructing a supertree\n");
+        printf2("\t!\t\t- Run a shell session, while preserving the current Clann session (type \'exit\' to return)\n");
+        printf2("\ttips\t\t- Show tips and hints for better use of Clann\n");
+        printf2("\tlog\t\t- Control logging of screen output to a log file\n");
 
-        printf("\nThe following commands are only available when there are source trees in memory:\n");
+        printf2("\nThe following commands are only available when there are source trees in memory:\n");
 
-        printf("\nSupertree reconstruction:\n");
-        printf("\ths\t\t- Carry out a heuristic search for the best supertree usign the criterion selected\n");
-        printf("\tbootstrap\t- Carry out a bootstrap supertree analysis using the criterion selected\n");
-        printf("\tnj\t\t- Construct a neighbour-joining supertree\n");
-        printf("\talltrees\t- Exhaustively search all possible supertrees\n");
-        printf("\tusertrees\t- Assess user-defined supertrees (from seperate file), to find the best scoring\n");
-        printf("\tconsensus\t- Calculate a consensus tree of all trees containing all taxa\n");
+        printf2("\nSupertree reconstruction:\n");
+        printf2("\ths\t\t- Carry out a heuristic search for the best supertree usign the criterion selected\n");
+        printf2("\tbootstrap\t- Carry out a bootstrap supertree analysis using the criterion selected\n");
+        printf2("\tnj\t\t- Construct a neighbour-joining supertree\n");
+        printf2("\talltrees\t- Exhaustively search all possible supertrees\n");
+        printf2("\tusertrees\t- Assess user-defined supertrees (from seperate file), to find the best scoring\n");
+        printf2("\tconsensus\t- Calculate a consensus tree of all trees containing all taxa\n");
 
-        printf("\nSource tree selection and modification:\n");
-        printf("\tshowtrees\t- Visualise selected source trees in ASCII format (also can save selected trees to file)\n");
-       printf("\tdeletetrees\t- Specify source trees to delete from memory (based on a variety of criteria)\n"); 
-      /*  printf("\tincludetrees\t- Specify trees for inclusion in the analysis (based on a variety of criteria)\n"); */ /* we are excluding the include command because it is problematic*/
-        printf("\tdeletetaxa\t- Specify taxa to delete from all source trees in memory (i.e. prune from the trees while preserving branch lengths)\n");
-        printf("\trandomisetrees\t- Randomises the source trees in memory, while preserving taxa composition in each tree\n");
+        printf2("\nSource tree selection and modification:\n");
+        printf2("\tshowtrees\t- Visualise selected source trees in ASCII format (also can save selected trees to file)\n");
+       printf2("\tdeletetrees\t- Specify source trees to delete from memory (based on a variety of criteria)\n"); 
+      /*  printf2("\tincludetrees\t- Specify trees for inclusion in the analysis (based on a variety of criteria)\n"); */ /* we are excluding the include command because it is problematic*/
+        printf2("\tdeletetaxa\t- Specify taxa to delete from all source trees in memory (i.e. prune from the trees while preserving branch lengths)\n");
+        printf2("\trandomisetrees\t- Randomises the source trees in memory, while preserving taxa composition in each tree\n");
 
-        printf("\nMiscellaneous calculations:\n");
-        printf("\trfdists\t\t- Calculate Robinson-Foulds distances between all source trees\n");
-        printf("\tgeneratetrees\t- Generate random supertrees & assess  against source trees in memory\n");
-        printf("\tyaptp\t\t- \"Yet another permutation-tail-probability\" test - performs a randomisation test\n");
+        printf2("\nMiscellaneous calculations:\n");
+        printf2("\trfdists\t\t- Calculate Robinson-Foulds distances between all source trees\n");
+        printf2("\tgeneratetrees\t- Generate random supertrees & assess  against source trees in memory\n");
+        printf2("\tyaptp\t\t- \"Yet another permutation-tail-probability\" test - performs a randomisation test\n");
 
 
 
-        printf("\nExperimental Options:\n");
-        printf("\treconstruct\t- Carry out a gene-tree reconciliation (source trees against a species tree)\n");
-        printf("\tprunemonophylies - Prunes clades which consist of multiple sequences from the same species, to a single representative\n");
-        printf("\tsprdists\t- Carry out estimation of SPR distances of real data versus ideal and randomised versions of the data\n");
+        printf2("\nExperimental Options:\n");
+        printf2("\treconstruct\t- Carry out a gene-tree reconciliation (source trees against a species tree)\n");
+        printf2("\tprunemonophylies - Prunes clades which consist of multiple sequences from the same species, to a single representative\n");
+        printf2("\tsprdists\t- Carry out estimation of SPR distances of real data versus ideal and randomised versions of the data\n");
 
-        printf("\n\n\nType a command followed by '?' to get information on the options available i.e.: \"exe ?\"\n");
-        printf("Full descriptions of the commands are available in the manual\n\n\n");
+        printf2("\n\n\nType a command followed by '?' in interactive mode to get information on the options available i.e.: \"exe ?\"\n");
+        printf2("Full descriptions of the commands are available in the manual\n\n\n");
 
 
         }
@@ -1082,193 +1195,193 @@ void print_commands(int num)
 
     if(num == 1)
         {
-        printf("\nexecute\t<filename>\n");
-        printf("\nexe\t<filename>\n\n");
-		 printf("\tOptions\t\tSettings\t\t\tCurrent\n");
-        printf("\t===========================================================\n");
-		printf("\n\tmaxnamelen\t<integer number> | delimited\t*none");
-		printf("\n\tdelimiter_char\t<character>\t\t\t'.'");
-		printf("\n\tsummary\t\tshort | long\t\t\t*long");
+        printf2("\nexecute\t<filename>\n");
+        printf2("\nexe\t<filename>\n\n");
+		 printf2("\tOptions\t\tSettings\t\t\tCurrent\n");
+        printf2("\t===========================================================\n");
+		printf2("\n\tmaxnamelen\t<integer number> | delimited\t*none");
+		printf2("\n\tdelimiter_char\t<character>\t\t\t'.'");
+		printf2("\n\tsummary\t\tshort | long\t\t\t*long");
         }
     if(num == 2)
         {
-        printf("\nalltrees [options]\n\n");
-        printf("\tOptions\t\tSettings\t\t\tCurrent\n");
-        printf("\t===========================================================\n");
+        printf2("\nalltrees [options]\n\n");
+        printf2("\tOptions\t\tSettings\t\t\tCurrent\n");
+        printf2("\t===========================================================\n");
         if(criterion == 0 || criterion == 2 || criterion == 3)
             {
-            printf("\n\trange\t\t<treenumber> - <treenumber>\t*all\n\tsavetrees\t<filename>\t\t\ttop_alltrees.txt\n\tcreate\t\tyes | no\t\t\t*no\n");
+            printf2("\n\trange\t\t<treenumber> - <treenumber>\t*all\n\tsavetrees\t<filename>\t\t\ttop_alltrees.txt\n\tcreate\t\tyes | no\t\t\t*no\n");
             if(criterion == 0)
                 {
-                printf("\tweight\t\tequal | comparisons\t\t");
-                if(dweight == 1) printf("comparisons\n");else printf("euqal\n");
+                printf2("\tweight\t\tequal | comparisons\t\t");
+                if(dweight == 1) printf2("comparisons\n");else printf2("euqal\n");
                 }
             if(criterion == 2)
                 {
-                printf("\tweight\t\tequal | splits\t\t\t");
-                if(splits_weight == 1) printf("equal\n");if(splits_weight == 2) printf("splits\n");
+                printf2("\tweight\t\tequal | splits\t\t\t");
+                if(splits_weight == 1) printf2("equal\n");if(splits_weight == 2) printf2("splits\n");
                 }
             if(criterion == 3)
                 {
-                printf("\tweight\t\tequal | taxa | quartets\t\t");
-                if(quartet_normalising == 1) printf("equal\n");if(quartet_normalising == 2) printf("taxa\n");if(quartet_normalising == 3) printf("quartets\n");
+                printf2("\tweight\t\tequal | taxa | quartets\t\t");
+                if(quartet_normalising == 1) printf2("equal\n");if(quartet_normalising == 2) printf2("taxa\n");if(quartet_normalising == 3) printf2("quartets\n");
                 }
             }
         
         }
     if(num == 3)
         {
-        printf("\nusertrees <filename> [options]\n\n");
-        printf("\tOptions\t\tSettings\t\t\tCurrent\n");
-        printf("\t===========================================================\n");
-        printf("\n\toutfile\t\t<filename>\t\t\tUsertrees_result.txt");
+        printf2("\nusertrees <filename> [options]\n\n");
+        printf2("\tOptions\t\tSettings\t\t\tCurrent\n");
+        printf2("\t===========================================================\n");
+        printf2("\n\toutfile\t\t<filename>\t\t\tUsertrees_result.txt");
         if(criterion == 0)
             {
-            printf("\n\tweight\t\tequal | comparisons\t\t");
-            if(dweight == 1) printf("comparisons\n");else printf("splits\n");
+            printf2("\n\tweight\t\tequal | comparisons\t\t");
+            if(dweight == 1) printf2("comparisons\n");else printf2("splits\n");
             }
         if(criterion == 2)
             {
-            printf("\n\tweight\t\tequal | splits\t\t\t");
-            if(splits_weight == 1) printf("equal\n");if(splits_weight == 2) printf("splits\n");
+            printf2("\n\tweight\t\tequal | splits\t\t\t");
+            if(splits_weight == 1) printf2("equal\n");if(splits_weight == 2) printf2("splits\n");
             }
         if(criterion == 3)
             {
-            printf("\n\tweight\t\tequal | taxa | quartets\t\t");
-            if(quartet_normalising == 1) printf("equal\n");if(quartet_normalising == 2) printf("taxa\n");if(quartet_normalising == 3) printf("quartets\n");
+            printf2("\n\tweight\t\tequal | taxa | quartets\t\t");
+            if(quartet_normalising == 1) printf2("equal\n");if(quartet_normalising == 2) printf2("taxa\n");if(quartet_normalising == 3) printf2("quartets\n");
             }
-		printf("\n\tprintsourcescores\tyes | no\t\t*no\n");
+		printf2("\n\tprintsourcescores\tyes | no\t\t*no\n");
         }
     if(num == 4)
         {
-        printf("\nhs (or hsearch) [options]  \n");
-        printf("\tOptions\t\tSettings\t\t\tCurrent\n");
-        printf("\t===========================================================\n");
+        printf2("\nhs (or hsearch) [options]  \n");
+        printf2("\tOptions\t\tSettings\t\t\tCurrent\n");
+        printf2("\t===========================================================\n");
         if(criterion == 0 || criterion == 2 || criterion == 3 || criterion==5)
             {
-            printf("\n\tsample\t\t<integer number>\t\t*10,000\n\tnreps\t\t<integer number>\t\t*10");
-            printf("\n\tswap\t\tnni | spr | tbr\t\t\t");
-            if(method == 1) printf("nni");
-            if(method == 2) printf("spr"); 
-            printf("\n\tnsteps\t\t<integer number>\t\t%d", number_of_steps);
-			printf("\n\tstart\t\tnj | random | <filename>\tnj");
+            printf2("\n\tsample\t\t<integer number>\t\t*10,000\n\tnreps\t\t<integer number>\t\t*10");
+            printf2("\n\tswap\t\tnni | spr | tbr\t\t\t");
+            if(method == 1) printf2("nni");
+            if(method == 2) printf2("spr"); 
+            printf2("\n\tnsteps\t\t<integer number>\t\t%d", number_of_steps);
+			printf2("\n\tstart\t\tnj | random | <filename>\tnj");
 
-			printf("\n\tmaxswaps\t<integer number>\t\t*1,000,000\n\tsavetrees\t<filename>\t\t\tHeuristic_result.txt");
+			printf2("\n\tmaxswaps\t<integer number>\t\t*1,000,000\n\tsavetrees\t<filename>\t\t\tHeuristic_result.txt");
             if(criterion == 0)
                 {
-                printf("\n\tweight\t\tequal | comparisons\t\t");
-                if(dweight == 1) printf("comparisons");else printf("splits");
+                printf2("\n\tweight\t\tequal | comparisons\t\t");
+                if(dweight == 1) printf2("comparisons");else printf2("splits");
                 }
             if(criterion == 2)
                 {
-                printf("\n\tweight\t\tequal | splits\t\t\t");
-                if(splits_weight == 1) printf("equal");if(splits_weight == 2) printf("splits");
+                printf2("\n\tweight\t\tequal | splits\t\t\t");
+                if(splits_weight == 1) printf2("equal");if(splits_weight == 2) printf2("splits");
                 }
             if(criterion == 3)
                 {
-                printf("\n\tweight\t\tequal | taxa | quartets\t\t");
-                if(quartet_normalising == 1) printf("equal");if(quartet_normalising == 2) printf("taxa");if(quartet_normalising == 3) printf("quartets");
+                printf2("\n\tweight\t\tequal | taxa | quartets\t\t");
+                if(quartet_normalising == 1) printf2("equal");if(quartet_normalising == 2) printf2("taxa");if(quartet_normalising == 3) printf2("quartets");
                 }
 			if(criterion == 0)
 				{
-				printf("\n\tdrawhistogram\tyes | no\t\t\t*no\n\tnbins\t\t<integer number>\t\t*20\n\thistogramfile\t<filename>\t\t\t*Heuristic_histogram.txt");
+				printf2("\n\tdrawhistogram\tyes | no\t\t\t*no\n\tnbins\t\t<integer number>\t\t*20\n\thistogramfile\t<filename>\t\t\t*Heuristic_histogram.txt");
 				}
             
             }
         if(criterion == 1)
             {
-            printf("\n\tanalysis\tparsimony | nj\t\t\t*parsimony\n");
-            printf("\n\tParsimony options:\n\tweighted\tyes | no\t\t\t*no\n\tswap\t\tnni | spr | tbr\t\t\t*tbr\n\taddseq\t\tsimple | closest | asis |\n\t\t\trandom | furthest\t\t*random\n\tnreps\t\t<integer number>\t\t*10\n\n\tGeneral Options:\n\tsavetrees\t<filename>\t\t\tMRP.tree\n");
+            printf2("\n\tanalysis\tparsimony | nj\t\t\t*parsimony\n");
+            printf2("\n\tParsimony options:\n\tweighted\tyes | no\t\t\t*no\n\tswap\t\tnni | spr | tbr\t\t\t*tbr\n\taddseq\t\tsimple | closest | asis |\n\t\t\trandom | furthest\t\t*random\n\tnreps\t\t<integer number>\t\t*10\n\n\tGeneral Options:\n\tsavetrees\t<filename>\t\t\tMRP.tree\n");
             }
 		if(criterion == 4)
 			{
-			printf("\n\tmissing\t4point | ultrametric\t\t\t*4point\n");
+			printf2("\n\tmissing\t4point | ultrametric\t\t\t*4point\n");
 			}
 		if(criterion == 5)
 			{
-			printf("\n\tduplications\t<value>\t\t\t\t*1.0\n\tlosses\t\t<value>\t\t\t\t*1.0");
-			printf("\n\tnumspeciesrootings\t<value> | all\t\t*2\n\tnumgenerootings\t\t<value> | all\t\t*2\n");
+			printf2("\n\tduplications\t<value>\t\t\t\t*1.0\n\tlosses\t\t<value>\t\t\t\t*1.0");
+			printf2("\n\tnumspeciesrootings\t<value> | all\t\t*2\n\tnumgenerootings\t\t<value> | all\t\t*2\n");
 			}
         }
     if(num == 5)
         {
-        printf("\nbootstrap (or boot) [options]  \n\n\n");
-        printf("\tOptions\t\tSettings\t\t\tCurrent\n");
-        printf("\t===========================================================\n");
+        printf2("\nbootstrap (or boot) [options]  \n\n\n");
+        printf2("\tOptions\t\tSettings\t\t\tCurrent\n");
+        printf2("\t===========================================================\n");
         if(criterion != 1)
             {
-            printf("\n\tnreps\t\t<integer number>\t\t*100\n\thsreps\t\t<integer number>\t\t*10\n\tsample\t\t<integer number>\t\t*10,000\n\tswap\t\tnni | spr | tbr | all\t\t");
-            if(method == 1) printf("nni");
-            if(method == 2) printf("spr");
-            printf("\n\tstart\t\trandom | <filename>\t\trandom");
+            printf2("\n\tnreps\t\t<integer number>\t\t*100\n\thsreps\t\t<integer number>\t\t*10\n\tsample\t\t<integer number>\t\t*10,000\n\tswap\t\tnni | spr | tbr | all\t\t");
+            if(method == 1) printf2("nni");
+            if(method == 2) printf2("spr");
+            printf2("\n\tstart\t\trandom | <filename>\t\trandom");
             
-            printf("\n\tnsteps\t\t<integer number>\t\t%d\n\ttreefile\t<output treefile name>\t\tbootstrap.txt\n\tmaxswaps\t<integer number>\t\t*1,000,000\n", number_of_steps);
+            printf2("\n\tnsteps\t\t<integer number>\t\t%d\n\ttreefile\t<output treefile name>\t\tbootstrap.txt\n\tmaxswaps\t<integer number>\t\t*1,000,000\n", number_of_steps);
             if(criterion == 0)
                 {
-                printf("\tweight\t\tequal | comparisons\t\t");
-                if(dweight == 1) printf("comparisons");else printf("splits");
+                printf2("\tweight\t\tequal | comparisons\t\t");
+                if(dweight == 1) printf2("comparisons");else printf2("splits");
                 }
             if(criterion == 2)
                 {
-                printf("\tweight\t\tequal | splits\t\t\t");
-                if(splits_weight == 1) printf("equal");if(splits_weight == 2) printf("splits");
+                printf2("\tweight\t\tequal | splits\t\t\t");
+                if(splits_weight == 1) printf2("equal");if(splits_weight == 2) printf2("splits");
                 }
             if(criterion == 3)
                 {
-                printf("\tweight\t\tequal | taxa | quartets\t\t");
-                if(quartet_normalising == 1) printf("equal");if(quartet_normalising == 2) printf("taxa");if(quartet_normalising == 3) printf("quartets");
+                printf2("\tweight\t\tequal | taxa | quartets\t\t");
+                if(quartet_normalising == 1) printf2("equal");if(quartet_normalising == 2) printf2("taxa");if(quartet_normalising == 3) printf2("quartets");
                 }
 			if(criterion == 5)
 				{
-				printf("\n\tduplications\t<value>\t\t\t\t*1.0\n\tlosses\t\t<value>\t\t\t\t*1.0");
-				printf("\n\tnumspeciesrootings\t<value> | all\t\t*2\n\tnumgenerootings\t\t<value> | all\t\t*2\n");
+				printf2("\n\tduplications\t<value>\t\t\t\t*1.0\n\tlosses\t\t<value>\t\t\t\t*1.0");
+				printf2("\n\tnumspeciesrootings\t<value> | all\t\t*2\n\tnumgenerootings\t\t<value> | all\t\t*2\n");
 				}
 
-			printf("\n\tconsensus\tstrict | majrule | minor | <proportion>\t*majrule");
-			printf("\n\tconsensusfile\t<filename>\t\t\tconsensus.ph\n");
-            printf("\n");
+			printf2("\n\tconsensus\tstrict | majrule | minor | <proportion>\t*majrule");
+			printf2("\n\tconsensusfile\t<filename>\t\t\tconsensus.ph\n");
+            printf2("\n");
             }
         if(criterion == 1)
-            printf("\n\tnreps\t\t<integer number>\t\t*100\n\tswap\t\tnni | spr | tbr | all\t\t*tbr\n\taddseq\t\tsimple | closest | asis |\n\t\t\trandom | furthest\t\t*random\n\ttreefile\t<output treefile name>\t\tMRP.tree\n");
+            printf2("\n\tnreps\t\t<integer number>\t\t*100\n\tswap\t\tnni | spr | tbr | all\t\t*tbr\n\taddseq\t\tsimple | closest | asis |\n\t\t\trandom | furthest\t\t*random\n\ttreefile\t<output treefile name>\t\tMRP.tree\n");
         }
     if(num == 6)
         {
-        printf("\nyaptp [options]  \n\n\n");
-        printf("\tOptions\t\tSettings\t\t\tCurrent\n");
-        printf("\t===========================================================\n");
+        printf2("\nyaptp [options]  \n\n\n");
+        printf2("\tOptions\t\tSettings\t\t\tCurrent\n");
+        printf2("\t===========================================================\n");
         if(criterion != 1)
             {
-            printf("\n\tmethod\t\tequiprobable | markovian\t*equiprobable");
-            printf("\n\tnreps\t\t<integer number>\t\t*100\n\thsreps\t\t<integer number>\t\t*10\n\tsample\t\t<integer number>\t\t*10,000\n\tsearch\t\tnni | spr | all\t\t\t");
-            if(method == 1) printf("nni");
-            if(method == 2) printf("spr");
-            printf("\n\tnsteps\t\t<integer number>\t\t%d\n\ttreefile\t<output treefile name>\t\tyaptp.ph\n\tmaxswaps\t<integer number>\t\t*1,000,000\n", number_of_steps);
+            printf2("\n\tmethod\t\tequiprobable | markovian\t*equiprobable");
+            printf2("\n\tnreps\t\t<integer number>\t\t*100\n\thsreps\t\t<integer number>\t\t*10\n\tsample\t\t<integer number>\t\t*10,000\n\tsearch\t\tnni | spr | all\t\t\t");
+            if(method == 1) printf2("nni");
+            if(method == 2) printf2("spr");
+            printf2("\n\tnsteps\t\t<integer number>\t\t%d\n\ttreefile\t<output treefile name>\t\tyaptp.ph\n\tmaxswaps\t<integer number>\t\t*1,000,000\n", number_of_steps);
             if(criterion == 0)
                 {
-                printf("\tweight\t\tequal | comparisons\t\t");
-                if(dweight == 1) printf("comparisons");else printf("splits");
+                printf2("\tweight\t\tequal | comparisons\t\t");
+                if(dweight == 1) printf2("comparisons");else printf2("splits");
                 }
             if(criterion == 2)
                 {
-                printf("\tweight\t\tequal | splits\t\t\t");
-                if(splits_weight == 1) printf("equal");if(splits_weight == 2) printf("splits");
+                printf2("\tweight\t\tequal | splits\t\t\t");
+                if(splits_weight == 1) printf2("equal");if(splits_weight == 2) printf2("splits");
                 }
             if(criterion == 3)
                 {
-                printf("\tweight\t\tequal | taxa | quartets\t\t");
-                if(quartet_normalising == 1) printf("equal");if(quartet_normalising == 2) printf("taxa");if(quartet_normalising == 3) printf("quartets");
+                printf2("\tweight\t\tequal | taxa | quartets\t\t");
+                if(quartet_normalising == 1) printf2("equal");if(quartet_normalising == 2) printf2("taxa");if(quartet_normalising == 3) printf2("quartets");
                 }
 	if(criterion == 5)
 		{
-		printf("\n\tduplications\t<value>\t\t\t\t*1.0\n\tlosses\t\t<value>\t\t\t\t*1.0");
-		printf("\n\tnumspeciesrootings\t<value> | all\t\t*2\n\tnumgenerootings\t\t<value> | all\t\t*2\n");
+		printf2("\n\tduplications\t<value>\t\t\t\t*1.0\n\tlosses\t\t<value>\t\t\t\t*1.0");
+		printf2("\n\tnumspeciesrootings\t<value> | all\t\t*2\n\tnumgenerootings\t\t<value> | all\t\t*2\n");
 		}
 
-            printf("\n");
+            printf2("\n");
             }
         else
             {
-            printf("\n\tnreps\t\t<integer number>\t\t*100\n");
+            printf2("\n\tnreps\t\t<integer number>\t\t*100\n");
             }
             
         }
@@ -1278,173 +1391,183 @@ void print_commands(int num)
         }
     if(num == 8)
         {
-        printf("\nset [options]  \n\n\n");
-        printf("\tOptions\t\tSettings\t\t\tCurrent\n");
-        printf("\t===========================================================\n");
-        printf("\n\tcriterion\tdfit | sfit | qfit | mrp | avcon\t");
-        if(criterion == 0) printf("dfit");
-        if(criterion == 1) printf("mrp");
-        if(criterion == 2) printf("sfit");
-        if(criterion == 3) printf("qfit");
-        if(criterion == 4) printf("avcon");
-        printf("\n");
-        printf("\n\tseed\t\t<integer number>\t\t\t%d", seed);
-/*        printf("\n\n\t\t\tdfit = best Distance Fit\n\t\t\tsfit = maximum Splits Fit\n\t\t\tqfit = maximum Quartet Fit\n\t\t\tmrp = Matrix representation using parsimony\n");
+        printf2("\nset [options]  \n\n\n");
+        printf2("\tOptions\t\tSettings\t\t\tCurrent\n");
+        printf2("\t===========================================================\n");
+        printf2("\n\tcriterion\tdfit | sfit | qfit | mrp | avcon\t");
+        if(criterion == 0) printf2("dfit");
+        if(criterion == 1) printf2("mrp");
+        if(criterion == 2) printf2("sfit");
+        if(criterion == 3) printf2("qfit");
+        if(criterion == 4) printf2("avcon");
+        printf2("\n");
+        printf2("\n\tseed\t\t<integer number>\t\t\t%d", seed);
+/*        printf2("\n\n\t\t\tdfit = best Distance Fit\n\t\t\tsfit = maximum Splits Fit\n\t\t\tqfit = maximum Quartet Fit\n\t\t\tmrp = Matrix representation using parsimony\n");
   */      }
     if(num == 9)
-        printf("\nquit \n\tquit from the program and return to the operating system\n");
+        printf2("\nquit \n\tquit from the program and return to the operating system\n");
     if(num == 10)
         {
-        printf("\nexclude [options]  \nNOT IMPLEMENTED YET\n\n");
-        printf("\tOptions\t\tSettings\t\t\tCurrent\n");
-        printf("\t===========================================================\n");
+        printf2("\nexclude [options]  \nNOT IMPLEMENTED YET\n\n");
+        printf2("\tOptions\t\tSettings\t\t\tCurrent\n");
+        printf2("\t===========================================================\n");
 
-        printf("\n\tall\t\tyes | no\t\t\tno\n\tlessthan\t<integer number>  \n\tgreaterthan\t<integer number>\n\tequalto\t\t<integer number>\n\tcontaining\t<taxanumbers>\n");
+        printf2("\n\tall\t\tyes | no\t\t\tno\n\tlessthan\t<integer number>  \n\tgreaterthan\t<integer number>\n\tequalto\t\t<integer number>\n\tcontaining\t<taxanumbers>\n");
         }
     if(num == 11)
         {
-        printf("\ninclude [options]  \nNOT IMPLEMENTED YET\n\n");
-        printf("\tOptions\t\tSettings\t\t\tCurrent\n");
-        printf("\t===========================================================\n");
+        printf2("\ninclude [options]  \nNOT IMPLEMENTED YET\n\n");
+        printf2("\tOptions\t\tSettings\t\t\tCurrent\n");
+        printf2("\t===========================================================\n");
 
-        printf("\n\tall\t\tyes | no\t\t\tno\n\tlessthan\t<integer number>  \n\tgreaterthan\t<integer number>\n\tequalto\t\t<integer number>\n\tcontaining\t<taxanumbers>\n");
+        printf2("\n\tall\t\tyes | no\t\t\tno\n\tlessthan\t<integer number>  \n\tgreaterthan\t<integer number>\n\tequalto\t\t<integer number>\n\tcontaining\t<taxanumbers>\n");
         }
      if(num == 12)
         {
-        printf("\n!  \n\n\n");
-        printf("\tOptions\t\tSettings\t\t\tCurrent\n");
-        printf("\t===========================================================\n");
+        printf2("\n!  \n\n\n");
+        printf2("\tOptions\t\tSettings\t\t\tCurrent\n");
+        printf2("\t===========================================================\n");
 
-        printf("\n\tTemporarily returns the user to the operating system by running a C shell\n\tType 'exit' to return to clann");
+        printf2("\n\tTemporarily returns the user to the operating system by running a C shell\n\tType 'exit' to return to clann");
         }
     if(num == 13)
-        printf("\nquit\n\tThis command quits Clann\n");
+        printf2("\nquit\n\tThis command quits Clann\n");
 	
 	if(num == 14)
 		{
-        printf("\ngeneratetrees [options]  \n\n\n");
-        printf("\tOptions\t\tSettings\t\t\tCurrent\n");
-        printf("\t===========================================================\n");
+        printf2("\ngeneratetrees [options]  \n\n\n");
+        printf2("\tOptions\t\tSettings\t\t\tCurrent\n");
+        printf2("\t===========================================================\n");
 
-        printf("\n\tmethod\t\tequiprobable | markovian\t*equiprobable\n\tntrees\t\tall | <integer number>\t\t*100\n\tnbins\t\t<integer number>\t\t*20\n\toutfile\t\t<output file name>\t\t*histogram.txt\n\tsourcedata\treal | randomised | ideal\t*real\n\tsavescores\tyes | no\t\t\t*no\n\tsupertree\tmemory | <supertree file name>\t*memory\n\tsavesourcetrees\tyes | no\t\t\t*no\n\n\tThe option 'supertree' is only used when idealised data are being created\n\n");
+        printf2("\n\tmethod\t\tequiprobable | markovian\t*equiprobable\n\tntrees\t\tall | <integer number>\t\t*100\n\tnbins\t\t<integer number>\t\t*20\n\toutfile\t\t<output file name>\t\t*histogram.txt\n\tsourcedata\treal | randomised | ideal\t*real\n\tsavescores\tyes | no\t\t\t*no\n\tsupertree\tmemory | <supertree file name>\t*memory\n\tsavesourcetrees\tyes | no\t\t\t*no\n\n\tThe option 'supertree' is only used when idealised data are being created\n\n");
 		
 		
 		}
      
 	 if(num == 15)
 		{
-		printf("\nconsensus [options]\n\n\n");
-		printf("\tOptions\t\tSettings\t\t\tCurrent\n");
-        printf("\t===========================================================\n");
+		printf2("\nconsensus [options]\n\n\n");
+		printf2("\tOptions\t\tSettings\t\t\tCurrent\n");
+        printf2("\t===========================================================\n");
 		
-		printf("\n\tmethod\tstrict | majrule | minor | <value>\t*minor\n\tguidetree\t<guide tree file name>\t\t*<none>\n\tfilename\t<output file name>\t\t*consensus.ph\n");
+		printf2("\n\tmethod\tstrict | majrule | minor | <value>\t*minor\n\tguidetree\t<guide tree file name>\t\t*<none>\n\tfilename\t<output file name>\t\t*consensus.ph\n");
 		}
 	 
 	 if(num == 16)
 		{
-		printf("\nshowtrees\trange | size | namecontains | containstaxa | score \n\n");
-		printf("\tOptions\t\tSettings\t\t\tCurrent\n");
-        printf("\t===========================================================\n");
+		printf2("\nshowtrees\trange | size | namecontains | containstaxa | score \n\n");
+		printf2("\tOptions\t\tSettings\t\t\tCurrent\n");
+        printf2("\t===========================================================\n");
 		
-		printf("\n\trange\t\t<integer value> - <integer value> \t*all\n\tsize\t\tequalto <integer value>\n\t\t\tlessthan <integer value>\n\t\t\tgreaterthan <integer value>\t\t*none\n\tnamecontians\t<character string>\t\t\t*none\n\tcontainstaxa\t<character string>\t\t\t*none\n\tscore\t\t<min score> - <max score>\t\t*none\n\tsavetrees\tyes | no\t\t\t\t*no\n\tfilename\t<output file name>\t\t\t*showtrees.txt\n\tdisplay\t\tyes | no\t\t\t\t*yes\n");
+		printf2("\n\trange\t\t<integer value> - <integer value> \t*all\n\tsize\t\tequalto <integer value>\n\t\t\tlessthan <integer value>\n\t\t\tgreaterthan <integer value>\t\t*none\n\tnamecontians\t<character string>\t\t\t*none\n\tcontainstaxa\t<character string>\t\t\t*none\n\tscore\t\t<min score> - <max score>\t\t*none\n\tsavetrees\tyes | no\t\t\t\t*no\n\tfilename\t<output file name>\t\t\t*showtrees.txt\n\tdisplay\t\tyes | no\t\t\t\t*yes\n");
 		}
 
 	 if(num == 17)
 		{
-		printf("\tdeletetrees\trange | size | namecontains | containstaxa | score \n\n");
-		printf("\tOptions\t\tSettings\t\t\tCurrent\n");
-        printf("\t===========================================================\n");
+		printf2("\tdeletetrees\trange | size | namecontains | containstaxa | score \n\n");
+		printf2("\tOptions\t\tSettings\t\t\tCurrent\n");
+        printf2("\t===========================================================\n");
 		
-		printf("\n\tsinglecopy\tN/A\n\tmulticopy\tN/A\n\trange\t\t<integer value> - <integer value> \t*all\n\tsize\t\tequalto <integer value>\n\t\t\tlessthan <integer value>\n\t\t\tgreaterthan <integer value>\t\t*none\n\tnamecontains\t<character string>\t\t\t*none\n\tcontainstaxa\t<character string>\t\t\t*none\n\tscore\t\t<min score> - <max score>\t\t*none\n");
+		printf2("\n\tsinglecopy\tN/A\n\tmulticopy\tN/A\n\trange\t\t<integer value> - <integer value> \t*all\n\tsize\t\tequalto <integer value>\n\t\t\tlessthan <integer value>\n\t\t\tgreaterthan <integer value>\t\t*none\n\tnamecontains\t<character string>\t\t\t*none\n\tcontainstaxa\t<character string>\t\t\t*none\n\tscore\t\t<min score> - <max score>\t\t*none\n");
 		}
 
 	 if(num == 18)
 		{
-		printf("\nincludetrees\trange | size | namecontains | containstaxa | score \n\n");
-		printf("\tOptions\t\tSettings\t\t\tCurrent\n");
-        printf("\t===========================================================\n");
+		printf2("\nincludetrees\trange | size | namecontains | containstaxa | score \n\n");
+		printf2("\tOptions\t\tSettings\t\t\tCurrent\n");
+        printf2("\t===========================================================\n");
 		
-		printf("\n\trange\t\t<integer value> - <integer value> \t*all\n\tsize\t\tequalto <integer value>\n\t\t\tlessthan <integer value>\n\t\t\tgreaterthan <integer value>\t\t*none\n\tnamecontians\t<character string>\t\t\t*none\n\tcontainstaxa\t<character string>\t\t\t*none\n\tscore\t\t<min score> - <max score>\t\t*none\n");
+		printf2("\n\trange\t\t<integer value> - <integer value> \t*all\n\tsize\t\tequalto <integer value>\n\t\t\tlessthan <integer value>\n\t\t\tgreaterthan <integer value>\t\t*none\n\tnamecontians\t<character string>\t\t\t*none\n\tcontainstaxa\t<character string>\t\t\t*none\n\tscore\t\t<min score> - <max score>\t\t*none\n");
 		}
 	
 	 if(num == 19)
 		{
-		printf("\nrfdists [options]\t\n\n");
-		printf("\tOptions\t\tSettings\t\t\tCurrent\n");
-        printf("\t===========================================================\n");
-		printf("\n\tfilename\t<output file name>\t\t*robinson_foulds.txt\n\toutput\t\tmatrix | vector\t\t*matrix\n\tmissing\t\tnone | 4point | ultrametric\t*none\n");
+		printf2("\nrfdists [options]\t\n\n");
+		printf2("\tOptions\t\tSettings\t\t\tCurrent\n");
+        printf2("\t===========================================================\n");
+		printf2("\n\tfilename\t<output file name>\t\t*robinson_foulds.txt\n\toutput\t\tmatrix | vector\t\t*matrix\n\tmissing\t\tnone | 4point | ultrametric\t*none\n");
 		}
 	if(num == 20)
 		{
-		printf("\ndeletetaxa\t <taxa name> <taxa name> etc...\n\n");
-		printf("\tOptions\t\tSettings\t\t\tCurrent\n");
-        printf("\t===========================================================\n");
+		printf2("\ndeletetaxa\t <taxa name> <taxa name> etc...\n\n");
+		printf2("\tOptions\t\tSettings\t\t\tCurrent\n");
+        printf2("\t===========================================================\n");
 		}
 	if(num == 21)
 		{
-		printf("\nnj [options]\t\n\n");
-		printf("\tOptions\t\tSettings\t\t\tCurrent\n");
-        printf("\t===========================================================\n");
-		printf("\n\tmissing\t\t4point | ultrametric\t\t*4point\n\tsavetrees\t<file name>\t\t\t*NJtree.ph\n");
+		printf2("\nnj [options]\t\n\n");
+		printf2("\tOptions\t\tSettings\t\t\tCurrent\n");
+        printf2("\t===========================================================\n");
+		printf2("\n\tmissing\t\t4point | ultrametric\t\t*4point\n\tsavetrees\t<file name>\t\t\t*NJtree.ph\n");
 		}
 	 if(num == 22)
 		{
-		printf("\nsprdists [options]\t\n\n");
-		printf("\tOptions\t\tSettings\t\t\tCurrent\n");
-        printf("\t===========================================================\n");
-		printf("\n\tsupertree\tcreate | memory | <file name>\t*create\n\tdorandomisation\tyes | no\t\t\t*yes\n\toutfile\t\t<file name>\t\t\t*SPRdistances.txt\n");
+		printf2("\nsprdists [options]\t\n\n");
+		printf2("\tOptions\t\tSettings\t\t\tCurrent\n");
+        printf2("\t===========================================================\n");
+		printf2("\n\tsupertree\tcreate | memory | <file name>\t*create\n\tdorandomisation\tyes | no\t\t\t*yes\n\toutfile\t\t<file name>\t\t\t*SPRdistances.txt\n");
 		}
 	 if(num == 23)
 		{
-		printf("\nmapunknowns \t\n\n");
-		printf("\tOptions\t\tSettings\t\t\tCurrent\n");
-        printf("\t===========================================================\n");
-		printf("\n\t\n");
+		printf2("\nmapunknowns \t\n\n");
+		printf2("\tOptions\t\tSettings\t\t\tCurrent\n");
+        printf2("\t===========================================================\n");
+		printf2("\n\t\n");
 		}
 	 if(num == 24)
 		{
-		printf("\nreconstruct \t\n\n");
-		printf("\tOptions\t\tSettings\t\t\tCurrent\n");
-        printf("\t===========================================================\n");
-		printf("\n\tduplications\t<value>\t\t\t\t*1.0\n\tlosses\t\t<value>\t\t\t\t*1.0");
-		printf("\n\tshowrecon\tyes | no\t\t\t*no\n\tbasescore\t<value>\t\t\t\t*1.0\n\tprintfiles\tyes | no\t\t\t*yes");
+		printf2("\nreconstruct [options]\t\n\n");
+		printf2("\tOptions\t\tSettings\t\t\tCurrent\n");
+        printf2("\t===========================================================\n");
+		printf2("\n\tduplications\t<value>\t\t\t\t*1.0\n\tlosses\t\t<value>\t\t\t\t*1.0");
+		printf2("\n\tshowrecon\tyes | no\t\t\t*no\n\tbasescore\t<value>\t\t\t\t*1.0\n\tprintfiles\tyes | no\t\t\t*yes");
 		}
      if(num == 25)
         {
-        printf("\nprunemonophylies \t\n\n");
-        printf("\tOptions\t\tSettings\t\t\tCurrent\n");
-        printf("\t===========================================================\n");
-        printf("\n\tfilename\t<output file name>\t\t*prunedtrees.txt");
-        printf("\n\tselection\trandom | length\t\t\t*random\n\n\tIf \"length\" is chosen, then name MUST have a number directly following the name of the species\n\t representing the sequence length. i.e.: \"Speces.length.XXXXXX\n\n" );
+        printf2("\nprunemonophylies [options]\t\n\n");
+        printf2("\tOptions\t\tSettings\t\t\tCurrent\n");
+        printf2("\t===========================================================\n");
+        printf2("\n\tfilename\t<output file name>\t\t*prunedtrees.txt");
+        printf2("\n\tselection\trandom | length\t\t\t*random\n\n\tIf \"length\" is chosen, then name MUST have a number directly following the name of the species\n\t representing the sequence length. i.e.: \"Speces.length.XXXXXX\n\n" );
         }
     if(num == 26)
         {
-        printf("\ntips \t\n\n");
-        printf("\tOptions\t\tSettings\t\t\tCurrent\n");
-        printf("\t===========================================================\n");
-        printf("\n\tnumber\t<value between 1 and 10>\t\trandom");
+        printf2("\ntips [options]\t\n\n");
+        printf2("\tOptions\t\tSettings\t\t\tCurrent\n");
+        printf2("\t===========================================================\n");
+        printf2("\n\tnumber\t<value between 1 and 10>\t\trandom");
         }
     if(num == 27)
         {
-        printf("\trandomisetrees \t\n\n");
-        printf("\tOptions\t\tSettings\t\t\tCurrent\n");
-        printf("\t===========================================================\n");
-        printf("\n\tThis command randomises all source trees in memory\n");
+        printf2("\nrandomisetrees \t\n\n");
+        printf2("\tOptions\t\tSettings\t\t\tCurrent\n");
+        printf2("\t===========================================================\n");
+        printf2("\n\tThis command randomises all source trees in memory\n");
         }
     if(num == 28)
         {
-        printf("\trandomprune \t\n\n");
-        printf("\tOptions\t\tSettings\t\t\tCurrent\n");
-        printf("\t===========================================================\n");
-        printf("\n\tThis command randomly prunes the source trees in memory\n");
+        printf2("\nrandomprune \t\n\n");
+        printf2("\tOptions\t\tSettings\t\t\tCurrent\n");
+        printf2("\t===========================================================\n");
+        printf2("\n\tThis command randomly prunes the source trees in memory\n");
+        }
+   if(num == 29)
+        {
+        printf2("\nlog [options]\t\n\n");
+        printf2("\tOptions\t\tSettings\t\t\tCurrent\n");
+        printf2("\t===========================================================\n");
+        printf2("\n\tstatus\t\ton|off\t\t\t\t");
+        if(print_log == TRUE) printf2("on");
+        else printf2("off");
+        printf2("\n\tfile\t\t<output file name>\t\t%s", logfile_name);
         }
 	
 	
 		
      if(num != 0)
         {
-        printf("\n\n\t\t\t\t\t\t\t*Option is nonpersistent\n");
-        printf("\t===========================================================\n\n");    
+        printf2("\n\n\t\t\t\t\t\t\t*Option is nonpersistent\n");
+        printf2("\t===========================================================\n\n");    
         }
     }
     
@@ -1539,7 +1662,7 @@ void execute_command(char *commandline, int do_all)
 				else
 					{
 					error = TRUE;
-					printf("Error: value %s not valid for maxnamelen\n\n", parsed_command[i+1]);
+					printf2("Error: value %s not valid for maxnamelen\n\n", parsed_command[i+1]);
 					}
 				}
             }
@@ -1555,13 +1678,13 @@ void execute_command(char *commandline, int do_all)
 				else
 					{
 					error = TRUE;
-					printf("Error: A character must be provided as a delimiter\n");
+					printf2("Error: A character must be provided as a delimiter\n");
 					}
 				}
             }  
         }
 
-    if(delimiter == TRUE) printf("\nDelimiter for recognising species names set to '%c'\n", delimiter_char);
+    if(delimiter == TRUE) printf2("\nDelimiter for recognising species names set to '%c'\n", delimiter_char);
 
     /********** open the input file ************/
     filename[0] = '\0';
@@ -1575,7 +1698,7 @@ void execute_command(char *commandline, int do_all)
     
     if((infile = fopen(filename, "r")) == '\0')		/* check to see if the file is there */
         {								/* Open the source tree file */
-        printf("Cannot open file %s\n", filename);
+        printf2("Cannot open file %s\n", filename);
         error = TRUE;
         }
 	strcpy(inputfilename, filename);
@@ -1801,12 +1924,12 @@ void execute_command(char *commandline, int do_all)
         
         if(c == '#')
             {
-            printf("\nReading Nexus format source tree file \n");
+            printf2("\nReading Nexus format source tree file \n");
 
 
 			if(nexusparser(infile) == TRUE)
 				{
-				printf("error reading nexus file\n");
+				printf2("error reading nexus file\n");
 				}
 
 
@@ -1816,11 +1939,11 @@ void execute_command(char *commandline, int do_all)
             }  /* End reading NEXUS format tree */
         else
             {
-			printf("\nReading Newhampshire (Phylip) format source trees\n");
+			printf2("\nReading Newhampshire (Phylip) format source trees\n");
             
 			if(c != '(')
                 {
-                printf("Error: Treefile not in correct format\n");
+                printf2("Error: Treefile not in correct format\n");
                 }
             else
                 {
@@ -2379,7 +2502,7 @@ int nexusparser(FILE *nexusfile)
 													}
 												if(found == -1)
 													{
-													printf("Error: taxa %s is not in the translation table\n", single);
+													printf2("Error: taxa %s is not in the translation table\n", single);
 													error = TRUE;
 													}
 												else
@@ -2542,27 +2665,27 @@ void input_file_summary(int do_all)
 		size_of_trees[i] = 0;
 	
     sup=1;
-    printf("\n\tSource tree summmary:\n\n");
-    printf("\t----------------------------------------------------\n");
-    printf("\t\tNumber of input trees: %d\n", Total_fund_trees-num_excluded_trees);
-    printf("\t\tNumber of unique taxa: %d\n", number_of_taxa-num_excluded_taxa);
+    printf2("\n\tSource tree summmary:\n\n");
+    printf2("\t----------------------------------------------------\n");
+    printf2("\t\tNumber of input trees: %d\n", Total_fund_trees-num_excluded_trees);
+    printf2("\t\tNumber of unique taxa: %d\n", number_of_taxa-num_excluded_taxa);
     sup =1;
     for(i=4; i<=number_of_taxa-num_excluded_taxa; i++) sup*=((2*i)-5);
-    printf("\t\tTotal unrooted trees in Supertree space?\n\t\t\t%g\n\n", sup);
+    printf2("\t\tTotal unrooted trees in Supertree space?\n\t\t\t%g\n\n", sup);
     
 
-    printf("\tOccurrence summary:\n\n");
+    printf2("\tOccurrence summary:\n\n");
     
-    printf("\t\tnumber\tTaxa name           \t\tOccurrence\n\n");
+    printf2("\t\tnumber\tTaxa name           \t\tOccurrence\n\n");
     for(i=0; i<number_of_taxa; i++)
         {
-        printf("\t\t%-4d\t%-30s\t%d\n", i, taxa_names[i], taxa_incidence[i]);
+        printf2("\t\t%-4d\t%-30s\t%d\n", i, taxa_names[i], taxa_incidence[i]);
         }
    
 	if(do_all)
 		{
-		printf("\n\n\tCo-occurrence summary:\n\n");
-		printf("\t\tTaxa Number\n      ");
+		printf2("\n\n\tCo-occurrence summary:\n\n");
+		printf2("\t\tTaxa Number\n      ");
 
 
 		limit_reached = FALSE;
@@ -2576,26 +2699,26 @@ void input_file_summary(int do_all)
 				limit = number_of_taxa;
 				}
 			if(previous_limit == 0)
-				printf("\n\t\t      ");
+				printf2("\n\t\t      ");
 			else
-				printf("\n\tCo-occurence summary continued:\n\t\t      ");
+				printf2("\n\tCo-occurence summary continued:\n\t\t      ");
 			for(i=previous_limit; i<limit; i++)
-				printf("%-5d ", i);
-			printf("\n");
+				printf2("%-5d ", i);
+			printf2("\n");
 			for(i=previous_limit; i<number_of_taxa; i++)
 				{
-				printf("\t\t%-5d ", i);
+				printf2("\t\t%-5d ", i);
 				for(j=previous_limit; j<=i; j++)
 					{
 					if(j<limit)
 						{
 						if(j== i)
-							printf("-     ");
+							printf2("-     ");
 						else
-							printf("%-5d ", Cooccurrance[i][j]);
+							printf2("%-5d ", Cooccurrance[i][j]);
 						}
 					}
-				printf("\n");
+				printf2("\n");
 				}
 			previous_limit = limit;
 			limit = limit+12;
@@ -2603,7 +2726,7 @@ void input_file_summary(int do_all)
 			}
 		}
 
-	printf("\n\n\tSource tree size summary:\n\n  num leaves\n");
+	printf2("\n\n\tSource tree size summary:\n\n  num leaves\n");
 	l=0;
 	smallest_tree = -1;
 	largest_tree = -1;
@@ -2637,10 +2760,10 @@ void input_file_summary(int do_all)
 		if(i==0) singlecopy++;
 		}	
 
-	printf("\tNumber of single copy trees:\t%d\n", singlecopy);
-	printf("\tnumber of multicopy trees:\t%d\n", Total_fund_trees-singlecopy);
+	printf2("\tNumber of single copy trees:\t%d\n", singlecopy);
+	printf2("\tnumber of multicopy trees:\t%d\n", Total_fund_trees-singlecopy);
 
-    printf("\t----------------------------------------------------\n");
+    printf2("\t----------------------------------------------------\n");
 	
 	free(size_of_trees);
     }
@@ -2952,6 +3075,9 @@ void clean_exit(int error)
 		exit(1);
     else
 		exit(0);
+
+	if(logfile!= NULL)
+		fclose(logfile);
     }
     
 
@@ -3763,14 +3889,14 @@ void intTotree(int tree_num, char *array, int num_taxa)
     
     min = 1;
     max = supers; /* max is now the number of possible trees in this tree space */
-   /* printf("path of tree number %d with %d taxa is:\n", tree_num, number_of_taxa);
+   /* printf2("path of tree number %d with %d taxa is:\n", tree_num, number_of_taxa);
    */
      for(i=4; i<=num_taxa; i++)  /* from a triplet to the full complement of taxa, we figure out the placement of each new taxa at each stage */
         {
         
         path[i-4] = div((tree_num - min), ((max - (min - 1))/((2 * i)- 5))).quot + 1;
 
-   /*     printf("min = %d, max = %d path = %d\n",min, max, path[i-4]);
+   /*     printf2("min = %d, max = %d path = %d\n",min, max, path[i-4]);
      */  
         if(i != num_taxa)
             {
@@ -3793,7 +3919,7 @@ void intTotree(int tree_num, char *array, int num_taxa)
         j=0; k=0;
         while(j!= path[i-3])
             {
-        /*    printf("%s\n", array);  */
+        /*    printf2("%s\n", array);  */
             exit = 0;
             while(exit == 0)
                 {
@@ -3997,7 +4123,7 @@ void alltrees_search(int user)
                 worst = tofloat(parsed_command[i+1]);
                 if(worst == 0)
                     {
-                    printf("Error: '%s' is an invalid value for keep\n", parsed_command[i+1]);
+                    printf2("Error: '%s' is an invalid value for keep\n", parsed_command[i+1]);
                     error = TRUE;
                     }
                 }
@@ -4006,7 +4132,7 @@ void alltrees_search(int user)
                 keep = toint(parsed_command[i+1]);
                 if(keep == 0)
                     {
-                    printf("Error: '%s' is an invalid values for nbest\n", parsed_command[i+1]);
+                    printf2("Error: '%s' is an invalid values for nbest\n", parsed_command[i+1]);
                     error = TRUE;
                     }
                 }
@@ -4014,12 +4140,12 @@ void alltrees_search(int user)
              {
                 if((userfile = fopen(parsed_command[i+1], "w")) == NULL)
                  {
-                    printf("Error opening file named %s\n", parsed_command[i+1]);
+                    printf2("Error opening file named %s\n", parsed_command[i+1]);
                     error = TRUE;
                  }
                 else
                  {
-                    printf("opened output file %s\n", parsed_command[i+1]);
+                    printf2("opened output file %s\n", parsed_command[i+1]);
                     strcpy(outfilename, parsed_command[i+1]);
                  }
              }
@@ -4028,7 +4154,7 @@ void alltrees_search(int user)
                 {
                 if((treesfile = fopen("alltrees.ph", "w")) == NULL) 
                     {
-                    printf("Error opening file named 'alltrees.ph'\n");
+                    printf2("Error opening file named 'alltrees.ph'\n");
                     error = TRUE;
                     }
                 }
@@ -4048,7 +4174,7 @@ void alltrees_search(int user)
                                 quartet_normalising = 3;
                             else
                                 {
-                                printf("Error: weight option '%s' is unknown\n", parsed_command[i+1]);
+                                printf2("Error: weight option '%s' is unknown\n", parsed_command[i+1]);
                                 error = TRUE;
                                 }
                             }
@@ -4067,7 +4193,7 @@ void alltrees_search(int user)
                             dweight = 1;
                         else
                             {
-                            printf("Error: weight option '%s' is unknown\n", parsed_command[i+1]);
+                            printf2("Error: weight option '%s' is unknown\n", parsed_command[i+1]);
                             error = TRUE;
                             }
                         }
@@ -4085,7 +4211,7 @@ void alltrees_search(int user)
                             splits_weight = 2;
                         else
                             {
-                            printf("Error: weight option '%s' is unknown\n", parsed_command[i+1]);
+                            printf2("Error: weight option '%s' is unknown\n", parsed_command[i+1]);
                             error = TRUE;
                             }
                         }
@@ -4099,7 +4225,7 @@ void alltrees_search(int user)
             {
             if((userfile = fopen("top_alltrees.txt", "w")) == NULL) 
                 {
-                printf("Error opening file named 'alltrees.ph'\n");
+                printf2("Error opening file named 'alltrees.ph'\n");
                 error = TRUE;
                 }
             }
@@ -4114,27 +4240,27 @@ void alltrees_search(int user)
             end = sup;
             }
             
-        printf("\n\nAlltrees (exhaustive search) settings:\n\trange: tree numbers %d to %d inclusive\n\tOutput file: %s\n\tCreate all trees? ", start, end, outfilename );
-        if(treesfile != NULL) printf("Yes\n");
-        else printf("No\n");
-        printf("\tWeighting Scheme = ");
+        printf2("\n\nAlltrees (exhaustive search) settings:\n\trange: tree numbers %d to %d inclusive\n\tOutput file: %s\n\tCreate all trees? ", start, end, outfilename );
+        if(treesfile != NULL) printf2("Yes\n");
+        else printf2("No\n");
+        printf2("\tWeighting Scheme = ");
         if(criterion==0)
             {
-            if(dweight == 0) printf("equal\n");
-            if(dweight == 1) printf("comparisons\n");
+            if(dweight == 0) printf2("equal\n");
+            if(dweight == 1) printf2("comparisons\n");
             }
         if(criterion == 2)
             {
-            if(splits_weight == 1) printf("equal\n");
-            if(splits_weight == 2) printf("splits\n");
+            if(splits_weight == 1) printf2("equal\n");
+            if(splits_weight == 2) printf2("splits\n");
             }
         if(criterion == 3)
             {
-            if(quartet_normalising == 1) printf("equal\n");
-            if(quartet_normalising == 2) printf("taxa\n");
-            if(quartet_normalising == 3) printf("quartets\n");
+            if(quartet_normalising == 1) printf2("equal\n");
+            if(quartet_normalising == 2) printf2("taxa\n");
+            if(quartet_normalising == 3) printf2("quartets\n");
             }
-        printf("\n\n");
+        printf2("\n\n");
             
 		if(!calculated_fund_scores && criterion == 0)
 			{
@@ -4188,7 +4314,7 @@ void alltrees_search(int user)
                 }
             }
     
-        if(user) printf("Progress indicator:");
+        if(user) printf2("Progress indicator:");
         
         /************ End assign dynamic arrays **************/
     
@@ -4207,7 +4333,7 @@ void alltrees_search(int user)
             
 		 if(signal(SIGINT, controlc5) == SIG_ERR)
 			{
-			printf("An error occurred while setting a signal handler\n");
+			printf2("An error occurred while setting a signal handler\n");
 			}
 			
         for(i=start; i<=end; i++)
@@ -4215,13 +4341,13 @@ void alltrees_search(int user)
             tree[0] = '\0';
             if(user_break)
 				{
-				printf("%d trees sampled\n", i);
+				printf2("%d trees sampled\n", i);
 				i = end+1;
 				}
             interval2 = time(NULL);
             if(difftime(interval2, interval1) > 5) /* every 10 seconds print a dot to the screen */
                 {
-                printf("=");
+                printf2("=");
                 fflush(stdout);
                 interval1 = time(NULL);
                 }
@@ -4306,7 +4432,7 @@ void alltrees_search(int user)
         /***** Print out the best tree found ******/
         if(user)
             {
-            printf("\n");
+            printf2("\n");
             i=0;
             
             
@@ -4338,7 +4464,7 @@ void alltrees_search(int user)
                 if(userfile != NULL) fprintf(userfile, "%s;\t[%f]\n", best_tree, scores_retained_supers[i] );
 
                 tree_coordinates(best_tree, FALSE, TRUE, FALSE, -1);
-                printf("\nSupertree %d of %d score = %f\n", i+1, j, scores_retained_supers[i] );
+                printf2("\nSupertree %d of %d score = %f\n", i+1, j, scores_retained_supers[i] );
                 i++;
                 }
 
@@ -4580,7 +4706,7 @@ int tree_build (int c, char *treestring, struct taxon *parent, int fromfile, int
 					position->name = assign_taxa_name(temp, FALSE);
 					if(j != number_of_taxa)
 						{
-						printf("Error, Taxa name %s is not contained in the source trees\n", temp);
+						printf2("Error, Taxa name %s is not contained in the source trees\n", temp);
 						}
 					}
 				else  /* if the tree has been created internally by an alltrees search */
@@ -5295,7 +5421,7 @@ void bootstrap_search(void)
             Nreps = toint(parsed_command[i+1]);
             if(Nreps == 0)
                 {
-                printf("Error: '%s' is an invalid number of repetitions\n", parsed_command[i+1]);
+                printf2("Error: '%s' is an invalid number of repetitions\n", parsed_command[i+1]);
                 error = TRUE;
                 }
             }
@@ -5313,7 +5439,7 @@ void bootstrap_search(void)
 						if(strcmp(parsed_command[i+1], "tbr") == 0) search = 1;   /* should be set to 1 when tbr is implemented */
 						else
 							{
-							printf("Error: swap option '%s' unknown\n", parsed_command[i+1]);
+							printf2("Error: swap option '%s' unknown\n", parsed_command[i+1]);
 							error = TRUE;
 							}
 						}
@@ -5330,7 +5456,7 @@ void bootstrap_search(void)
 					missing_method = 0;
 				else
 					{
-					printf("Error: '%s' is an invalid method to be assigned to missing\n", parsed_command[i+1]);
+					printf2("Error: '%s' is an invalid method to be assigned to missing\n", parsed_command[i+1]);
 					missing_method = 1;
 					error = TRUE;
 					}
@@ -5352,12 +5478,12 @@ void bootstrap_search(void)
 						percentage = tofloat(parsed_command[i+1]);
 						if(percentage > 1)
 							{
-							printf("Error: The cut off for a consensus tree must be between .5 and 1.0\n");
+							printf2("Error: The cut off for a consensus tree must be between .5 and 1.0\n");
 							error = TRUE;
 							}
 						if(percentage == 0)
 							{
-							printf("Error: consensus option %s unknown\n", parsed_command[i+1]);
+							printf2("Error: consensus option %s unknown\n", parsed_command[i+1]);
 							error = TRUE;
 							}
 						}
@@ -5369,7 +5495,7 @@ void bootstrap_search(void)
             strcpy(consensusfilename, parsed_command[i+1]);
             if(filename[0] == '\0')
                 {
-                printf("Error: Unable to open file named '%s'\n", parsed_command[i+1]);
+                printf2("Error: Unable to open file named '%s'\n", parsed_command[i+1]);
                 error = TRUE;
                 strcpy(filename, "consensus.ph");
                 }
@@ -5380,7 +5506,7 @@ void bootstrap_search(void)
             strcpy(filename, parsed_command[i+1]);
             if(filename[0] == '\0')
                 {
-                printf("Error: Unable to open file named '%s'\n", parsed_command[i+1]);
+                printf2("Error: Unable to open file named '%s'\n", parsed_command[i+1]);
                 error = TRUE;
                 strcpy(filename, "bootstrap.txt");
                 }
@@ -5391,21 +5517,21 @@ void bootstrap_search(void)
     if(!error)
         {
 
-        printf("\n\nBootstrap Settings:\n\tNumber of Bootstrap replicates = %d\n\tSearching Supertree-space:", Nreps);
-        if(search==0)printf(" Exhaustive search\n");
-        if(search==1)printf(" Heuristic search ");
+        printf2("\n\nBootstrap Settings:\n\tNumber of Bootstrap replicates = %d\n\tSearching Supertree-space:", Nreps);
+        if(search==0)printf2(" Exhaustive search\n");
+        if(search==1)printf2(" Heuristic search ");
 	
-        printf("\tBootstrap tree file: %s\n", filename);
+        printf2("\tBootstrap tree file: %s\n", filename);
 		if(percentage == 1)
-			printf("\tStrict ");
+			printf2("\tStrict ");
 		if(percentage == .5)
-			printf("\tMajority rule ");
+			printf2("\tMajority rule ");
 		if(percentage < 0.5)
-			printf("\tMajority rule with minor components ");
+			printf2("\tMajority rule with minor components ");
 		if(percentage > 0.5 && percentage != 1)
-			printf("%f cut-off ", percentage);
-		printf("consensus tree is to be constructed\n");
-		printf("\tConsensus file name = %s\n\n\n", consensusfilename);
+			printf2("%f cut-off ", percentage);
+		printf2("consensus tree is to be constructed\n");
+		printf2("\tConsensus file name = %s\n\n\n", consensusfilename);
 		
         taxa_present = malloc(number_of_taxa*sizeof(int));  /** This is so that we can check at each replicate whether or not every taxa is included **/
         for(i=0; i<number_of_taxa; i++)
@@ -5486,7 +5612,7 @@ void bootstrap_search(void)
             {
             /*****************************************/
             hsprint = TRUE;
-            printf("Bootstrap progress indicator: "); 
+            printf2("Bootstrap progress indicator: "); 
             for(i=0; i<Nreps; i++)  /* for all reps of the bootstrap algorithm */
                 {
 				if(!user_break)
@@ -5545,7 +5671,7 @@ void bootstrap_search(void)
 						{
 						if(taxa_present[j] == FALSE)
 							{
-							printf("\n\trepetition %d:\tTaxon %s is not present\n", i+1, taxa_names[j]);
+							printf2("\n\trepetition %d:\tTaxon %s is not present\n", i+1, taxa_names[j]);
 							allpresent=FALSE;
 							}
 						}
@@ -5557,7 +5683,7 @@ void bootstrap_search(void)
 					if(allpresent)
 						{
 						/* Now find the best tree for this bootstrapped set of fundamental trees */
-						printf("\n\trepetition %d:", i+1);
+						printf2("\n\trepetition %d:", i+1);
 						fflush(stdout);
 						if(search == 0)
 							{
@@ -5597,12 +5723,12 @@ void bootstrap_search(void)
 							
 								strcpy(best_tree, "");
 								print_named_tree(tree_top, best_tree);
-							   /* printf("\n%s[%f];\t[%f]\n", best_tree, best_tree,(float)((float)1/(float)l), scores_retained_supers[k]);  */
+							   /* printf2("\n%s[%f];\t[%f]\n", best_tree, best_tree,(float)((float)1/(float)l), scores_retained_supers[k]);  */
 								fprintf(bootfile, "%s [%f];\t[score = %f]\n", best_tree,(float)((float)1/(float)l), scores_retained_supers[k]);
 								}
 							else
 								{
-							   /* printf("\n%s\t[%f]\n", retained_supers[k], scores_retained_supers[k]); */
+							   /* printf2("\n%s\t[%f]\n", retained_supers[k], scores_retained_supers[k]); */
 								j=0;
 								strcpy(best_tree, "");
 								while(retained_supers[k][j] != ';')
@@ -5632,11 +5758,11 @@ void bootstrap_search(void)
 					else
 						{
 						i=Nreps;
-						printf("\n\nError: This data may not be suitable for bootstrapping due to the low\noccurrences of some taxa in the source trees. Please check the\noccurance summary to identify problematic taxa\n");
+						printf2("\n\nError: This data may not be suitable for bootstrapping due to the low\noccurrences of some taxa in the source trees. Please check the\noccurance summary to identify problematic taxa\n");
 						}
 					}
 				}
-            printf("\n");
+            printf2("\n");
             fclose(bootfile);
 			
             
@@ -5696,7 +5822,7 @@ void bootstrap_search(void)
                     {
                     if(taxa_present[j] == FALSE)
                         {
-                        printf("\n\trepetition %d:\tTaxon %s is not present\n", i+1, taxa_names[j]);
+                        printf2("\n\trepetition %d:\tTaxon %s is not present\n", i+1, taxa_names[j]);
                         allpresent=FALSE;
                         }
                     }
@@ -5734,7 +5860,7 @@ void bootstrap_search(void)
 							}
 						if(error == 1)
 							{
-							printf("error\n");
+							printf2("error\n");
 							i=Nreps;
 							}	
 						}
@@ -5757,14 +5883,24 @@ void bootstrap_search(void)
                 else
                     {
                     i=Nreps;
-                    printf("\n\nError: This data may not be suitable for bootstrapping due to the low\noccurrences of some taxa in the source trees. Please check the\nCo-occurance summary to identify problematic taxa\n");
+                    printf2("\n\nError: This data may not be suitable for bootstrapping due to the low\noccurrences of some taxa in the source trees. Please check the\nCo-occurance summary to identify problematic taxa\n");
                     error = TRUE;
 		    }
                 }
             fclose(BR_file);
             if(!error && allpresent)
                 {
-                if(system("paup coding.nex") != 0) printf("Error calling paup, please execute the file coding.nex in paup to perform the parsimony step\n");
+                if(print_log == FALSE) 
+					strcpy(system_call, "paup coding.nex");
+				else
+					{
+					strcpy(system_call, "paup coding.nex");
+					strcat(system_call, " | tee -a ");
+					strcat(system_call, logfile_name);
+					}
+
+				if(system(system_call) != 0) printf2("Error calling paup, please execute the file coding.nex in paup to perform the parsimony step\n");
+
 				}
             
             }
@@ -5832,7 +5968,7 @@ void bootstrap_search(void)
 
 void memory_error(int error_num)  /*123 so far*/
     {
-    printf("Error: Out of memory @ %d\n", error_num);
+    printf2("Error: Out of memory @ %d\n", error_num);
     clean_exit(1);
     }
 
@@ -5923,7 +6059,7 @@ void print_tree_withinternals(struct taxon * position, char *tree)
 			strcpy(name, "");
 			totext(position->name, name);
 			strcat(tree, name);
-		/*	printf("%d\n", name);*/
+		/*	printf2("%d\n", name);*/
 			}
 		count++;
 		position = position->next_sibling;
@@ -5980,7 +6116,7 @@ void usertrees_search(void)
     
     if((userfile = fopen(parsed_command[1], "r")) == NULL)
         {
-        printf("Error opening file named %s\n", parsed_command[1]);
+        printf2("Error opening file named %s\n", parsed_command[1]);
         error = TRUE;
         }
     else
@@ -6011,7 +6147,7 @@ void usertrees_search(void)
                                 quartet_normalising = 3;
                             else
                                 {
-                                printf("Error: weight option '%s' is unknown\n", parsed_command[i+1]);
+                                printf2("Error: weight option '%s' is unknown\n", parsed_command[i+1]);
                                 error = TRUE;
                                 }
                             }
@@ -6030,7 +6166,7 @@ void usertrees_search(void)
                             dweight = 1;
                         else
                             {
-                            printf("Error: weight option '%s' is unknown\n", parsed_command[i+1]);
+                            printf2("Error: weight option '%s' is unknown\n", parsed_command[i+1]);
                             error = TRUE;
                             }
                         }
@@ -6048,7 +6184,7 @@ void usertrees_search(void)
                             splits_weight = 2;
                         else
                             {
-                            printf("Error: weight option '%s' is unknown\n", parsed_command[i+1]);
+                            printf2("Error: weight option '%s' is unknown\n", parsed_command[i+1]);
                             error = TRUE;
                             }
                         }
@@ -6059,7 +6195,7 @@ void usertrees_search(void)
                 {
                 if((outfile = fopen(parsed_command[i+1], "w")) == NULL)
                     {
-                    printf("Error opening output file named: %s\n", parsed_command[i+1]);
+                    printf2("Error opening output file named: %s\n", parsed_command[i+1]);
                     error = TRUE;
                     }
                 }
@@ -6069,24 +6205,24 @@ void usertrees_search(void)
             {
             if((outfile = fopen("Usertrees_result.txt", "w")) == NULL)
                 {
-                printf("Error opening output file  Usertrees_result.txt\n");
+                printf2("Error opening output file  Usertrees_result.txt\n");
                 error = TRUE;
                 }
             }
         }
     if(criterion == 1 || criterion == 4 || criterion == 5)
 		{
-		printf("ERROR: Usertree search is not available under the criteria ");
+		printf2("ERROR: Usertree search is not available under the criteria ");
 		switch(criterion)
 			{
 			case 1:
-				printf("Matrix Representation Using Parsimony (MRP)\n");
+				printf2("Matrix Representation Using Parsimony (MRP)\n");
 				break;
 			case 4:
-				printf("Average consensus (AVCON)\n");
+				printf2("Average consensus (AVCON)\n");
 				break;
 			default:
-				printf("Reconstruction of duplications and losses (RECON)\n");
+				printf2("Reconstruction of duplications and losses (RECON)\n");
 				break;
 			}
 		error = TRUE;
@@ -6094,57 +6230,57 @@ void usertrees_search(void)
     if(!error)
         {   
 		
-		printf("\nUsertree Search settings:\n");
-		printf("\tCriterion = ");
+		printf2("\nUsertree Search settings:\n");
+		printf2("\tCriterion = ");
 		switch(criterion)
 			{
 			case 1:
-				printf("Matrix Representation Using Parsimony (MRP)\n");
+				printf2("Matrix Representation Using Parsimony (MRP)\n");
 				break;
 			case 0:
-				printf("Most Similar Supertree (dfit)\n");
+				printf2("Most Similar Supertree (dfit)\n");
 				break;
 			case 2:
-				printf("Maximum split fit (SFIT)\n");
+				printf2("Maximum split fit (SFIT)\n");
 				break;
 			case 4:
-				printf("Average consensus (AVCON)\n");
+				printf2("Average consensus (AVCON)\n");
 				break;
 			case 5:
-				printf("Reconstruction of duplications and losses (RECON)\n");
+				printf2("Reconstruction of duplications and losses (RECON)\n");
 				break;
 			default:
-				printf("Maximum quartet fit (QFIT)\n");
+				printf2("Maximum quartet fit (QFIT)\n");
 				break;
 				
 			}
 		if(criterion != 1 && criterion != 4)
 			{
 			if(criterion != 5)
-				printf("\tWeighting Scheme = ");
+				printf2("\tWeighting Scheme = ");
 			if(criterion==0)
 				{
-				if(dweight == 0) printf("equal\n");
-				if(dweight == 1) printf("comparisons\n");
+				if(dweight == 0) printf2("equal\n");
+				if(dweight == 1) printf2("comparisons\n");
 				}
 			if(criterion == 2)
 				{
-				if(splits_weight == 1) printf("equal\n");
-				if(splits_weight == 2) printf("splits\n");
+				if(splits_weight == 1) printf2("equal\n");
+				if(splits_weight == 2) printf2("splits\n");
 				}
 			if(criterion == 3)
 				{
-				if(quartet_normalising == 1) printf("equal\n");
-				if(quartet_normalising == 2) printf("taxa\n");
-				if(quartet_normalising == 3) printf("quartets\n");
+				if(quartet_normalising == 1) printf2("equal\n");
+				if(quartet_normalising == 2) printf2("taxa\n");
+				if(quartet_normalising == 3) printf2("quartets\n");
 				}
-			printf("\tUser defined supertrees from file: %s\n", parsed_command[1]);
+			printf2("\tUser defined supertrees from file: %s\n", parsed_command[1]);
 			
 			}
 		
-		if(criterion==5) printf("\n\tDuplication weight = %f\n\tLosses weight = %f\n\n", dup_weight, loss_weight);
+		if(criterion==5) printf2("\n\tDuplication weight = %f\n\tLosses weight = %f\n\n", dup_weight, loss_weight);
 		
-		if(print_source_scores)printf("\nScores of each source tree compared to the best user supertree to be printed to sourcetree_scores.txt\n");
+		if(print_source_scores)printf2("\nScores of each source tree compared to the best user supertree to be printed to sourcetree_scores.txt\n");
 		
 		
 		
@@ -6359,7 +6495,7 @@ void usertrees_search(void)
 				
 				if(outfile != NULL) fprintf(outfile, "%s\t[%f]\n", retained_supers[i], scores_retained_supers[i] );
 				tree_coordinates(retained_supers[i], FALSE, TRUE, FALSE, -1);
-				printf("\nSupertree %d of %d score = %f\n", i+1, j, scores_retained_supers[i] );
+				printf2("\nSupertree %d of %d score = %f\n", i+1, j, scores_retained_supers[i] );
 				i++;
 				}
 
@@ -6379,23 +6515,23 @@ void controlc1(int signal)
 	{
 	char *c = NULL;
 	
-	printf("\n\nCompleted %d random samples before CTRL-C was caught\nDo you want to stop the random sampling and start the heuristuc searches now? (Y/N): \n", GC);
+	printf2("\n\nCompleted %d random samples before CTRL-C was caught\nDo you want to stop the random sampling and start the heuristuc searches now? (Y/N): \n", GC);
 	c = malloc(10000*sizeof(char));
 	xgets(c);
 	while(strcmp(c, "Y") != 0 && strcmp(c, "y") != 0 && strcmp(c, "N") != 0 && strcmp(c, "n") != 0)
 		{
-		printf("Error '%s' is not a valid response, please respond Y or N\n", c);
+		printf2("Error '%s' is not a valid response, please respond Y or N\n", c);
 		xgets(c);
 		}
 	
 	if(strcmp(c, "Y") == 0 || strcmp(c, "y") == 0)
 		{
 		GC = 100000000;
-		printf("Starting Heuristic searches\n");
+		printf2("Starting Heuristic searches\n");
 		}
 
 	if(strcmp(c, "N") == 0 || strcmp(c, "n") == 0)
-			printf("Continuing random samples.....\n");
+			printf2("Continuing random samples.....\n");
 	
 	free(c);
 
@@ -6407,23 +6543,23 @@ void controlc2(int signal)
 	
 	c = malloc(10000*sizeof(char));
 	
-	printf("\n\n\n\nCompleted the assessment of %d trees...best tree found so far has a score of %f\nDo you want to stop the heuristic searches now? (Y/N): \n", NUMSWAPS, BESTSCORE);
+	printf2("\n\n\n\nCompleted the assessment of %d trees...best tree found so far has a score of %f\nDo you want to stop the heuristic searches now? (Y/N): \n", NUMSWAPS, BESTSCORE);
 	xgets(c);
 	while(strcmp(c, "Y") != 0 && strcmp(c, "y") != 0 && strcmp(c, "N") != 0 && strcmp(c, "n") != 0)
 		{
-		printf("Error '%s' is not a valid response, please respond Y or N\n", c);
+		printf2("Error '%s' is not a valid response, please respond Y or N\n", c);
 		xgets(c);
 		}
 	
 	if(strcmp(c, "Y") == 0 || strcmp(c, "y") == 0)
 		{
 		user_break = TRUE;
-		printf("Stopping heuristic search. The resulting tree may be sub-optimal\n\n");
+		printf2("Stopping heuristic search. The resulting tree may be sub-optimal\n\n");
 		}
 
 
 	if(strcmp(c, "N") == 0 || strcmp(c, "n") == 0)
-			printf("Continuing heuristic searches.....\n");
+			printf2("Continuing heuristic searches.....\n");
 	
 	free(c);
 	}
@@ -6434,23 +6570,23 @@ void controlc3(int signal)
 	
 	c = malloc(10000*sizeof(char));
 	
-	printf("\n\nDo you want to stop the generation of trees now? (Y/N): ");
+	printf2("\n\nDo you want to stop the generation of trees now? (Y/N): ");
 	xgets(c);
 	while(strcmp(c, "Y") != 0 && strcmp(c, "y") != 0 && strcmp(c, "N") != 0 && strcmp(c, "n") != 0)
 		{
-		printf("Error '%s' is not a valid response, please respond Y or N\n", c);
+		printf2("Error '%s' is not a valid response, please respond Y or N\n", c);
 		xgets(c);
 		}
 	
 	if(strcmp(c, "Y") == 0 || strcmp(c, "y") == 0)
 		{
 		user_break = TRUE;
-		printf("Stopping the generation of treesn\n");
+		printf2("Stopping the generation of treesn\n");
 		}
 
 
 	if(strcmp(c, "N") == 0 || strcmp(c, "n") == 0)
-			printf("Continuing the generation of trees.....\n");
+			printf2("Continuing the generation of trees.....\n");
 	
 	free(c);
 	}
@@ -6461,18 +6597,18 @@ void controlc4(int signal)
 	
 	c = malloc(10000*sizeof(char));
 	
-	printf("\n\nDo you really wish to quit? (Y/N): ");
+	printf2("\n\nDo you really wish to quit? (Y/N): ");
 	xgets(c);
 	while(strcmp(c, "Y") != 0 && strcmp(c, "y") != 0 && strcmp(c, "N") != 0 && strcmp(c, "n") != 0)
 		{
-		printf("Error '%s' is not a valid response, please respond Y or N\n", c);
+		printf2("Error '%s' is not a valid response, please respond Y or N\n", c);
 		xgets(c);
 		}
 	
 	if(strcmp(c, "Y") == 0 || strcmp(c, "y") == 0)
 		{
 		user_break = TRUE;
-		printf("Bye\n");
+		printf2("Bye\n");
 		clean_exit(0);
 		}
 	
@@ -6485,22 +6621,22 @@ void controlc5(int signal)
 	
 	c = malloc(10000*sizeof(char));
 	
-	printf("\n\nDo you want to stop the exhaustive searches now? (Y/N): ");
+	printf2("\n\nDo you want to stop the exhaustive searches now? (Y/N): ");
 	xgets(c);
 	while(strcmp(c, "Y") != 0 && strcmp(c, "y") != 0 && strcmp(c, "N") != 0 && strcmp(c, "n") != 0)
 		{
-		printf("Error '%s' is not a valid response, please respond Y or N\n", c);
+		printf2("Error '%s' is not a valid response, please respond Y or N\n", c);
 		xgets(c);
 		}
 	if(strcmp(c, "Y") == 0 || strcmp(c, "y") == 0)
 		{
 		user_break = TRUE;
-		printf("Stopping exhaustive search. The resulting tree may be sub-optimal\n\n");
+		printf2("Stopping exhaustive search. The resulting tree may be sub-optimal\n\n");
 		}
 
 
 	if(strcmp(c, "N") == 0 || strcmp(c, "n") == 0)
-			printf("Continuing heuristic searches.....\n");
+			printf2("Continuing heuristic searches.....\n");
 	
 	free(c);
 	}
@@ -6554,7 +6690,7 @@ void heuristic_search(int user, int print, int sample, int nreps)
 				numspectries = toint(parsed_command[i+1]);
 				if(numspectries == 0)
 					{
-					printf("Error: '%s' is an invalid value to be assigned to numspeciesrootings\n", parsed_command[i+1]);
+					printf2("Error: '%s' is an invalid value to be assigned to numspeciesrootings\n", parsed_command[i+1]);
 					numspectries = 2;
 					error = TRUE;
 					}
@@ -6569,7 +6705,7 @@ void heuristic_search(int user, int print, int sample, int nreps)
 				numgenetries = toint(parsed_command[i+1]);
 				if(numgenetries == 0)
 					{
-					printf("Error: '%s' is an invalid value to be assigned to numgenerootings\n", parsed_command[i+1]);
+					printf2("Error: '%s' is an invalid value to be assigned to numgenerootings\n", parsed_command[i+1]);
 					numgenetries = 2;
 					error = TRUE;
 					}
@@ -6591,7 +6727,7 @@ void heuristic_search(int user, int print, int sample, int nreps)
 					missing_method = 0;
 				else
 					{
-					printf("Error: '%s' is an invalid method to be assigned to missing\n", parsed_command[i+1]);
+					printf2("Error: '%s' is an invalid method to be assigned to missing\n", parsed_command[i+1]);
 					missing_method = 1;
 					error = TRUE;
 					}
@@ -6607,7 +6743,7 @@ void heuristic_search(int user, int print, int sample, int nreps)
 				if(strcmp(parsed_command[i+1], "no") == 0);
 				else
 					{
-					printf("Error: '%s' is an invalid value for drawhistogram\n", parsed_command[i+1]);
+					printf2("Error: '%s' is an invalid value for drawhistogram\n", parsed_command[i+1]);
 					error = TRUE;
 					}
 				}
@@ -6617,7 +6753,7 @@ void heuristic_search(int user, int print, int sample, int nreps)
 			bins = toint(parsed_command[i+1]);
 			if(bins == 0)
 				{
-				printf("Error: '%s' is an invalid integer number to be assigned to nbins\n", parsed_command[i+1]);
+				printf2("Error: '%s' is an invalid integer number to be assigned to nbins\n", parsed_command[i+1]);
 				bins = 20;
 				error = TRUE;
 				}
@@ -6634,7 +6770,7 @@ void heuristic_search(int user, int print, int sample, int nreps)
             number_of_steps = toint(parsed_command[i+1]);
             if(number_of_steps == 0)
                 {
-                printf("Error: '%s' is an invalid integer number to be assigned to nsteps\n", parsed_command[i+1]);
+                printf2("Error: '%s' is an invalid integer number to be assigned to nsteps\n", parsed_command[i+1]);
                 number_of_steps = 5;
                 error = TRUE;
                 }
@@ -6644,7 +6780,7 @@ void heuristic_search(int user, int print, int sample, int nreps)
             nbest = toint(parsed_command[i+1]);
             if(nbest == 0)
                 {
-                printf("Error: '%s' is an invalid integer number to be assigned to nbest\n", parsed_command[i+1]);
+                printf2("Error: '%s' is an invalid integer number to be assigned to nbest\n", parsed_command[i+1]);
                 error = TRUE;
                 }
             }
@@ -6653,7 +6789,7 @@ void heuristic_search(int user, int print, int sample, int nreps)
             numswaps = toint(parsed_command[i+1]);
             if(numswaps == 0)
                 {
-                printf("Error: '%s' is an invalid integer number to be assigned to maxswaps\n", parsed_command[i+1]);                
+                printf2("Error: '%s' is an invalid integer number to be assigned to maxswaps\n", parsed_command[i+1]);                
                 error = TRUE;
                 }
             }
@@ -6664,7 +6800,7 @@ void heuristic_search(int user, int print, int sample, int nreps)
             nreps = toint(parsed_command[i+1]);
             if(nreps == 0)
                 {
-                printf("Error: '%s' is an invalid integer number to be assigned to nreps\n", parsed_command[i+1]);
+                printf2("Error: '%s' is an invalid integer number to be assigned to nreps\n", parsed_command[i+1]);
                 error = TRUE;
                 }
             }
@@ -6675,7 +6811,7 @@ void heuristic_search(int user, int print, int sample, int nreps)
             
             if(nreps == 0)
                 {
-                printf("Error: '%s' is an invalid integer number to be assigned to nreps\n", parsed_command[i+1]);
+                printf2("Error: '%s' is an invalid integer number to be assigned to nreps\n", parsed_command[i+1]);
                 error = TRUE;
                 }
             }
@@ -6696,7 +6832,7 @@ void heuristic_search(int user, int print, int sample, int nreps)
 						method = 3;
 					else
 						{
-						printf("Error: swap option '%s' not known\n", parsed_command[i+1]);
+						printf2("Error: swap option '%s' not known\n", parsed_command[i+1]);
 						error = TRUE;
 						}
                     }
@@ -6708,14 +6844,14 @@ void heuristic_search(int user, int print, int sample, int nreps)
                 {
                 if((outfile = fopen(parsed_command[i+1], "w")) == NULL)
                     {
-                    printf("Error opening file named %s\n", parsed_command[i+1]);
+                    printf2("Error opening file named %s\n", parsed_command[i+1]);
                     error = TRUE;
                     strcpy(useroutfile, parsed_command[i+1]);
                     }
                 else
                     {
 					strcpy(useroutfile, parsed_command[i+1]);
-                    printf("opened output file %s\n", parsed_command[i+1]);
+                    printf2("opened output file %s\n", parsed_command[i+1]);
                     }
                 }
             else
@@ -6733,7 +6869,7 @@ void heuristic_search(int user, int print, int sample, int nreps)
                         dweight = 1;
                     else
                         {
-                        printf("Error: weight option '%s' is unknown\n", parsed_command[i+1] );
+                        printf2("Error: weight option '%s' is unknown\n", parsed_command[i+1] );
                         error = TRUE;
                         }
                     }
@@ -6755,7 +6891,7 @@ void heuristic_search(int user, int print, int sample, int nreps)
                             quartet_normalising = 3;
                         else
                             {
-                            printf("Error: weight option '%s' is unknown\n", parsed_command[i+1] );
+                            printf2("Error: weight option '%s' is unknown\n", parsed_command[i+1] );
                             error = TRUE;
                             }
                         }
@@ -6775,7 +6911,7 @@ void heuristic_search(int user, int print, int sample, int nreps)
                         splits_weight = 2;
                     else
                         {
-                        printf("Error: weight option '%s' is unknown\n", parsed_command[i+1]);
+                        printf2("Error: weight option '%s' is unknown\n", parsed_command[i+1]);
                         error = TRUE;
                         }
                     }
@@ -6793,7 +6929,7 @@ void heuristic_search(int user, int print, int sample, int nreps)
 						start = 2;
 					else
 						{
-						printf("nj is not a valid option for starting trees in the recon criterion\n");
+						printf2("nj is not a valid option for starting trees in the recon criterion\n");
 						error = TRUE;
 						}
 					}
@@ -6803,13 +6939,13 @@ void heuristic_search(int user, int print, int sample, int nreps)
 					if((userfile = fopen(parsed_command[i+1], "r")) == NULL)
 						{
 						
-						printf("Error opening file named %s\n", parsed_command[i+1]);
+						printf2("Error opening file named %s\n", parsed_command[i+1]);
 						error = TRUE;
 						
 						}
 					else
 						{
-						printf("opened user file %s\n", parsed_command[i+1]);
+						printf2("opened user file %s\n", parsed_command[i+1]);
 						strcpy(userfilename, parsed_command[i+1]);
 						}
 					} 
@@ -6822,7 +6958,7 @@ void heuristic_search(int user, int print, int sample, int nreps)
 				dup_weight = tofloat(parsed_command[i+1]);
 				if(dup_weight < 0)
 					{
-					printf("Error: '%s' is an invalid value for dups\n", parsed_command[i+1]);
+					printf2("Error: '%s' is an invalid value for dups\n", parsed_command[i+1]);
 					error = TRUE;
 					}
 				}
@@ -6831,7 +6967,7 @@ void heuristic_search(int user, int print, int sample, int nreps)
 				loss_weight = tofloat(parsed_command[i+1]);
 				if(loss_weight < 0)
 					{
-					printf("Error: '%s' is an invalid value for losses\n", parsed_command[i+1]);
+					printf2("Error: '%s' is an invalid value for losses\n", parsed_command[i+1]);
 					error = TRUE;
 					}
 				}
@@ -6847,9 +6983,9 @@ void heuristic_search(int user, int print, int sample, int nreps)
             sample = toint(parsed_command[i+1]);
             if(sample < nreps)
                 {
-                printf("Error: '%s' is an invalid integer number to be assigned to sample\n It must be equal to or larger than", parsed_command[i+1]);
-                if(user)printf(" nreps (%d)\n", nreps);
-                if(!user)printf(" hsreps (%d)\n", nreps);
+                printf2("Error: '%s' is an invalid integer number to be assigned to sample\n It must be equal to or larger than", parsed_command[i+1]);
+                if(user)printf2(" nreps (%d)\n", nreps);
+                if(!user)printf2(" hsreps (%d)\n", nreps);
                 error = TRUE;
                 }
             }      
@@ -6866,86 +7002,86 @@ void heuristic_search(int user, int print, int sample, int nreps)
         if(hsprint==TRUE)
             {
             /***** Print out summary of settings for this run */
-            printf("\n\nHeuristic Search settings:\n");
-            printf("\tCriterion = ");
+            printf2("\n\nHeuristic Search settings:\n");
+            printf2("\tCriterion = ");
             switch(criterion)
                 {
                 case 1:
-                    printf("Matrix Representation Using Parsimony (MRP)\n");
+                    printf2("Matrix Representation Using Parsimony (MRP)\n");
                     break;
                 case 0:
-                    printf("Most Similar Supertree (dfit)\n");
+                    printf2("Most Similar Supertree (dfit)\n");
                     break;
                 case 2:
-                    printf("Maximum split fit (SFIT)\n");
+                    printf2("Maximum split fit (SFIT)\n");
                     break;
                 case 4:
-                    printf("Average consensus (AVCON)\n");
+                    printf2("Average consensus (AVCON)\n");
                     break;
 				case 5:
-					printf("Reconstruction of duplications and losses (RECON)\n");
+					printf2("Reconstruction of duplications and losses (RECON)\n");
 					break;
                 default:
-                    printf("Maximum quartet fit (QFIT)\n");
+                    printf2("Maximum quartet fit (QFIT)\n");
                     break;
                     
                 }
             if(criterion != 1 && criterion != 4)
                 {
-                printf("\tHeuristic search algorithm = ");
-                if(method == 1) printf("Nearest Neighbor Interchange (NNI)\n");
-                if(method == 2) printf("Sub-tree Pruning and Regrafting (SPR)\n");
-				if(method == 3) printf("Tree Bisection and Reconnection (TBR)\n");
-                printf("\tMaximum Number of Steps (nsteps) = %d\n", number_of_steps);
-                printf("\tMaximum Number of Swaps (maxswaps) = %d\n", numswaps);
-                printf("\tNumber of repetitions of Heuristic search = %d\n", nreps);
+                printf2("\tHeuristic search algorithm = ");
+                if(method == 1) printf2("Nearest Neighbor Interchange (NNI)\n");
+                if(method == 2) printf2("Sub-tree Pruning and Regrafting (SPR)\n");
+				if(method == 3) printf2("Tree Bisection and Reconnection (TBR)\n");
+                printf2("\tMaximum Number of Steps (nsteps) = %d\n", number_of_steps);
+                printf2("\tMaximum Number of Swaps (maxswaps) = %d\n", numswaps);
+                printf2("\tNumber of repetitions of Heuristic search = %d\n", nreps);
                 if(criterion != 5)
-					printf("\tWeighting Scheme = ");
+					printf2("\tWeighting Scheme = ");
                 if(criterion==0)
                     {
-                    if(dweight == 0) printf("equal\n");
-                    if(dweight == 1) printf("comparisons\n");
+                    if(dweight == 0) printf2("equal\n");
+                    if(dweight == 1) printf2("comparisons\n");
                     }
                 if(criterion == 2)
                     {
-                    if(splits_weight == 1) printf("equal\n");
-                    if(splits_weight == 2) printf("splits\n");
+                    if(splits_weight == 1) printf2("equal\n");
+                    if(splits_weight == 2) printf2("splits\n");
                     }
                 if(criterion == 3)
                     {
-                    if(quartet_normalising == 1) printf("equal\n");
-                    if(quartet_normalising == 2) printf("taxa\n");
-                    if(quartet_normalising == 3) printf("quartets\n");
+                    if(quartet_normalising == 1) printf2("equal\n");
+                    if(quartet_normalising == 2) printf2("taxa\n");
+                    if(quartet_normalising == 3) printf2("quartets\n");
                     }
-                printf("\tStarting trees = ");
+                printf2("\tStarting trees = ");
                 if(start == 0)
-                    printf("Top %d random trees chosen from %d random samples\n",nreps, sample);
+                    printf2("Top %d random trees chosen from %d random samples\n",nreps, sample);
                 if(start == 1)
-                    printf("User defined from file named %s\n", userfilename);
+                    printf2("User defined from file named %s\n", userfilename);
 				if(start == 2)
 					{
-					printf("neighbor-joining tree from Average consensus distances\n\tMissing data estimated using ");
-					if(missing_method == 1) printf(" 4 point condition distances\n");
-					if(missing_method == 0) printf(" ultrametric distances\n");
+					printf2("neighbor-joining tree from Average consensus distances\n\tMissing data estimated using ");
+					if(missing_method == 1) printf2(" 4 point condition distances\n");
+					if(missing_method == 0) printf2(" ultrametric distances\n");
 					}
-				if(user) printf("\tOutput file = %s\n", useroutfile);
+				if(user) printf2("\tOutput file = %s\n", useroutfile);
                 }
             }
 		if(criterion == 0 && do_histogram == TRUE)
 			{
-			printf("\tSource tree scores to be plotted against best supertree(s)\n");
-			printf("\tNumber of bins to summarise the source tree scores = %d\n", bins);
-			printf("\tHistogram to be written to file '%s'\n", histogramfile_name);
+			printf2("\tSource tree scores to be plotted against best supertree(s)\n");
+			printf2("\tNumber of bins to summarise the source tree scores = %d\n", bins);
+			printf2("\tHistogram to be written to file '%s'\n", histogramfile_name);
 			}
 		if(criterion==5 && hsprint == TRUE)
 			{
-			printf("\n\tDuplication weight = %f\n\tLosses weight = %f\n", dup_weight, loss_weight);
-			printf("\tNumber of species tree rootings = ");
-			if(numspectries == -1) printf("all possible\n");
-			else printf("%d\n", numspectries);
-			printf("\tNumber of gene tree rootings = ");
-			if(numgenetries == -1) printf("all possible\n");
-			else printf("%d\n", numgenetries);
+			printf2("\n\tDuplication weight = %f\n\tLosses weight = %f\n", dup_weight, loss_weight);
+			printf2("\tNumber of species tree rootings = ");
+			if(numspectries == -1) printf2("all possible\n");
+			else printf2("%d\n", numspectries);
+			printf2("\tNumber of gene tree rootings = ");
+			if(numgenetries == -1) printf2("all possible\n");
+			else printf2("%d\n", numgenetries);
 				
 			}
 		
@@ -6959,14 +7095,24 @@ void heuristic_search(int user, int print, int sample, int nreps)
 				fclose(BR_file);
 				if(error == FALSE)
 					{
-					if(system("paup coding.nex") != 0) printf("Error calling paup, please execute the file coding.nex in paup to perform the parsimony step\n");
+					if(print_log == FALSE) 
+						strcpy(system_call, "paup coding.nex");
+					else
+						{
+						strcpy(system_call, "paup coding.nex");
+						strcat(system_call, " | tee -a ");
+						strcat(system_call, logfile_name);
+						}
+
+					if(system(system_call) != 0) printf2("Error calling paup, please execute the file coding.nex in paup to perform the parsimony step\n");
+
 					}
 				if(error == FALSE)
 					{
 					remove("clanntmp.chr");
 					remove("clanntree.chr");
 					/*pars("coding.nex", "clanntmp.chr"); */
-					printf("\n");
+					printf2("\n");
 					}
 
                 }
@@ -6975,15 +7121,23 @@ void heuristic_search(int user, int print, int sample, int nreps)
 					
 				if(!got_weights)
 					{
-					printf("Warning: There were no weights included in the input trees.\nThe analysis will assume that all branch lengths are set to unity (1)\n");
+					printf2("Warning: There were no weights included in the input trees.\nThe analysis will assume that all branch lengths are set to unity (1)\n");
 					}
 				paupfile = fopen("average_consensus.nex", "w");
 				error = average_consensus(0, missing_method,  useroutfile, paupfile);
 				fclose(paupfile);
-				if(system("paup average_consensus.nex")!= 0) 
-					printf("Error calling PAUP*\n\tPlease execute the file average_consensus.nex in PAUP to complete the analysis\n");
 
-                    
+				if(print_log == FALSE) 
+					strcpy(system_call, "paup average_consensus.nex");
+				else
+					{
+					strcpy(system_call, "paup average_consensus.nex");
+					strcat(system_call, " | tee -a ");
+					strcat(system_call, logfile_name);
+					}
+
+				if(system(system_call) != 0) printf2("Error calling PAUP*\n\tPlease execute the file average_consensus.nex in PAUP to complete the analysis\n");
+				           
                 }
             }  /***** FINISH AVERAGE CONSENSUS */
         else
@@ -7008,7 +7162,7 @@ void heuristic_search(int user, int print, int sample, int nreps)
                     {
                     if((outfile = fopen("Heuristic_result.txt", "w")) == NULL)
                         {
-                        printf("Error opening file named Heuristic_result.txt\n");
+                        printf2("Error opening file named Heuristic_result.txt\n");
                         error = TRUE;
                         }
                     }
@@ -7061,7 +7215,7 @@ void heuristic_search(int user, int print, int sample, int nreps)
                 interval1 = time(NULL);
                 if(print)
                     {
-                    printf("\nRandom sampling progress indicator:");
+                    printf2("\nRandom sampling progress indicator:");
                     fflush(stdout);
                     }
                 
@@ -7082,7 +7236,7 @@ void heuristic_search(int user, int print, int sample, int nreps)
                     }
                 if(signal(SIGINT, controlc1) == SIG_ERR)
 						{
-						printf("An error occurred while setting a signal handler\n");
+						printf2("An error occurred while setting a signal handler\n");
 						}
                 for(GC=0; GC<sample; GC++)
                     {
@@ -7090,7 +7244,7 @@ void heuristic_search(int user, int print, int sample, int nreps)
                     interval2 = time(NULL);
                     if(difftime(interval2, interval1) > 5) /* every 5 seconds print a dot to the screen */
                         {
-                        printf("*");
+                        printf2("*");
                         fflush(stdout);
                         interval1 = time(NULL);
                         }
@@ -7174,15 +7328,15 @@ void heuristic_search(int user, int print, int sample, int nreps)
 				
                 if(signal(SIGINT, controlc2) == SIG_ERR)
 					{
-					printf("An error occurred while setting a signal handler\n");
+					printf2("An error occurred while setting a signal handler\n");
 					}
 				for(i=0; i<Total_fund_trees; i++)sourcetree_scores[i] = -1;
 				i=0;
-				 if(print) printf("\nHeuristic search progress indicator:");
+				 if(print) printf2("\nHeuristic search progress indicator:");
                     fflush(stdout);
                 while(i != nreps && !user_break) /* Start searching tree space */
                     {
-					if(print)printf("\nRepetition %d of %d:", i+1, nreps);
+					if(print)printf2("\nRepetition %d of %d:", i+1, nreps);
                     fflush(stdout);
                     swaps += do_search(starths[i], TRUE, print, numswaps, outfile, numspectries, numgenetries);
                     i++;
@@ -7201,13 +7355,13 @@ void heuristic_search(int user, int print, int sample, int nreps)
 					neighbor_joining(FALSE, temptree, FALSE);
 					if(signal(SIGINT, controlc2) == SIG_ERR)
 						{
-						printf("An error occurred while setting a signal handler\n");
+						printf2("An error occurred while setting a signal handler\n");
 						}
 					for(i=0; i<Total_fund_trees; i++)sourcetree_scores[i] = -1;
-					 if(print) printf("\nHeuristic search progress indicator:");
+					 if(print) printf2("\nHeuristic search progress indicator:");
 					for(i=0; i<nreps; i++)
 						{
-						if(print) printf("\nRepetition %d of %d:", i+1, nreps);
+						if(print) printf2("\nRepetition %d of %d:", i+1, nreps);
 						if(i != 0)
 							{
 							random_num =(int)fmod(rand(), 10);
@@ -7233,7 +7387,7 @@ void heuristic_search(int user, int print, int sample, int nreps)
 					k=0; swaps=0;
 					while(!feof(userfile))
 						{
-						if(print)printf("\t\nusertree %d progress indicator: =", k+1);
+						if(print)printf2("\t\nusertree %d progress indicator: =", k+1);
 						i=0;
 						while(c != ';')
 							{
@@ -7265,7 +7419,7 @@ void heuristic_search(int user, int print, int sample, int nreps)
 						print_named_tree(tree_top, best_tree);
 						strcat(best_tree, ";");
 						while(unroottree(best_tree)==TRUE);
-						/*  printf("!:assigned tree: %s\n", best_tree); */
+						/*  printf2("!:assigned tree: %s\n", best_tree); */
 								
 								
 						if(criterion == 0) distance = compare_trees(FALSE);  /* calculate the distance from the super tree to all the fundamental trees */
@@ -7370,8 +7524,8 @@ void heuristic_search(int user, int print, int sample, int nreps)
 						}
 					}
                 }
-                if(print)printf("\n");
-                if(print)printf("Number of topologies tried: %d\n",swaps);
+                if(print)printf2("\n");
+                if(print)printf2("Number of topologies tried: %d\n",swaps);
                 
                 
                 /**** Print out the best trees found *******/
@@ -7391,7 +7545,7 @@ void heuristic_search(int user, int print, int sample, int nreps)
                         {
                         if(outfile != NULL) fprintf(outfile, "%s\t[%f]\n", retained_supers[i], scores_retained_supers[i] );
                         tree_coordinates(retained_supers[i], FALSE, TRUE, FALSE, -1);
-                        printf("\nSupertree %d of %d score = %f\n", i+1, j, scores_retained_supers[i] );
+                        printf2("\nSupertree %d of %d score = %f\n", i+1, j, scores_retained_supers[i] );
 						
 
 
@@ -7412,7 +7566,7 @@ void heuristic_search(int user, int print, int sample, int nreps)
 							temptree[0] = '\0';
 							for(j=0; j<Total_fund_trees; j++) sourcetree_scores[j] = -1;
 							compare_trees(FALSE);  /* calculate the distance from the super tree to all the fundamental trees */
-							printf("\nPlot of source tree scores against supertree number %d", i+1);
+							printf2("\nPlot of source tree scores against supertree number %d", i+1);
 							draw_histogram(histogram_file, bins, sourcetree_scores, Total_fund_trees);
 							
 							
@@ -7444,14 +7598,14 @@ int average_consensus(int nrep, int missing_method, char * useroutfile, FILE *pa
 	
 	
 	temptree = malloc(TREE_LENGTH*sizeof(char));
-	if(!temptree) printf("out of memory'n");
+	if(!temptree) printf2("out of memory'n");
 	temptree[0] = '\0';
 	taxa_comp = malloc(number_of_taxa*sizeof(int*));
-	if(!taxa_comp) printf("out of memory'n");
+	if(!taxa_comp) printf2("out of memory'n");
 	for(i=0; i<number_of_taxa; i++)
 		{
 		taxa_comp[i] = malloc(number_of_taxa*sizeof(int));
-		if(!taxa_comp[i]) printf("out of memory'n");
+		if(!taxa_comp[i]) printf2("out of memory'n");
 		for(j=0; j<number_of_taxa; j++)
 			taxa_comp[i][j] = FALSE;
 		}
@@ -7569,9 +7723,9 @@ int average_consensus(int nrep, int missing_method, char * useroutfile, FILE *pa
 	
 	if(!found)
 		{
-		printf("\n\nERROR: the overlap in the data is too sparse to calculate missing cells using ");
-		if(missing_method == 0) printf("an ultrametric estimate\n");
-		if(missing_method == 1) printf("a 4 point condition estimate\n");
+		printf2("\n\nERROR: the overlap in the data is too sparse to calculate missing cells using ");
+		if(missing_method == 0) printf2("an ultrametric estimate\n");
+		if(missing_method == 1) printf2("a 4 point condition estimate\n");
 		error = TRUE;
 		}
 	else
@@ -7624,7 +7778,7 @@ int do_search(char *tree, int user, int print, int maxswaps, FILE *outfile, int 
         tree_top = temp_top;
         temp_top = NULL;
 /*		print_tree(tree_top, temporary_tree);
-		printf("built tree = %s\n", temporary_tree);
+		printf2("built tree = %s\n", temporary_tree);
   */      if(method == 1)
             {
             /* if NNI is to be carried out */       
@@ -7642,7 +7796,7 @@ int do_search(char *tree, int user, int print, int maxswaps, FILE *outfile, int 
                     branchpointer = NULL;
                     better_score = spr(tree_top, maxswaps, numspectries, numgenetries);
                     }while(better_score == FALSE && remaining_spr(tree_top) > 0 && tried_regrafts < maxswaps && !user_break);
-					printf("better_score = %d\t, remaining_spr = %d\ttried_regrafts = %d\tuserbreak = %d\n", better_score, remaining_spr(tree_top), tried_regrafts, user_break);
+					printf2("better_score = %d\t, remaining_spr = %d\ttried_regrafts = %d\tuserbreak = %d\n", better_score, remaining_spr(tree_top), tried_regrafts, user_break);
                 reset_spr(tree_top);
                 }
             swaps = tried_regrafts;
@@ -7809,7 +7963,7 @@ void do_swap(struct taxon * first, struct taxon * second)
         interval2 = time(NULL);
         if(difftime(interval2, interval1) > 5) /* every 5 seconds print a dot to the screen */
             {
-            printf("=");
+            printf2("=");
             fflush(stdout);
             interval1 = time(NULL);
             }
@@ -7905,7 +8059,7 @@ int swapper(struct taxon * position,struct taxon * prev_pos, int stepstaken, str
 
 		start1 = first_swap;
 			
-		if(second_swap == NULL) printf("second_swap is null!\n");
+		if(second_swap == NULL) printf2("second_swap is null!\n");
 		while(second_swap->prev_sibling != NULL) second_swap = second_swap->prev_sibling;  /* rewinding */
 		
 		start2 = second_swap; /* start2 now points to the start levle to be swapped against */
@@ -7928,7 +8082,7 @@ int swapper(struct taxon * position,struct taxon * prev_pos, int stepstaken, str
                                             strcpy(best_tree, "");
                                             print_named_tree(tree_top, best_tree);
                                             strcat(best_tree, ";");
-                                            /*  printf("!:assigned tree: %s\n", best_tree);  */
+                                            /*  printf2("!:assigned tree: %s\n", best_tree);  */
                                             
                                             
                                             if(criterion == 0) distance = compare_trees(FALSE);  /* calculate the distance from the super tree to all the fundamental trees */
@@ -8071,7 +8225,7 @@ void yaptp_search(void)
             Nreps = toint(parsed_command[i+1]);
             if(Nreps == 0)
                 {
-                printf("Error: '%s' is an invalid number of repetitions\n", parsed_command[i+1]);
+                printf2("Error: '%s' is an invalid number of repetitions\n", parsed_command[i+1]);
                 error = TRUE;
                 }
             }
@@ -8083,7 +8237,7 @@ void yaptp_search(void)
         		yaptp_method =1;
 		else
 			{
-			printf("Using the citerion recon it is only possible to use the markovian method for randomisation\n");
+			printf2("Using the citerion recon it is only possible to use the markovian method for randomisation\n");
 			yaptp_method = 2;
 			}
 		}
@@ -8093,7 +8247,7 @@ void yaptp_search(void)
                     yaptp_method =2;
                 else
                     {
-                    printf("Error: method option '%s' unknown\n", parsed_command[i+1]);
+                    printf2("Error: method option '%s' unknown\n", parsed_command[i+1]);
                         error = TRUE;
                     }
                 }
@@ -8110,7 +8264,7 @@ void yaptp_search(void)
                     if(strcmp(parsed_command[i+1], "spr") == 0) search = 1;   /* should be set to 2 when SPR is implemented */
                     else
                         {
-                        printf("Error: search option '%s' unknown\n", parsed_command[i+1]);
+                        printf2("Error: search option '%s' unknown\n", parsed_command[i+1]);
                         error = TRUE;
                         }
                     }
@@ -8121,7 +8275,7 @@ void yaptp_search(void)
             strcpy(filename, parsed_command[i+1]);
             if(filename[0] == '\0')
                 {
-                printf("Error: Unable to open file named '%s'\n", parsed_command[i+1]);
+                printf2("Error: Unable to open file named '%s'\n", parsed_command[i+1]);
                 error = TRUE;
                 strcpy(filename, "yaptp.txt");
                 }
@@ -8131,13 +8285,13 @@ void yaptp_search(void)
     if(!error)
         {
 		
-        printf("\n\nYAPTP Settings:\n\tNumber of YAPTP repetitions: %d\n\tSearching Supertree-space: ", Nreps);
-        if(search == 0)printf("Exhaustive Search of Supertree-spce\n");
-        if(search == 1)printf("Heuristic Search\n");
-        printf("\tRandomisation method (method) = ");
-        if(yaptp_method==1) printf("equiprobable\n");
-        if(yaptp_method==2) printf("markovian\n");
-        printf("\tYAPTP output file: yaptp.txt\n\n");
+        printf2("\n\nYAPTP Settings:\n\tNumber of YAPTP repetitions: %d\n\tSearching Supertree-space: ", Nreps);
+        if(search == 0)printf2("Exhaustive Search of Supertree-spce\n");
+        if(search == 1)printf2("Heuristic Search\n");
+        printf2("\tRandomisation method (method) = ");
+        if(yaptp_method==1) printf2("equiprobable\n");
+        if(yaptp_method==2) printf2("markovian\n");
+        printf2("\tYAPTP output file: yaptp.txt\n\n");
         
 		if(!calculated_fund_scores && criterion == 0)
 			{
@@ -8168,7 +8322,18 @@ void yaptp_search(void)
             BR_file = fopen("coding.nex", "w");
             coding(0, 2, Nreps);
             fclose(BR_file);
-            if(system("paup coding.nex") != 0) printf("Error calling paup, please execute the file coding.nex in paup to perform the parsimony step\n");
+
+			if(print_log == FALSE) 
+				strcpy(system_call, "paup coding.nex");
+			else
+				{
+				strcpy(system_call, "paup coding.nex");
+				strcat(system_call, " | tee -a ");
+				strcat(system_call, logfile_name);
+				}
+
+			if(system(system_call) != 0) printf2("Error calling paup, please execute the file coding.nex in paup to perform the parsimony step\n");
+
             }
         else
             {
@@ -8231,14 +8396,14 @@ void yaptp_search(void)
         
             /*****************************************/
             hsprint=TRUE;
-            printf("YAPTP progress indicator: "); 
+            printf2("YAPTP progress indicator: "); 
 			GC = 0;
             for(i=0; i<Nreps; i++)  /* for all reps of the yaptp algorithm */
                 {
 				if(!user_break)
 					{
 					if(i>0)hsprint=FALSE;
-					printf("\n\trepetition %d:=", i+1);
+					printf2("\n\trepetition %d:=", i+1);
 					fflush(stdout);
 					/***** Create the replicate of randomised fundamental trees  **********/
 					
@@ -8288,7 +8453,7 @@ void yaptp_search(void)
 							}
 						else
 							{
-						/* printf("%s;\t[%f]\n", retained_supers[k], scores_retained_supers[k]);  */
+						/* printf2("%s;\t[%f]\n", retained_supers[k], scores_retained_supers[k]);  */
 							fprintf(yaptpfile, "%s\t[%f %d]\n", retained_supers[k], scores_retained_supers[k], i);
 							}
 						fflush(yaptpfile);
@@ -8838,7 +9003,7 @@ int coding(int nrep, int search, int ptpreps)
             
             if(nreps == 0)
                 {
-                printf("Error: '%s' is an invalid integer number to be assigned to nreps\n", parsed_command[i+1]);
+                printf2("Error: '%s' is an invalid integer number to be assigned to nreps\n", parsed_command[i+1]);
                 error = TRUE;
                 }
             }
@@ -8849,7 +9014,7 @@ int coding(int nrep, int search, int ptpreps)
             
             if(nreps == 0)
                 {
-                printf("Error: '%s' is an invalid integer number to be assigned to nreps\n", parsed_command[i+1]);
+                printf2("Error: '%s' is an invalid integer number to be assigned to nreps\n", parsed_command[i+1]);
                 error = TRUE;
                 }
             }
@@ -8864,7 +9029,7 @@ int coding(int nrep, int search, int ptpreps)
                     njbuild = TRUE;
                 else
                     {
-                    printf("Error: option %s not valid analysis\n", parsed_command[i+1]);
+                    printf2("Error: option %s not valid analysis\n", parsed_command[i+1]);
                     error = TRUE;
                     }
                 }
@@ -8886,7 +9051,7 @@ int coding(int nrep, int search, int ptpreps)
                 addseq = 5;
             if(strcmp(parsed_command[i+1], "simple") != 0 && strcmp(parsed_command[i+1], "closest") != 0 && strcmp(parsed_command[i+1], "asis") != 0 && strcmp(parsed_command[i+1], "random") != 0 && strcmp(parsed_command[i+1], "furthest") != 0)
                 {
-                printf("Error addseq option %s not known\n", parsed_command[i+1]);
+                printf2("Error addseq option %s not known\n", parsed_command[i+1]);
                 error=TRUE;
                 }
             }
@@ -8900,7 +9065,7 @@ int coding(int nrep, int search, int ptpreps)
                 swap = 3;
             if(strcmp(parsed_command[i+1], "nni") != 0 && strcmp(parsed_command[i+1], "spr") != 0 && strcmp(parsed_command[i+1], "tbr") != 0)
                 {
-                printf("Error swap option %s not known\n", parsed_command[i+1]);
+                printf2("Error swap option %s not known\n", parsed_command[i+1]);
                 error=TRUE;
                 }
             }
@@ -9321,46 +9486,46 @@ int MRP_matrix(char **trees, int num_trees, int consensus)
             {
             if(strcmp(parsed_command[i+1], "mrp") == 0 || strcmp(parsed_command[i+1], "MRP") == 0)
                 {
-                if(criterion != 1) printf("Scoring criterion set to matrix representation using parsimony (MRP)\n");
+                if(criterion != 1) printf2("Scoring criterion set to matrix representation using parsimony (MRP)\n");
                 criterion = 1;
                 }
             else
                 {
                 if(strcmp(parsed_command[i+1], "dfit") == 0 || strcmp(parsed_command[i+1], "DFIT") == 0)
                     {
-                    if(criterion != 0) printf("Scoring criterion set to best distance fit (DFIT)\n");
+                    if(criterion != 0) printf2("Scoring criterion set to best distance fit (DFIT)\n");
                     criterion = 0;
                     }
                 else
                     {
                     if(strcmp(parsed_command[i+1], "sfit") == 0 || strcmp(parsed_command[i+1], "SFIT") == 0)
                         {
-                        if(criterion != 2) printf("Scoring criterion set to maximum split fit (SFIT)\n");
+                        if(criterion != 2) printf2("Scoring criterion set to maximum split fit (SFIT)\n");
                         criterion = 2;
                         }
                     else
                         {
                         if(strcmp(parsed_command[i+1], "qfit") == 0 || strcmp(parsed_command[i+1], "QFIT") == 0)
                             {
-                            if(criterion != 3) printf("Scoring criterion set to maximum quartet fit (QFIT)\n");
+                            if(criterion != 3) printf2("Scoring criterion set to maximum quartet fit (QFIT)\n");
                             criterion = 3;
                             }
                         else
                             {
                             if(strcmp(parsed_command[i+1], "avcon") == 0 || strcmp(parsed_command[i+1], "AVCON") == 0)
                                 {
-								if(criterion != 4) printf("Scoring criterion set to average consensus (AVCON)\n");
+								if(criterion != 4) printf2("Scoring criterion set to average consensus (AVCON)\n");
 								criterion = 4;
                                 }
                             else
 								{
 								if(strcmp(parsed_command[i+1], "recon") == 0 || strcmp(parsed_command[i+1], "RECON") == 0)
 									{
-									if(criterion != 5) printf("Scoring criterion set to duplication and loss reconstruction (RECON)\n");
+									if(criterion != 5) printf2("Scoring criterion set to duplication and loss reconstruction (RECON)\n");
 									criterion = 5;
 									}
 								else
-									printf("Error: %s not known as criterion tpye\n", parsed_command[i+1]);
+									printf2("Error: %s not known as criterion tpye\n", parsed_command[i+1]);
 								}
 							}
                         }
@@ -9378,13 +9543,13 @@ int MRP_matrix(char **trees, int num_trees, int consensus)
         		}
       		if(isdigit==FALSE)
   				{
-      			printf("ERROR: the value you entered (%s) is not an integer\n", parsed_command[i+1] );		
+      			printf2("ERROR: the value you entered (%s) is not an integer\n", parsed_command[i+1] );		
   				}
   			else
   				{	
   				seed=atoi(parsed_command[i+1]);
   				srand((unsigned) (seed));
-  				printf("The seed value for the randome number generator has been set to %d\n", seed);
+  				printf2("The seed value for the random number generator has been set to %d\n", seed);
   				}
         	}
         }
@@ -10047,7 +10212,7 @@ int spr(struct taxon * position, int maxswaps, int numspectries, int numgenetrie
 		
 								start = position;
 								print_tree(position, debugtree);
-								printf("%s\n", debugtree);
+								printf2("%s\n", debugtree);
 								debugtree[0] = '\0';
 
 	
@@ -10076,7 +10241,7 @@ int spr(struct taxon * position, int maxswaps, int numspectries, int numgenetrie
                     position = position->next_sibling;
                     }
                 }
-	*/		printf("numsiblingd=%d\n", numofsiblings);
+	*/		printf2("numsiblingd=%d\n", numofsiblings);
             position = start;
             if(!better_score && start->parent != NULL && tried_regrafts < maxswaps && !user_break)
                     {
@@ -10122,7 +10287,7 @@ int spr(struct taxon * position, int maxswaps, int numspectries, int numgenetrie
                                 }
 							newbie = position;
 								print_tree(newbie, debugtree);
-								printf("NEWBIE=%s\n", debugtree);
+								printf2("NEWBIE=%s\n", debugtree);
 								debugtree[0] = '\0';
 							
                             tmp = latest;
@@ -10145,7 +10310,7 @@ int spr(struct taxon * position, int maxswaps, int numspectries, int numgenetrie
 								newbie->spr = TRUE;
 								
 								print_tree(newbie, debugtree);
-								printf("%s\n", debugtree);
+								printf2("%s\n", debugtree);
 								debugtree[0] = '\0';
 								
 								better_score = regraft(tmp, newbie, NULL, 1, maxswaps, numspectries, numgenetries);
@@ -10167,7 +10332,7 @@ int spr(struct taxon * position, int maxswaps, int numspectries, int numgenetrie
 									print_tree(newbie, debugtree);
 									strcat(debugtree, ";");
 									unroottree(debugtree);
-									printf("unrooted = %s\n", debugtree);
+									printf2("unrooted = %s\n", debugtree);
 									
 									dismantle_tree(newbie);
 									newbie = NULL;
@@ -10178,36 +10343,36 @@ int spr(struct taxon * position, int maxswaps, int numspectries, int numgenetrie
 									
 									debugtree[0] = '\0';
 									print_tree(newbie, debugtree);
-									printf("now = %s\n", debugtree);
+									printf2("now = %s\n", debugtree);
 									debugtree[0] = '\0';	
 									
 									i = number_tree(newbie, 0); /* count the parts of newbie */
-									printf("i=%d\n", i);
+									printf2("i=%d\n", i);
 									temp_top = NULL;
 									duplicate_tree(newbie, NULL); /* make a copy of the subtree */
 									copy = temp_top;
 									temp_top = NULL;
 									
 									print_tree_withinternals(copy, debugtree);
-									printf("copy = %s\n", debugtree);
+									printf2("copy = %s\n", debugtree);
 									debugtree[0] = '\0';
 									
 								
 									for(j=0; j<i; j++) /* reroot newbie at each of the "i" positions on the subtree */
 										{
-										printf("j=%d\n", j);
+										printf2("j=%d\n", j);
 										temper1 = get_branch(newbie, j);
 										
 										
-										printf("I\n");
+										printf2("I\n");
 										temp_top = newbie;
 										reroot_tree(temper1);
 										newbie = temp_top;
 											print_tree_withinternals(newbie, debugtree);
-											printf("rerooted: %d\t%s\n", temper1->tag, debugtree);
+											printf2("rerooted: %d\t%s\n", temper1->tag, debugtree);
 											debugtree[0] = '\0';
 
-										printf("II\n");
+										printf2("II\n");
 										
 										temper = make_taxon();
 										temper->daughter = newbie; 
@@ -10217,26 +10382,26 @@ int spr(struct taxon * position, int maxswaps, int numspectries, int numgenetrie
 										newbie->spr = TRUE;
 
 
-										printf("a=\n");
+										printf2("a=\n");
 										better_score = regraft(tmp, newbie, NULL, 1, maxswaps, numspectries, numgenetries);
 										
-										printf("b\n");
+										printf2("b\n");
 
 										if(better_score || user_break) j = i;
 										else
 											{
-											printf("change\n");
+											printf2("change\n");
 											dismantle_tree(newbie);
 											newbie = NULL;
 											temp_top = NULL;
-											printf("dismantled\n");
+											printf2("dismantled\n");
 
 											duplicate_tree(copy, NULL); /* make a copy of the subtree */
 											newbie = temp_top;
 											temp_top = NULL;
 											number_tree(newbie, 0);
 											newbie->spr = TRUE;
-											printf("end\n");
+											printf2("end\n");
 											}
 										}
 									}
@@ -10250,7 +10415,7 @@ int spr(struct taxon * position, int maxswaps, int numspectries, int numgenetrie
 									newbie->spr = TRUE;
 									
 									print_tree(newbie, debugtree);
-									printf("%s\n", debugtree);
+									printf2("%s\n", debugtree);
 									debugtree[0] = '\0';
 									
 									better_score = regraft(tmp, newbie, NULL, 1, maxswaps, numspectries, numgenetries);
@@ -10392,10 +10557,10 @@ int regraft(struct taxon * position, struct taxon * newbie, struct taxon * last,
 				/* regraft newbie here */
                                 
                                 
-			/*	if((newbie->daughter)->name != -1)printf("newbie daughter = %d\n", newbie->daughter->name);
-				else printf("newbie daughter = pointer\n");
-				if(position->name != -1) printf("new sibling daughter = %d\n", position->name);
-				else printf("pointer to %d\n", position->daughter->name);
+			/*	if((newbie->daughter)->name != -1)printf2("newbie daughter = %d\n", newbie->daughter->name);
+				else printf2("newbie daughter = pointer\n");
+				if(position->name != -1) printf2("new sibling daughter = %d\n", position->name);
+				else printf2("pointer to %d\n", position->daughter->name);
 	*/
 				newbie->next_sibling = position->next_sibling;
 				newbie->prev_sibling = position->prev_sibling;
@@ -10421,7 +10586,7 @@ int regraft(struct taxon * position, struct taxon * newbie, struct taxon * last,
                                 interval2 = time(NULL);
                                 if(difftime(interval2, interval1) > 5) /* every 5 seconds print a dot to the screen */
                                     {
-                                    printf("=");
+                                    printf2("=");
                                     fflush(stdout);
                                     interval1 = time(NULL);
                                     }
@@ -10593,7 +10758,7 @@ int regraft(struct taxon * position, struct taxon * newbie, struct taxon * last,
         if(position->daughter != NULL)
             {
             get_lengths(position->daughter);
-			printf("%f\n", position->length);
+			printf2("%f\n", position->length);
             if(position->length > largest_length) largest_length = position->length;
             }
         position = position->next_sibling;
@@ -10985,9 +11150,9 @@ void tree_coordinates(char *tree, int bootstrap, int build, int mapping, int fun
         {
         for(j=0; j<80; j++)
             {
-            printf("%c", treearray[i][j]);
+            printf2("%c", treearray[i][j]);
             }
-        printf("\n");
+        printf2("\n");
         }
 	
 	if(bootstrap)
@@ -11029,7 +11194,7 @@ void generatetrees(void)
 					}
 				else
 					{
-					printf("Error: %s is not a valid method\n\n", parsed_command[i+1]);
+					printf2("Error: %s is not a valid method\n\n", parsed_command[i+1]);
 					error = TRUE;
 					}
 				}
@@ -11048,7 +11213,7 @@ void generatetrees(void)
 				if(ntrees == 0) 
 					{
 					error = TRUE;
-					printf("%d is not a valid value for ntrees\n", ntrees);
+					printf2("%d is not a valid value for ntrees\n", ntrees);
 					}
 				}
 			}
@@ -11064,7 +11229,7 @@ void generatetrees(void)
 			if(n == 0) 
 				{
 				error = TRUE;
-				printf("%d is not a valid value for nbins\n", ntrees);
+				printf2("%d is not a valid value for nbins\n", ntrees);
 				}
 			}
 					
@@ -11082,7 +11247,7 @@ void generatetrees(void)
 						data = 3;
 					else
 						{
-						printf("Error: %s not valid sourcedata option\n", parsed_command[i+1]);
+						printf2("Error: %s not valid sourcedata option\n", parsed_command[i+1]);
 						error = TRUE;
 						}
 					}
@@ -11111,7 +11276,7 @@ void generatetrees(void)
 					saveideal = FALSE;
 				else
 					{
-					printf("Error: %s not valid savesourcetrees option\n", parsed_command[i+1]);
+					printf2("Error: %s not valid savesourcetrees option\n", parsed_command[i+1]);
 					error = TRUE;
 					}
 				}
@@ -11121,44 +11286,44 @@ void generatetrees(void)
 
 	if(criterion == 4 || criterion == 1)
 		{
-		printf("Error: This command is not currently implemented for MRP or Average consensus\n\tplease select another criterion to continue\n");
+		printf2("Error: This command is not currently implemented for MRP or Average consensus\n\tplease select another criterion to continue\n");
 		error = TRUE;
 		}
 	if(data == 3 && super == 1 && trees_in_memory == 0)
 		{
-		printf("\n\nError: there are no trees in memory, a supertree is required to create ideal data\n\tYou have two choices:\n\t1) choose to run a Heuristic search to create a supertree\n\t2) specify a file containing the supertree to use\n\n\n");
+		printf2("\n\nError: there are no trees in memory, a supertree is required to create ideal data\n\tYou have two choices:\n\t1) choose to run a Heuristic search to create a supertree\n\t2) specify a file containing the supertree to use\n\n\n");
 		error = TRUE;
 		}
 	if(!error)
 		{
-		printf("\n\nGeneratetrees Settings:\n");
-		printf("\tGenerating");
-		if(random) printf(" %d random trees\n", ntrees);
-		else printf(" all %.0f possible trees\n", sup);
+		printf2("\n\nGeneratetrees Settings:\n");
+		printf2("\tGenerating");
+		if(random) printf2(" %d random trees\n", ntrees);
+		else printf2(" all %.0f possible trees\n", sup);
 		if(random)
 			{
-			printf("\tRandom supertree generator used: ");
-			if(gen_method == 1) printf("Equiprobable\n");
-			else printf("Markovian\n");
+			printf2("\tRandom supertree generator used: ");
+			if(gen_method == 1) printf2("Equiprobable\n");
+			else printf2("Markovian\n");
 			}
-		printf("\tNumber of bins = %d\n", n);
-		printf("\tCalculating the tree scores using ");
-		if(data == 1) printf("the real source trees\n");
-		if(data == 2) printf("randomised versions of the source trees\n");
+		printf2("\tNumber of bins = %d\n", n);
+		printf2("\tCalculating the tree scores using ");
+		if(data == 1) printf2("the real source trees\n");
+		if(data == 2) printf2("randomised versions of the source trees\n");
 		if(data == 3) 
 			{
-			printf("idealised versions of the source trees\n");
-			printf("\tIdeal data created from first supertree in ");
-			if(super == 1)printf("memory\n");
-			if(super == 2)printf("file named %s\n", superfilename);
-			if(saveideal) printf("\tIdeal data to be saved to the file 'idealtrees.ph'\n");
+			printf2("idealised versions of the source trees\n");
+			printf2("\tIdeal data created from first supertree in ");
+			if(super == 1)printf2("memory\n");
+			if(super == 2)printf2("file named %s\n", superfilename);
+			if(saveideal) printf2("\tIdeal data to be saved to the file 'idealtrees.ph'\n");
 			}
-		printf("\tCriterion used to calculate supertree scores = ");
-		if(criterion == 0) printf("dfit\n");
-		if(criterion == 2) printf("sfit\n");
-		if(criterion == 3) printf("qfit\n");
-		printf("\tOutput file = %s\n", filename);
-		if(print_all_scores)printf("\tSaving all %d supertree scores to file 'allscores.txt'\n", ntrees);
+		printf2("\tCriterion used to calculate supertree scores = ");
+		if(criterion == 0) printf2("dfit\n");
+		if(criterion == 2) printf2("sfit\n");
+		if(criterion == 3) printf2("qfit\n");
+		printf2("\tOutput file = %s\n", filename);
+		if(print_all_scores)printf2("\tSaving all %d supertree scores to file 'allscores.txt'\n", ntrees);
 		
 		outfile = fopen(filename, "w");
 		
@@ -11178,7 +11343,7 @@ void generatetrees(void)
 		
 		if(signal(SIGINT, controlc3) == SIG_ERR)
 			{
-			printf("An error occurred while setting a signal handler\n");
+			printf2("An error occurred while setting a signal handler\n");
 			}
 		for(i=0; i<number_of_taxa; i++) presenceof_SPRtaxa[i] = '\0';
 		
@@ -11285,7 +11450,7 @@ void generatetrees(void)
 						fprintf(idealfile, "%s [%s]\n", temptree, tree_names[i]);
 						}
 					fclose(idealfile);
-					printf("finished printing out trees\n");
+					printf2("finished printing out trees\n");
 					}	
 				
                 cal_fund_scores(FALSE);
@@ -11313,7 +11478,7 @@ void generatetrees(void)
 						{
 						if((superfile = fopen(superfilename, "r")) == NULL)
 							{
-							printf("Error opening supertree file %s\n", superfilename);
+							printf2("Error opening supertree file %s\n", superfilename);
 							error = TRUE;
 							}
 						else
@@ -11391,7 +11556,7 @@ void generatetrees(void)
 				}
 				
 			interval1 = time(NULL);
-			printf("\nProgress Indicator:");
+			printf2("\nProgress Indicator:");
 			fflush(stdout);
 			if(print_all_scores) allscores = fopen("allscores.txt", "w");
 
@@ -11403,7 +11568,7 @@ void generatetrees(void)
 					interval2 = time(NULL);
 					if(difftime(interval2, interval1) > 5) /* every 5 seconds print a dot to the screen */
 						{
-						printf("=");
+						printf2("=");
 						fflush(stdout);
 						interval1 = time(NULL);
 						}
@@ -11568,16 +11733,16 @@ void draw_histogram(FILE *outfile, int bins, float *results, int num_results)
 		if(hist[i] > max1) max1 = hist[i];
 		}
 		
-	if(outfile != NULL)printf("\nResults as follows:\n\n\n");
+	if(outfile != NULL)printf2("\nResults as follows:\n\n\n");
 	for(i=0; i<bins; i++)
 		{
 		 x = (hist[i]/max1)*40;
 		if(outfile != NULL)fprintf(outfile, "%.2f-%.2f\t%d\n", min+(i*k), (min+((i+1)*k))-0.01, hist[i]);
-		if(outfile != NULL)printf("%.2f - %.2f\t|", min+(i*k), (min+((i+1)*k))-0.01);
-		else printf("\t%-4.0f|", min+(i*k));
+		if(outfile != NULL)printf2("%.2f - %.2f\t|", min+(i*k), (min+((i+1)*k))-0.01);
+		else printf2("\t%-4.0f|", min+(i*k));
 		for(j=0; j<x; j++)
-			printf("=");
-		printf(" (%d)\n",hist[i]);
+			printf2("=");
+		printf2(" (%d)\n",hist[i]);
 		y=i;
 		z =0;
 		while(y < bins && hist[y] == 0)
@@ -11587,12 +11752,12 @@ void draw_histogram(FILE *outfile, int bins, float *results, int num_results)
 			}
 		if(z > 15)
 			{
-			printf("\t    .\n\t    .\n\t    .\n\t    \n");
+			printf2("\t    .\n\t    .\n\t    .\n\t    \n");
 			i = y-3;
 			}
 		
 		}
-		printf("\n\n\n");
+		printf2("\n\n\n");
 
 	/* calculate the rest of the statistics */
 	variance = 0;
@@ -11610,7 +11775,7 @@ void draw_histogram(FILE *outfile, int bins, float *results, int num_results)
 	skewness = skewness/num_results;
 	
 	
-	if(outfile != NULL)printf("Moments of the Distribution:\n\n\tMean = %f\n\tVariance = %f\n\tStandard Deviation = %f\n\tSkewness = %f\n\tStandard deviation of skewness = %f\n\n", mean, variance, std_dev, skewness, sqrt(((double)6)/(double)num_results));
+	if(outfile != NULL)printf2("Moments of the Distribution:\n\n\tMean = %f\n\tVariance = %f\n\tStandard Deviation = %f\n\tSkewness = %f\n\tStandard deviation of skewness = %f\n\n", mean, variance, std_dev, skewness, sqrt(((double)6)/(double)num_results));
 	
 	
 	
@@ -11640,7 +11805,7 @@ void do_consensus(void)
 			if(guidetreefile != NULL) fclose(guidetreefile);
 			if((guidetreefile = fopen(guidetreename, "r")) == NULL)		/* check to see if the file is there */
 				{								/* Open the source tree file */
-				printf("Cannot open file %s\n", guidetreename);
+				printf2("Cannot open file %s\n", guidetreename);
 				error = TRUE;
 				}
 			useguide = TRUE;
@@ -11659,7 +11824,7 @@ void do_consensus(void)
 						percentage = tofloat(parsed_command[i+1]);
 						if(percentage > 1)
 							{
-							printf("Error: The cut off for a consensus tree must be between .5 and 1.0\n");
+							printf2("Error: The cut off for a consensus tree must be between .5 and 1.0\n");
 							error = TRUE;
 							}
 						}
@@ -11682,7 +11847,7 @@ void do_consensus(void)
 						tree_type = 2;
 					else
 						{
-						printf("Error: %s is an invalid option for data\n", parsed_command[i+1]);
+						printf2("Error: %s is an invalid option for data\n", parsed_command[i+1]);
 						error = TRUE;
 						}
 					}
@@ -11796,21 +11961,21 @@ void do_consensus(void)
 							}
 						}
 					}
-				printf("\nConsensus settings:\n");
-				printf("\tConsensus of %d universally distributed source trees\n", numtrees);
+				printf2("\nConsensus settings:\n");
+				printf2("\tConsensus of %d universally distributed source trees\n", numtrees);
 				if(useguide)
 					{
-					printf("\tOnly relationships as defined by the guidetree in %s ", guidetreename);
+					printf2("\tOnly relationships as defined by the guidetree in %s ", guidetreename);
 					}
 				else
 					{
-					printf("\tOnly relationships with ");
-					if(percentage == 1) printf("100%% support ");
-					if(percentage == 0) printf("50%% support or greater (including congruent minor components) ");
-					if(percentage != 0 && percentage != 1) printf("%0.0f%% support or greater ", percentage*100);
+					printf2("\tOnly relationships with ");
+					if(percentage == 1) printf2("100%% support ");
+					if(percentage == 0) printf2("50%% support or greater (including congruent minor components) ");
+					if(percentage != 0 && percentage != 1) printf2("%0.0f%% support or greater ", percentage*100);
 					}
-				printf("are included in the consensus\n");
-				printf("\tConsensus file = %s\n", consensusfilename);
+				printf2("are included in the consensus\n");
+				printf2("\tConsensus file = %s\n", consensusfilename);
 				
 				consensusfile = fopen(consensusfilename, "w");
 				
@@ -11819,7 +11984,7 @@ void do_consensus(void)
 				fclose(consensusfile);
 				}
 			else
-				printf("There are no tress that contain all the taxa, unable to construct a consensus tree\n");
+				printf2("There are no tress that contain all the taxa, unable to construct a consensus tree\n");
 					
 			}
 		}
@@ -11862,12 +12027,12 @@ void consensus(int num_trees, char **trees, int num_reps, float percentage, FILE
 				if(j%16 == 0)
 					{
 					k++; shorthand[i][k]=0;
-					if(k != 0) printf("%d ", shorthand[k-1]);
+					if(k != 0) printf2("%d ", shorthand[k-1]);
 					}
 				shorthand[i][k] += (((int)(pow(2, j%16))) * total_coding[i][j]);
 				}
-			 printf("%d ", shorthand[i][k]);
-			printf("\n");
+			 printf2("%d ", shorthand[i][k]);
+			printf2("\n");
 			}
 		}
 	 */
@@ -12097,54 +12262,54 @@ void consensus(int num_trees, char **trees, int num_reps, float percentage, FILE
 			}
 
 		
-		printf("\n\n\nSets included in the consensus tree\n");
+		printf2("\n\n\nSets included in the consensus tree\n");
 		for(i=0; i<num_partitions; i++)
 			{
 			if(in[i] && (float)(partition_number[i]/num_reps) >= percentage && (float)(partition_number[i]/num_reps) >= .5)
 				{
-				printf("\t");
+				printf2("\t");
 				for(j=0; j<number_of_taxa; j++)
 					{
 					if(total_coding[i][j] == 1)
-						printf("*");
+						printf2("*");
 					else
-						printf(".");
+						printf2(".");
 					}
-				printf("\t%.2f\n", (float)(partition_number[i]/num_reps));
+				printf2("\t%.2f\n", (float)(partition_number[i]/num_reps));
 				}
 			}
 		
-		printf("\n\n\nMinor Components included in the consensus tree\n");
+		printf2("\n\n\nMinor Components included in the consensus tree\n");
 		for(i=0; i<num_partitions; i++)
 			{
 			if(in[i] && (float)(partition_number[i]/num_reps) < .5)
 				{
-				printf("\t");
+				printf2("\t");
 				for(j=0; j<number_of_taxa; j++)
 					{
 					if(total_coding[i][j] == 1)
-						printf("*");
+						printf2("*");
 					else
-						printf(".");
+						printf2(".");
 					}
-				printf("\t%.2f\n", (float)(partition_number[i]/num_reps));
+				printf2("\t%.2f\n", (float)(partition_number[i]/num_reps));
 				}
 			}
 		
-		printf("\n\nSets not included in the consensus tree\n");
+		printf2("\n\nSets not included in the consensus tree\n");
 		for(i=0; i<num_partitions; i++)
 			{
 			if(!in[i])
 				{
-				printf("\t");
+				printf2("\t");
 				for(j=0; j<number_of_taxa; j++)
 					{
 					if(total_coding[i][j] == 1)
-						printf("*");
+						printf2("*");
 					else
-						printf(".");
+						printf2(".");
 					}
-				printf("\t%.2f\n", (float)(partition_number[i]/num_reps));
+				printf2("\t%.2f\n", (float)(partition_number[i]/num_reps));
 				}
 			}
 		/* build a nested parenthesis tree from the remaining splits and return. This is the result */
@@ -12431,7 +12596,7 @@ void showtrees(void)
 					}
 				else
 					{
-					printf("ERROR: %s not valid modifier of \"fullnames\"\n", parsed_command[i+1]);
+					printf2("ERROR: %s not valid modifier of \"fullnames\"\n", parsed_command[i+1]);
 					error = TRUE;
 					}
 				}
@@ -12448,7 +12613,7 @@ void showtrees(void)
 					}
 				else
 					{
-					printf("ERROR: %s not valid modifier of \"display\"\n", parsed_command[i+1]);
+					printf2("ERROR: %s not valid modifier of \"display\"\n", parsed_command[i+1]);
 					error = TRUE;
 					}
 				}
@@ -12463,7 +12628,7 @@ void showtrees(void)
 					savetrees = FALSE;
 				else
 					{
-					printf("Error: %s not a valid modifier of \"savetrees\"\n", parsed_command[i+1]);
+					printf2("Error: %s not a valid modifier of \"savetrees\"\n", parsed_command[i+1]);
 					error = TRUE;
 					}
 				}
@@ -12479,7 +12644,7 @@ void showtrees(void)
 			if(start <0 || end > Total_fund_trees)
 				{
 				error = TRUE;
-				printf("Error: the start of the range must not be less than 1 and the end of the range must no be greater than the number of source trees\n");
+				printf2("Error: the start of the range must not be less than 1 and the end of the range must no be greater than the number of source trees\n");
 				}
 			}
 		if(strcmp(parsed_command[i], "namecontains") == 0)
@@ -12498,7 +12663,7 @@ void showtrees(void)
 				}
 			else
 				{
-				printf("Error: the number of taxa chosen os greater than the number of taxa in memory\n");
+				printf2("Error: the number of taxa chosen os greater than the number of taxa in memory\n");
 				error = TRUE;
 				}
 			mode[3] = TRUE;
@@ -12521,7 +12686,7 @@ void showtrees(void)
 				if(equalto < 4 || equalto > number_of_taxa)
 					{
 					error = TRUE;
-					printf("Error in size \"equalto\"\n\n");
+					printf2("Error in size \"equalto\"\n\n");
 					}
 				}
 			else
@@ -12533,7 +12698,7 @@ void showtrees(void)
 					if(greaterthan >= number_of_taxa)
 						{
 						error = TRUE;
-						printf("Error in size \"greaterthan\"\n\n");
+						printf2("Error in size \"greaterthan\"\n\n");
 						}
 					}
 				else
@@ -12545,12 +12710,12 @@ void showtrees(void)
 						if(lessthan < 5)
 							{
 							error = TRUE;
-							printf("Error in size \"lessthan\"\n\n");
+							printf2("Error in size \"lessthan\"\n\n");
 							}
 						}
 					else
 						{
-						printf("Error: %s not valid option for \"size\"\n", parsed_command[i+1]);
+						printf2("Error: %s not valid option for \"size\"\n", parsed_command[i+1]);
 						error = TRUE;
 						}
 					}
@@ -12564,7 +12729,7 @@ void showtrees(void)
 		{
 		if(trees_in_memory == 0)
 			{
-			printf("Error: There are no saved supertrees in memory from which to calculate scores\n");
+			printf2("Error: There are no saved supertrees in memory from which to calculate scores\n");
 			error = TRUE;
 			}
 		}
@@ -12573,15 +12738,15 @@ void showtrees(void)
 		{
 		if((showfile = fopen(savedfile, "w")) == NULL)		/* check to see if the file is there */
 			{								/* Open the source tree file */
-			printf("Cannot open file %s\n", savedfile);
+			printf2("Cannot open file %s\n", savedfile);
 			error = TRUE;
 			}
 		}
 	if(!error)
 		{
-		printf("showtrees settings:\n\n");
+		printf2("showtrees settings:\n\n");
 		if(savetrees)
-			printf("\tsaving selection of trees in phylip format to file: %s\n", savedfile);
+			printf2("\tsaving selection of trees in phylip format to file: %s\n", savedfile);
 		
 		
 		
@@ -12731,9 +12896,9 @@ void showtrees(void)
 					temptree[0] = '\0';
 					strcpy(temptree, fundamentals[j]);
 					returntree(temptree);
-					printf("\n\n\nTree number %d\nTree name = %s\n", i+1, tree_names[j]);
-					printf("Weight = %f\n", tree_weights[j]);
-					if(trees_in_memory > 0)printf("Score = %f\n", sourcetree_scores[j]);
+					printf2("\n\n\nTree number %d\nTree name = %s\n", i+1, tree_names[j]);
+					printf2("Weight = %f\n", tree_weights[j]);
+					if(trees_in_memory > 0)printf2("Score = %f\n", sourcetree_scores[j]);
 					tree_coordinates(temptree, TRUE, TRUE, FALSE, -1);
 					}
 				counter++;
@@ -12760,16 +12925,16 @@ void showtrees(void)
 					}
 				if(display)
 					{
-					printf("\n\n\nTree number %d\nTree name = %s\n", i+1, tree_names[i]);
-					printf("Weight = %f\n", tree_weights[i]);
-					if(trees_in_memory > 0)printf("Score = %f\n", sourcetree_scores[i]);
+					printf2("\n\n\nTree number %d\nTree name = %s\n", i+1, tree_names[i]);
+					printf2("Weight = %f\n", tree_weights[i]);
+					if(trees_in_memory > 0)printf2("Score = %f\n", sourcetree_scores[i]);
 					tree_coordinates(temptree, TRUE, TRUE, FALSE, -1);
 					}
 				counter++;
 				}
 			} */ /* Old save trees before names were delimited */
 		
-		printf("\n%d source trees met with the criteria specified\n", counter);
+		printf2("\n%d source trees met with the criteria specified\n", counter);
 		}
 	if(savetrees) fclose(showfile);
 	free(temptree);
@@ -12868,7 +13033,7 @@ void exclude(int do_all)
 			if(start <0 || end > Total_fund_trees)
 				{
 				error = TRUE;
-				printf("Error: the start of the range must not be less than 1 and the end of the range must no be greater than the number of source trees\n");
+				printf2("Error: the start of the range must not be less than 1 and the end of the range must no be greater than the number of source trees\n");
 				}
 			}
 		if(strcmp(parsed_command[i], "namecontains") == 0)
@@ -12887,7 +13052,7 @@ void exclude(int do_all)
 				}
 			else
 				{
-				printf("Error: the number of taxa chosen os greater than the number of taxa in memory\n");
+				printf2("Error: the number of taxa chosen os greater than the number of taxa in memory\n");
 				error = TRUE;
 				}
 			mode[3] = TRUE;
@@ -12900,7 +13065,7 @@ void exclude(int do_all)
 			if(worstscore < bestscore)
 				{
 				error = TRUE;
-				printf("Error: the range must end with a larger or equal score to the start of the range\n");
+				printf2("Error: the range must end with a larger or equal score to the start of the range\n");
 				}
 			}
 		if(strcmp(parsed_command[i], "size") == 0)
@@ -12913,7 +13078,7 @@ void exclude(int do_all)
 				if(equalto > number_of_taxa)
 					{
 					error = TRUE;
-					printf("Error in size \"equalto\"\n\n");
+					printf2("Error in size \"equalto\"\n\n");
 					}
 				}
 			else
@@ -12933,7 +13098,7 @@ void exclude(int do_all)
 						}
 					else
 						{
-						printf("Error: %s not valid option for \"size\"\n", parsed_command[i+1]);
+						printf2("Error: %s not valid option for \"size\"\n", parsed_command[i+1]);
 						error = TRUE;
 						}
 					}
@@ -12947,7 +13112,7 @@ void exclude(int do_all)
 		{
 		if(trees_in_memory == 0)
 			{
-			printf("Error: There are no saved supertrees in memory from which to calculate scores\n");
+			printf2("Error: There are no saved supertrees in memory from which to calculate scores\n");
 			error = TRUE;
 			}
 		}
@@ -12955,7 +13120,7 @@ void exclude(int do_all)
 		{
 		if(trees_in_memory == 0)
 			{
-			printf("Error: There are no saved supertrees in memory from which to calculate scores\n");
+			printf2("Error: There are no saved supertrees in memory from which to calculate scores\n");
 			error = TRUE;
 			}
 		}
@@ -13137,10 +13302,10 @@ void exclude(int do_all)
 				for(i=0; i<number_of_taxa; i++)
 					{
 					if(temp_incidence[i] == 0)
-						printf("\t%s\n", taxa_names[i]);
+						printf2("\t%s\n", taxa_names[i]);
 					}
 				command = malloc(10000*sizeof(char));
-				printf("This will permenantly remove these trees from memory\nAre you sure you wish to continue: (yes/no) ");
+				printf2("This will permenantly remove these trees from memory\nAre you sure you wish to continue: (yes/no) ");
 				xgets(command);
 				if(strcmp(command, "y") == 0 || strcmp(command, "Y") == 0 || strcmp(command, "yes") == 0 || strcmp(command, "Yes") == 0)
 					{
@@ -13226,7 +13391,7 @@ void exclude(int do_all)
 				/*	}
 				else
 					{
-					printf("\nAction aborted\n");
+					printf2("\nAction aborted\n");
 					error = TRUE;
 					} */
 				}
@@ -13283,7 +13448,7 @@ void exclude(int do_all)
 				}
 			if(!error)
 				{
-				printf("\n%d source trees were excluded, %d trees remain in memory\n", counter, countedout );	
+				printf2("\n%d source trees were excluded, %d trees remain in memory\n", counter, countedout );	
 				}
 			/*} */
 		}
@@ -13467,7 +13632,7 @@ void include(int do_all)
 			if(start <0 || end > Total_fund_trees)
 				{
 				error = TRUE;
-				printf("Error: the start of the range must not be less than 1 and the end of the range must no be greater than the number of source trees\n");
+				printf2("Error: the start of the range must not be less than 1 and the end of the range must no be greater than the number of source trees\n");
 				}
 			}
 		if(strcmp(parsed_command[i], "namecontains") == 0)
@@ -13486,7 +13651,7 @@ void include(int do_all)
 				}
 			else
 				{
-				printf("Error: the number of taxa chosen os greater than the number of taxa in memory\n");
+				printf2("Error: the number of taxa chosen os greater than the number of taxa in memory\n");
 				error = TRUE;
 				}
 			mode[3] = TRUE;
@@ -13499,7 +13664,7 @@ void include(int do_all)
 			if(worstscore < bestscore)
 				{
 				error = TRUE;
-				printf("Error: the range must end with a larger score than the start of the range\n");
+				printf2("Error: the range must end with a larger score than the start of the range\n");
 				}
 			}
 		if(strcmp(parsed_command[i], "size") == 0)
@@ -13512,7 +13677,7 @@ void include(int do_all)
 				if(equalto < 4 || equalto > number_of_taxa)
 					{
 					error = TRUE;
-					printf("Error in size \"equalto\"\n\n");
+					printf2("Error in size \"equalto\"\n\n");
 					}
 				}
 			else
@@ -13524,7 +13689,7 @@ void include(int do_all)
 					if(greaterthan >= number_of_taxa)
 						{
 						error = TRUE;
-						printf("Error in size \"greaterthan\"\n\n");
+						printf2("Error in size \"greaterthan\"\n\n");
 						}
 					}
 				else
@@ -13536,12 +13701,12 @@ void include(int do_all)
 						if(lessthan < 5)
 							{
 							error = TRUE;
-							printf("Error in size \"lessthan\"\n\n");
+							printf2("Error in size \"lessthan\"\n\n");
 							}
 						}
 					else
 						{
-						printf("Error: %s not valid option for \"size\"\n", parsed_command[i+1]);
+						printf2("Error: %s not valid option for \"size\"\n", parsed_command[i+1]);
 						error = TRUE;
 						}
 					}
@@ -13555,7 +13720,7 @@ void include(int do_all)
 		{
 		if(trees_in_memory == 0)
 			{
-			printf("Error: There are no saved supertrees in memory from which to calculate scores\n");
+			printf2("Error: There are no saved supertrees in memory from which to calculate scores\n");
 			error = TRUE;
 			}
 		}
@@ -13730,7 +13895,7 @@ void include(int do_all)
 	if(!error)
 		{
 		input_file_summary(do_all);
-		printf("\n%d source trees were re-included, %d trees remain in memory\n", counter, countedout );	
+		printf2("\n%d source trees were re-included, %d trees remain in memory\n", counter, countedout );	
 		}
 	
 	free(temptree);
@@ -13770,7 +13935,7 @@ void sourcetree_dists(void)
 					output_format = 1;
 				else
 					{
-					printf("Error: '%s' not valid option for output\n", parsed_command[i+1]);
+					printf2("Error: '%s' not valid option for output\n", parsed_command[i+1]);
 					error = TRUE;
 					}
 				}
@@ -13789,7 +13954,7 @@ void sourcetree_dists(void)
 						missing_method = 2;
 					else
 						{
-						printf("Error: '%s' not valid option for missing\n", parsed_command[i+1]);
+						printf2("Error: '%s' not valid option for missing\n", parsed_command[i+1]);
 						error = TRUE;
 						}
 					}
@@ -13799,7 +13964,7 @@ void sourcetree_dists(void)
 	
 	if((RFfile = fopen(RFfilename, "w")) == NULL)		/* check to see if the file is there */
 			{								/* Open the source tree file */
-			printf("Cannot open file %s\n", RFfilename);
+			printf2("Cannot open file %s\n", RFfilename);
 			error = TRUE;
 			}
 	if(!error)
@@ -13858,12 +14023,12 @@ void sourcetree_dists(void)
 			if(!tracking) memory_error(79);
 			for(i=0; i<(2*number_of_taxa); i++) tracking[i] = FALSE;
 
-		printf("Calculating the Robinson-Foulds distance between the trees .... \n\n");
+		printf2("Calculating the Robinson-Foulds distance between the trees .... \n\n");
 		/**** calculate a BR coding for each sourcetree in memory ****/ 
 		y=0;
 		for(x=0; x<Total_fund_trees; x++)
 			{
-				printf("x=%d\ty=%d\n", x, y);
+				printf2("x=%d\ty=%d\n", x, y);
 			unroottree(fundamentals[x]);
 			if(sourcetreetag[x])
 				{
@@ -13946,10 +14111,10 @@ void sourcetree_dists(void)
 				}
 			}
 		x = y = 0;
-		printf("here\n");
+		printf2("here\n");
 		for(i=0; i<Total_fund_trees; i++)
 			{
-			printf("y=%d\n", y);
+			printf2("y=%d\n", y);
 			if(sourcetreetag[i])
 				{
 				
@@ -14085,9 +14250,9 @@ void sourcetree_dists(void)
 		
 		if(missing_method != 2)
 			{
-			printf("Estimating the missing data using ");
-			if(missing_method == 0) printf("ultrametric distances\n");
-			else printf("4 point condition distances\n");
+			printf2("Estimating the missing data using ");
+			if(missing_method == 0) printf2("ultrametric distances\n");
+			else printf2("4 point condition distances\n");
 			while(here && found)
 				{
 				for(i=0; i<Total_fund_trees-num_excluded_trees; i++)
@@ -14159,9 +14324,9 @@ void sourcetree_dists(void)
 		
 			if(!found)
 				{
-				printf("\n\nERROR: the overlap in the data is too sparse to calculate missing cells using ");
-				if(missing_method == 0) printf("an ultrametric estimate\n");
-				if(missing_method == 1) printf("a 4 point condition estimate\n");
+				printf2("\n\nERROR: the overlap in the data is too sparse to calculate missing cells using ");
+				if(missing_method == 0) printf2("an ultrametric estimate\n");
+				if(missing_method == 1) printf2("a 4 point condition estimate\n");
 				error = TRUE;
 				}
 			}
@@ -14212,7 +14377,7 @@ void sourcetree_dists(void)
 			fprintf(RFfile, "\n");
 			}
 			
-		printf("\nRobinson-Foulds distances of the source trees have been writen to file named %s\n\n", RFfilename);
+		printf2("\nRobinson-Foulds distances of the source trees have been writen to file named %s\n\n", RFfilename);
 		
 		for(i=0; i<Total_fund_trees-num_excluded_trees; i++)
 			{
@@ -14263,7 +14428,7 @@ void exclude_taxa(int do_all)
 					min_taxa = toint(parsed_command[k+1]);
 					if(min_taxa < 1) 
 						{
-						printf("Error the minimum number of taxa cannot be set below 1\n");
+						printf2("Error the minimum number of taxa cannot be set below 1\n");
 						error = TRUE;
 						}
 					k = k+1;
@@ -14281,7 +14446,7 @@ void exclude_taxa(int do_all)
 						}
 					if(!found)
 						{
-						printf("Error: Cannot find any taxa that match the string \"%s\"\n", parsed_command[k]);
+						printf2("Error: Cannot find any taxa that match the string \"%s\"\n", parsed_command[k]);
 						error = TRUE;
 						}
 					else
@@ -14295,11 +14460,11 @@ void exclude_taxa(int do_all)
 
 	if(k == 0)
 		{
-		printf("Error: you must specify the name of at least one taxa to delete\n");
+		printf2("Error: you must specify the name of at least one taxa to delete\n");
 		error = TRUE;
 		}
 	else
-		printf("\n%d taxa will be permanently deleted from the source trees\n", q);
+		printf2("\n%d taxa will be permanently deleted from the source trees\n", q);
 
 
 		/*** go through the names given and identify the taxa ***/
@@ -14311,7 +14476,7 @@ void exclude_taxa(int do_all)
 		tempfile = fopen(tmpfilename, "w");
 		command = malloc(10000*sizeof(char));
 		command[0] = '\0';
-	/*	printf("\nWarning: This command will permenantly delete any chosen taxa from each tree in memory\nThis will also delete any trees that contain less than 4 taxa after the pruning\n\nAre you sure you wish to continue? (yes/no): ");
+	/*	printf2("\nWarning: This command will permenantly delete any chosen taxa from each tree in memory\nThis will also delete any trees that contain less than 4 taxa after the pruning\n\nAre you sure you wish to continue? (yes/no): ");
 		xgets(command);
 		if(strcmp(command, "n") == 0 || strcmp(command, "no") == 0 || strcmp(command, "NO") == 0 || strcmp(command, "N") == 0 || strcmp(command, "No") == 0)
 			error = TRUE;
@@ -14364,7 +14529,7 @@ void exclude_taxa(int do_all)
 						tmp[j] = '\0';
 						}
 					/*get_taxa_details(tree_top);
-                   printf("--\n"); */
+                   printf2("--\n"); */
 					
 					if(print_pruned_tree(tree_top, 0, pruned_tree, TRUE, i) >1)
 						{
@@ -14380,9 +14545,9 @@ void exclude_taxa(int do_all)
 					}
 				else
 					{
-					if(!done)printf("\n\nThe following trees have been deleted from memory because they now contain less than 4 taxa\nTree Number\tTree name\n");
+					if(!done)printf2("\n\nThe following trees have been deleted from memory because they now contain less than 4 taxa\nTree Number\tTree name\n");
 					done = TRUE;
-					printf("%-10d\t%s\n", i+1, tree_names[i]);
+					printf2("%-10d\t%s\n", i+1, tree_names[i]);
 					}
 				}  
 			}
@@ -14397,7 +14562,7 @@ void exclude_taxa(int do_all)
 		{
 		fclose(tempfile);
 		if(num_left == 0)
-			printf("\nError: This will delete all trees from memory..... aborting deletetaxa\n");
+			printf2("\nError: This will delete all trees from memory..... aborting deletetaxa\n");
 		else
 			execute_command(tmpfilename, do_all);
 		strcpy(inputfilename, previnputfilename);
@@ -14460,7 +14625,7 @@ void spr_dist(void)
 					starting_super = 1;
 					if(trees_in_memory == 0)
 						{
-						printf("Error there are no trees in memory\n");
+						printf2("Error there are no trees in memory\n");
 						error = TRUE;
 						}
 					}
@@ -14468,13 +14633,13 @@ void spr_dist(void)
 					{
 					if((infile = fopen(parsed_command[i+1], "r")) == NULL)
 						{
-						printf("Error opening file named %s\n", parsed_command[i+1]);
+						printf2("Error opening file named %s\n", parsed_command[i+1]);
 						error = TRUE;
 						strcpy(userinfile, parsed_command[i+1]);
 						}
 					else
 						{
-						printf("opened input file %s\n", parsed_command[i+1]);
+						printf2("opened input file %s\n", parsed_command[i+1]);
 						starting_super = 2;
 						}
 					}
@@ -14490,7 +14655,7 @@ void spr_dist(void)
 					randomisation = TRUE;
 				else
 					{
-					printf("Error: %s not valid option for dorandomisation\n", parsed_command[i+1]);
+					printf2("Error: %s not valid option for dorandomisation\n", parsed_command[i+1]);
 					error = TRUE;
 					}
 				}
@@ -14504,12 +14669,12 @@ void spr_dist(void)
 		
 	if((outfile = fopen(outputfile, "w")) == NULL)
 		{
-		printf("Error opening file named %s\n", outputfile);
+		printf2("Error opening file named %s\n", outputfile);
 		error = TRUE;
 		}
 	else
 		{
-		printf("opened output file %s\n", outputfile);
+		printf2("opened output file %s\n", outputfile);
 		}
 	
 	if(!error)
@@ -14598,10 +14763,10 @@ void spr_dist(void)
 			{
 			heuristic_search(FALSE, FALSE, 1000, 1);
 			bestreal = scores_retained_supers[0];
-			printf("\nbestreal = %f\n", bestreal);
+			printf2("\nbestreal = %f\n", bestreal);
 			hsprint = FALSE;
 			if(signal(SIGINT, controlc4) == SIG_ERR)
-				printf("An error occurred while setting a signal handler\n");
+				printf2("An error occurred while setting a signal handler\n");
 			}
 		if(starting_super == 2) /* read in the tree from file */
 			{
@@ -14796,8 +14961,8 @@ void spr_dist(void)
 			
 			
 			/**** Report the amount of SPR per tree between ideal and real and the the same for real and random ***/
-			if(y==0)printf("amount SPR per tree required to make Ideal as incongruent as real data = %f\n", totalnow/(Total_fund_trees-num_excluded_trees));
-			else printf("amount SPR per tree required to make Ideal as incongruent as random data = %f\n", totalnow/(Total_fund_trees-num_excluded_trees));
+			if(y==0)printf2("amount SPR per tree required to make Ideal as incongruent as real data = %f\n", totalnow/(Total_fund_trees-num_excluded_trees));
+			else printf2("amount SPR per tree required to make Ideal as incongruent as random data = %f\n", totalnow/(Total_fund_trees-num_excluded_trees));
 			if(!randomisation) y = 2;
 			}
 		/**** Finish! ****/
@@ -15300,7 +15465,7 @@ void exhaustive_SPR(char * string)
 	labeledtreefile = fopen("labelledtree.ph", "w");
 	fprintf(labeledtreefile, "%s\n", tmp_labeledtree);
 	fclose(labeledtreefile);
-	printf("written labelledtree to file\n");
+	printf2("written labelledtree to file\n");
 	
 	if(!labelonly)
 		{
@@ -15731,7 +15896,7 @@ void nj(void)
 					missing_method = 0;
 				else
 					{
-					printf("Error: '%s' is an invalid method to be assigned to missing\n", parsed_command[i+1]);
+					printf2("Error: '%s' is an invalid method to be assigned to missing\n", parsed_command[i+1]);
 					missing_method = 1;
 					error = TRUE;
 					}
@@ -15746,7 +15911,7 @@ void nj(void)
 		{
 		if((outfile = fopen(useroutfile, "w")) == NULL)
 			{
-			printf("Error opening file named %s\n", useroutfile);
+			printf2("Error opening file named %s\n", useroutfile);
 			error = TRUE;
 			}
 		}
@@ -15756,12 +15921,12 @@ void nj(void)
 		fakefilename = malloc(100*sizeof(char));
 		fakefilename[0] = '\0';
 		tree = malloc(TREE_LENGTH*sizeof(char));
-		printf("\n\nNeighbor-joining settings:\n\tDistance matrix generation by average consensus method\n\tEstimation of missing data using ");
+		printf2("\n\nNeighbor-joining settings:\n\tDistance matrix generation by average consensus method\n\tEstimation of missing data using ");
 		if(missing_method == 1)
-			printf("4 point condition distances\n");
+			printf2("4 point condition distances\n");
 		if(missing_method == 0)
-			printf("ultrametric distances\n");
-		printf("\tresulting tree saved to file %s\n\n\n", useroutfile);
+			printf2("ultrametric distances\n");
+		printf2("\tresulting tree saved to file %s\n\n\n", useroutfile);
 		
 		average_consensus(0, missing_method, fakefilename, NULL);
 		neighbor_joining(TRUE, tree, TRUE);
@@ -15989,7 +16154,7 @@ void get_taxa_details(struct taxon *position)
 			}
 		else
 			{
-			printf("Taxon %d Fullname %s\n", position->name, position->fullname);
+			printf2("Taxon %d Fullname %s\n", position->name, position->fullname);
 			}
 		position = position->next_sibling;
 		}	
@@ -16141,7 +16306,7 @@ void isittagged(struct taxon * position)
 	{
 	while(position != NULL)
 		{
-		if(position->tag2 == TRUE) printf("found\n");
+		if(position->tag2 == TRUE) printf2("found\n");
 		if(position->daughter != NULL)
 			{
 			isittagged(position->daughter);
@@ -16242,11 +16407,11 @@ void printnamesandtags(struct taxon *position)
 		{
 		if(position->daughter != NULL) 
 			{
-			printf(" ->%d", position->tag);
+			printf2(" ->%d", position->tag);
 			printnamesandtags(position->daughter);
-			printf(":");
+			printf2(":");
 			}
-		else printf(" %d", position->name);
+		else printf2(" %d", position->name);
 		position=position->next_sibling;
 		}
 	}
@@ -16734,12 +16899,12 @@ void label_gene_tree(struct taxon * gene_position, struct taxon * species_top, i
 	{
 	struct taxon * position = gene_position, *tmp = NULL;
 	int i =0, j=0, latest = -1;
-/*	printf("in Label_gene_tree\n");*/
+/*	printf2("in Label_gene_tree\n");*/
 	while(position != NULL)
 		{
 		if(position->daughter != NULL) 
 			{
-	/*		printf("daughter\n"); */
+	/*		printf2("daughter\n"); */
 			label_gene_tree(position->daughter, species_top, presence, xnum);
 			for(i=0; i<2*number_of_taxa; i++) presence[i] = FALSE;
 			tmp = position->daughter;
@@ -17037,7 +17202,7 @@ void find(struct taxon * position)
 		{
 		if(position->daughter != NULL) find(position->daughter);
 		if(position->tag2 == TRUE)
-			printf("!%d\n", position->tag);
+			printf2("!%d\n", position->tag);
 		position = position->next_sibling;
 		}
 	}
@@ -17204,7 +17369,7 @@ void mapunknowns()
 		k=0;
 		while(presence_of_taxa[0][k] >0 || presence_of_taxa[l][k] == FALSE) k++;  /* fundamental [0] is the species tree, so whatever is not in there is an unknown */
 		/* k is now the number of the unkown taxa */
-		printf("unknown to be mapped: %s\n", taxa_names[k]);
+		printf2("unknown to be mapped: %s\n", taxa_names[k]);
 		position = get_taxon(gene_tree, k);
 
 		/** this is an unknown. we need to remove it, but mark its neighbors */
@@ -17244,7 +17409,7 @@ void mapunknowns()
 			reroot_tree(position);
 			gene_tree = tree_top;
 			tree_top = NULL;
-			printf("a==\n");
+			printf2("a==\n");
 			total = tree_map(gene_tree, species_tree,0);
 			
 			
@@ -17273,7 +17438,7 @@ void mapunknowns()
 			number_tree(gene_tree, 0);
 			}
 			
-		printf("best reconstruction with a score of %f\n", best_total);
+		printf2("best reconstruction with a score of %f\n", best_total);
 		tree_top = best_mapping;
 		tree_coordinates(temptree, TRUE, FALSE, FALSE, -1);
 		
@@ -17415,7 +17580,7 @@ float get_recon_score(char *giventree, int numspectries, int numgenetries)
 					strcpy(temptree1, temptree);
 
 					if(presence_of_trichotomies(gene_tree)) gene_tree = do_resolve_tricotomies(gene_tree, species_tree, basescore);	
-				/*	else printf("no resolving needed\n"); */
+				/*	else printf2("no resolving needed\n"); */
 
 
 					duplicate_tree(gene_tree, NULL);
@@ -17639,20 +17804,20 @@ struct taxon * do_resolve_tricotomies(struct taxon * gene_tree, struct taxon * s
 /*	for(i=0; i<2*number_of_taxa; i++)	
 		{
 		if(i<number_of_taxa)
-			printf("\t%s", taxa_names[i]);
+			printf2("\t%s", taxa_names[i]);
 		else
-			printf("\t%d", i);
+			printf2("\t%d", i);
 		}
-	printf("\n");
+	printf2("\n");
 	for(i=0; i<2*number_of_taxa; i++)	
 		{
 		if(i<number_of_taxa)
-			printf("%s\t", taxa_names[i]);
+			printf2("%s\t", taxa_names[i]);
 		else
-			printf("%d\t", i);
+			printf2("%d\t", i);
 		for(j=0; j<2*number_of_taxa; j++)
-			printf("%d\t", scores[i][j]);
-		printf("\n");
+			printf2("%d\t", scores[i][j]);
+		printf2("\n");
 		}
 */
 	/*resolve_tricotomies(gene_tree, species_tree);*/
@@ -17811,7 +17976,7 @@ void reconstruct(int print_settings)
 			dup_weight = tofloat(parsed_command[i+1]);
 			if(dup_weight < 0)
 				{
-				printf("Error: '%s' is an invalid value for dups\n", parsed_command[i+1]);
+				printf2("Error: '%s' is an invalid value for dups\n", parsed_command[i+1]);
 				error = TRUE;
 				}
 			}
@@ -17820,14 +17985,14 @@ void reconstruct(int print_settings)
 			loss_weight = tofloat(parsed_command[i+1]);
 			if(loss_weight < 0)
 				{
-				printf("Error: '%s' is an invalid value for losses\n", parsed_command[i+1]);
+				printf2("Error: '%s' is an invalid value for losses\n", parsed_command[i+1]);
 				error = TRUE;
 				}
 			}
 		}
 	if(!error)
 		{
-		if(print_settings)printf("\nReconstruction of Most likely Duplications and Losses\n\tDuplication weight = %f\n\tLosses weight = %f\n\nTree name:\tReconstruction score\n", dup_weight, loss_weight);
+		if(print_settings)printf2("\nReconstruction of Most likely Duplications and Losses\n\tDuplication weight = %f\n\tLosses weight = %f\n\nTree name:\tReconstruction score\n", dup_weight, loss_weight);
 		/**** BUILD THE SPECIES TREE *****/
 		strcpy(temptree, fundamentals[0]);
 		returntree(temptree);
@@ -17843,7 +18008,7 @@ void reconstruct(int print_settings)
 		species_tree->parent = temp_top;
 		species_tree = temp_top;
 		temp_top = NULL;
-		printf("1\n");
+		printf2("1\n");
 		number_tree1(species_tree, number_of_taxa);
 		num_species_internal = count_internal_branches(species_tree, 0);
 		if(printfiles)
@@ -17955,9 +18120,9 @@ void reconstruct(int print_settings)
 				gene_tree = NULL;
 				}
 			if(strcmp(tree_names[l], "") == 0)
-				printf("Tree number: %d\t%f\n", l, best_total);
+				printf2("Tree number: %d\t%f\n", l, best_total);
 			else
-				printf("%s\t%f\n", tree_names[l], best_total);
+				printf2("%s\t%f\n", tree_names[l], best_total);
 			tree_top = best_mapping;
 			if(dorecon == TRUE)
 				{
@@ -18168,7 +18333,7 @@ void hgt_reconstruction()
 		
 		}
 	
-	printf("Calculating best reconstruction of Duplications, losses and Horizontal gene transfers (HGT)\n\nDuplication weight set to %f\nLoss weight set to %f\nHGT weight set to %f\n\n", dup_weight, loss_weight, hgt_weight);
+	printf2("Calculating best reconstruction of Duplications, losses and Horizontal gene transfers (HGT)\n\nDuplication weight set to %f\nLoss weight set to %f\nHGT weight set to %f\n\n", dup_weight, loss_weight, hgt_weight);
 	
 	tree_top = NULL;
 	
@@ -18223,7 +18388,7 @@ void hgt_reconstruction()
 	species_tree->parent = temp_top;
 	species_tree = temp_top;
 	temp_top = NULL;
-			printf("2\n");
+			printf2("2\n");
 
 	xnum = number_tree1(species_tree, number_of_taxa); /* label the internal and external branches of the species tree */
 	assign_ances_desc(species_tree, species_allowed, previous);
@@ -18304,7 +18469,7 @@ void hgt_reconstruction()
 		
 			copy = tree_top;
 			tree_top = NULL;
-			printf("e\n");
+			printf2("e\n");
 			total = tree_map(copy, species_tree,0);
 			if(total < best_total || best_total == -1) best_total = total;
 			dismantle_tree(copy);
@@ -18324,7 +18489,7 @@ void hgt_reconstruction()
 		numparts = 1;
 		for(k=0; k<numparts; k++)
 			{
-			printf("ON part %d out of %d parts\n", k, numparts);
+			printf2("ON part %d out of %d parts\n", k, numparts);
 			tree_top = parts[k];
 			compress_tree1(parts[k]);
 			parts[k] = tree_top;
@@ -18413,7 +18578,7 @@ void hgt_reconstruction()
 								posit = NULL;
 								} 
 							copy = tree_top;  
-							printf("f\n");
+							printf2("f\n");
 							HGT1 = tree_map(copy, species_tree,0); /* HGT1 no has the score for the tree "copy" */
 							hgt_receipient1 = copy->tag;  /* if this is the HGT part, then this is the hypothesised node on the species tree that received the HGT */
 
@@ -18426,7 +18591,7 @@ void hgt_reconstruction()
 						tree_top = NULL;
 						duplicate_tree(copy, NULL);
 						copy1 = tree_top;
-						printf("g\n");
+						printf2("g\n");
 						best_total1 = tree_map(copy1, species_tree,0);
 						find_tagged(copy1, presence1);
 						best_mapping1 = copy1; /* this will be used later for checking HGT compatibilities (( this version is only used if k != 0 ))*/
@@ -18435,7 +18600,7 @@ void hgt_reconstruction()
 						tree_top = NULL;
 						duplicate_tree(test_part, NULL);
 						copy1 = tree_top;
-						printf("h\n");
+						printf2("h\n");
 						HGT2 = tree_map(copy1, species_tree,0); /* HGT2 no has the score for the tree "test_part" */
 						hgt_receipient2 = copy1->tag; /* if this is the HGT part, then this is the hypothesised node on the species tree that received the HGT */
 						/*find_tagged(copy1, presence2); This is commented out because if k != 0 then test_part cannot be the donor */
@@ -18490,7 +18655,7 @@ void hgt_reconstruction()
 										copy1 = tree_top;
 										tree_top = NULL;
 										
-										printf("I\n");
+										printf2("I\n");
 										total = tree_map(copy1, species_tree,0);
 										if(total < best_total || best_total == -1)
 											{
@@ -18523,7 +18688,7 @@ void hgt_reconstruction()
 									}
 								else
 									{
-									printf("j\n");
+									printf2("j\n");
 									best_total = tree_map(copy1, species_tree,0);
 									best_mapping = copy1;
 									copy1 = NULL;
@@ -18970,7 +19135,7 @@ void hgt_reconstruction()
 			if(found_better == TRUE) /* if we have found a better reconstruction that includes a HGT for this part of the tree */
 				{
 				/* dismantle the tree at parts[k] */
-				printf("HGT%d\n", numparts);
+				printf2("HGT%d\n", numparts);
 				overall_receptor[place_marker] = receptor;
 				overall_placements[k] = donor_score;
 				overall_placements[place_marker] = HGT_score;
@@ -18980,11 +19145,11 @@ void hgt_reconstruction()
 				best_donor = NULL;
 				strcpy(temptree, "");
 				print_tree(parts[k], temptree);
-				printf("donor:\n%s\n", temptree);
+				printf2("donor:\n%s\n", temptree);
 				parts[place_marker] = best_HGT;
 				strcpy(temptree, "");
 				print_tree(parts[place_marker], temptree);
-				printf("hgt:\n%s\n", temptree);
+				printf2("hgt:\n%s\n", temptree);
 
 				best_HGT = NULL;
 				assign_hgtdonors(parts[k], num_gene_nodes, place_marker);
@@ -18995,20 +19160,20 @@ void hgt_reconstruction()
 				}
 			
 			}
-		printf("\n\nprinting results\n");
+		printf2("\n\nprinting results\n");
 			
 		/**** print out the results */
 		i=0;
 		while(parts[i] != NULL && i < num_gene_nodes)
 			{
-			printf("part %d\nScore = %f\nReceptor Node:%d\nPossible Donors: ",i,overall_placements[i], overall_receptor[i] );
-			for(j=0; j<2*number_of_taxa; j++) printf("%d,", overall_presence[i][j]);
-			printf("\n");
+			printf2("part %d\nScore = %f\nReceptor Node:%d\nPossible Donors: ",i,overall_placements[i], overall_receptor[i] );
+			for(j=0; j<2*number_of_taxa; j++) printf2("%d,", overall_presence[i][j]);
+			printf2("\n");
 			strcpy(temptree, "");
 			strcpy(temptree, "");
 			print_tree(parts[i], temptree);
-			printf("parts[%d] %s\n",i, temptree);
-			printf("\n");
+			printf2("parts[%d] %s\n",i, temptree);
+			printf2("\n");
 			/*print_tree(parts[i], temptree);
 			tree_coordinates(temptree, TRUE, FALSE, FALSE);
 			*/
@@ -19205,11 +19370,11 @@ void random_prune(char *fund_tree)
 		strcpy(prunecommand, "showtrees savetrees=yes display=no filename=prunedtree.ph");
 		num_commands = parse_command(prunecommand);
 		showtrees();
-		printf("\n\tSummary of pruned taxa writtin to file prunedtaxa.txt\n");
+		printf2("\n\tSummary of pruned taxa writtin to file prunedtaxa.txt\n");
 		}
 	else
 		{
-		printf("0 clades met the criteria specified\n");
+		printf2("0 clades met the criteria specified\n");
 		}
 	
 	fclose(rp_outfile);
@@ -19505,18 +19670,18 @@ void check_treeisok(struct taxon *position)
 	{
 	struct taxon *start = position;
 	
-	if(position->parent != NULL) printf("^^ position->parent %d\n", position->parent->tag);
+	if(position->parent != NULL) printf2("^^ position->parent %d\n", position->parent->tag);
 	while(position != NULL)
 		{
-		if(position->prev_sibling != NULL) printf("[prev %d\t", position->prev_sibling->tag);
-		else printf("[no prev\t");
-		if(position->parent != NULL) printf("^^ parent = %d ^^\t ", position->parent->tag);
+		if(position->prev_sibling != NULL) printf2("[prev %d\t", position->prev_sibling->tag);
+		else printf2("[no prev\t");
+		if(position->parent != NULL) printf2("^^ parent = %d ^^\t ", position->parent->tag);
 		if(position->daughter != NULL)
-			printf("pointer vv%d (daughter = %d)\t", position->tag, position->daughter->tag);
+			printf2("pointer vv%d (daughter = %d)\t", position->tag, position->daughter->tag);
 		else
-			printf("taxa %d\t", position->name);
-		if(position->next_sibling != NULL) printf("\tnext %d]\t", position->next_sibling->tag);
-		else printf("no next]\n");
+			printf2("taxa %d\t", position->name);
+		if(position->next_sibling != NULL) printf2("\tnext %d]\t", position->next_sibling->tag);
+		else printf2("no next]\n");
 		position = position->next_sibling;
 		}
 	position = start;
@@ -19562,9 +19727,9 @@ void prune_monophylies(void)
     pm_outfile = fopen(filename2, "w");
 
 
-    printf("input trees will be pruned where clans of single species exist\nOne remaining representative will be chosen by ");
-    if(select_longest == TRUE) printf ("the length of the sequence (in the name, after the species (delimited with a \"%c\")\n", delimiter_char);
-        else printf("random\n");
+    printf2("input trees will be pruned where clans of single species exist\nOne remaining representative will be chosen by ");
+    if(select_longest == TRUE) printf2 ("the length of the sequence (in the name, after the species (delimited with a \"%c\")\n", delimiter_char);
+        else printf2("random\n");
 
     for(j=0; j<Total_fund_trees; j++)
         {
@@ -19620,8 +19785,8 @@ void prune_monophylies(void)
         	}
         }
     
-    printf("\nPruning finished. %d pruned trees with 4 or more taxa written to the file \"%s\"\n", trees_included, filename2);
-    printf("%d pruned trees with less than 4 taxa were excluded\n",trees_excluded );
+    printf2("\nPruning finished. %d pruned trees with 4 or more taxa written to the file \"%s\"\n", trees_included, filename2);
+    printf2("%d pruned trees with less than 4 taxa were excluded\n",trees_excluded );
     free(tmp);
     free(pruned_tree);
     fclose(pm_outfile);
@@ -19815,56 +19980,56 @@ void tips(int num)
 	switch(num)
 		{
 		case(0):
-			printf("\n\t1. Clann can be used to transform nexus formatted tree files into newick formatted files.\n\tThis is done by executing the nexus file as normal and then using the command: \"showtrees savetrees=yes\"\n\tIt is also possible to set the name of the file to which the trees are saved, and to stop clann from displaying a graphical representation of each source tree while this is done\n\n");
+			printf2("\n\t1. Clann can be used to transform nexus formatted tree files into newick formatted files.\n\tThis is done by executing the nexus file as normal and then using the command: \"showtrees savetrees=yes\"\n\tIt is also possible to set the name of the file to which the trees are saved, and to stop clann from displaying a graphical representation of each source tree while this is done\n\n");
 			break;
 		
 		case(1):
-			printf("\n\t2. Clann can be told only to read the first few characters of each taxa name whenreading the source trees into memory\n\tThis is useful when it is necessary to have unique identifiers (for instance gene IDs) on the source trees\n\tThe option \'maxnamelen\' in the \"exe\" command sets this value\n\tIf the names are not fixed widths, the option \'maxnamelen=delimited\' tells Clann to look for the fist dot \".\" which will specifying the end of the taxon ID in the trees\n\n\t\tFor instance using \"exe maxnamelen=delimited\" on the following tree:\n\t\t(apple.00121,(orange.1435,lemon.3421),pear.1032);\n\t\tResults in clann ignoring the numbers after the dots in the taxa names\n");
+			printf2("\n\t2. Clann can be told only to read the first few characters of each taxa name whenreading the source trees into memory\n\tThis is useful when it is necessary to have unique identifiers (for instance gene IDs) on the source trees\n\tThe option \'maxnamelen\' in the \"exe\" command sets this value\n\tIf the names are not fixed widths, the option \'maxnamelen=delimited\' tells Clann to look for the fist dot \".\" which will specifying the end of the taxon ID in the trees\n\n\t\tFor instance using \"exe maxnamelen=delimited\" on the following tree:\n\t\t(apple.00121,(orange.1435,lemon.3421),pear.1032);\n\t\tResults in clann ignoring the numbers after the dots in the taxa names\n");
 			break;
 
 		case(2):
-			printf("\n\t3. The equals sign (=), hyphen (-) and space ( ) are special characters in Clann and by default cannot be used in filenames to be read by clann\n\tIf a filename contain some of these characters Clann can only read the name of the file properly by putting the name in inverted commas.\n\t\tFor example: exe \"my-file.txt\"\n");
+			printf2("\n\t3. The equals sign (=), hyphen (-) and space ( ) are special characters in Clann and by default cannot be used in filenames to be read by clann\n\tIf a filename contain some of these characters Clann can only read the name of the file properly by putting the name in inverted commas.\n\t\tFor example: exe \"my-file.txt\"\n");
 			break;
 
 		case(3):
-			printf("\n\t4. The first command that you should run if you don’t know what to do is \"help\".\n\tThis will display the list of the commands that are available.\n\tCalling any of the commands followed by a question mark (for instance \"hs ?\"), will display the options and defaults associated with that command\n");
+			printf2("\n\t4. The first command that you should run if you don’t know what to do is \"help\".\n\tThis will display the list of the commands that are available.\n\tCalling any of the commands followed by a question mark (for instance \"hs ?\"), will display the options and defaults associated with that command\n");
 			break;
 		
 		case(4):
-			printf("\n\t5. The command \"!\" runs a shell terminal on Unix and Mac operating systems allowing system commands can be run without having to quit Clann\n");
+			printf2("\n\t5. The command \"!\" runs a shell terminal on Unix and Mac operating systems allowing system commands can be run without having to quit Clann\n");
 			break;
 
 		case(5):
-			printf("\n\t6. Clann can assess supertrees created using other programs\n\tUsing the \"usertrees\" command, clann will read in the file specified and assess all the trees it contains\n\tThe best supertree found in the file is displayed along with its score\n");
+			printf2("\n\t6. Clann can assess supertrees created using other programs\n\tUsing the \"usertrees\" command, clann will read in the file specified and assess all the trees it contains\n\tThe best supertree found in the file is displayed along with its score\n");
 			break;
 
 		case(6):
-			printf("\n\t7. All commands in Clann should be written completely in lowercase, typing the command \"boot\" is not the same as \"Boot\" and only the first will be recognised as a valid command\n");
+			printf2("\n\t7. All commands in Clann should be written completely in lowercase, typing the command \"boot\" is not the same as \"Boot\" and only the first will be recognised as a valid command\n");
 			break;
 
 		case(7):
-			printf("\n\t8. Heuristic and exhaustive searches of supertree space can be interrupted using the key combination \"control-c\"\n\tThis dispays the score if the best tree found so far and give the user the option to stop the search now or continue.\n\tIf this is done during the random sampling phase of a heuristic search, it will allow the user to move straight to the heuristic search without completing the random sampling\n");
+			printf2("\n\t8. Heuristic and exhaustive searches of supertree space can be interrupted using the key combination \"control-c\"\n\tThis dispays the score if the best tree found so far and give the user the option to stop the search now or continue.\n\tIf this is done during the random sampling phase of a heuristic search, it will allow the user to move straight to the heuristic search without completing the random sampling\n");
 			break;
 
 		case(8):
-			printf("\n\t9. Users can assess different configurations of their data by excluding (or including) certain source trees from subsequent commands using the \"excludetrees\" and \"includetrees\" commands\n\tSource trees can be selected based on their name,the taxa they contain, their size (number of taxa they contain) or their score when compared to a supertree\n");
+			printf2("\n\t9. Users can assess different configurations of their data by excluding (or including) certain source trees from subsequent commands using the \"excludetrees\" and \"includetrees\" commands\n\tSource trees can be selected based on their name,the taxa they contain, their size (number of taxa they contain) or their score when compared to a supertree\n");
 			break;
 
 		case(9):
-			printf("\n\t10. Individual (or multiple) taxa can be pruned from the source trees using the command \"deletetaxa\"\n\tBranch lengths are adjusted to take the deletion of thetaxa into account\n\tIf the deletion of taxa from a source tree means that there are less than 4 taxa remaining, that source tree is removed from the analysis\n\tClann will display the names of the source trees removed if this occurs\n");
+			printf2("\n\t10. Individual (or multiple) taxa can be pruned from the source trees using the command \"deletetaxa\"\n\tBranch lengths are adjusted to take the deletion of thetaxa into account\n\tIf the deletion of taxa from a source tree means that there are less than 4 taxa remaining, that source tree is removed from the analysis\n\tClann will display the names of the source trees removed if this occurs\n");
 			break;
 
 		default:
-			printf("\n\t1. Clann can be used to transform nexus formatted tree files into newick formatted files.\n\tThis is done by executing the nexus file as normal and then using the command: \"showtrees savetrees=yes\"\n\tIt is also possible to set the name of the file to which the trees are saved, and to stop clann from displaying a graphical representation of each source tree while this is done\n\n");
-			printf("\n\t2. Clann can be told only to read the first few characters of each taxa name when reading the source trees into memory\n\tThis is useful when it is necessary to have unique identifiers (for instance gene IDs) on the source trees\n\tThe option \'maxnamelen\' in the \"exe\" command sets this value\n\tIf the names are not fixed widths, the option \'maxnamelen=delimited\' tells Clann to look for the fist dot \".\" which will specify the end of the taxon ID in the trees\n\n\t\tFor instance using \"exe maxnamelen=delimited\" on the following tree:\n\t\t(apple.00121,(orange.1435,lemon.3421),pear.1032);\n\t\tResults in clann ignoring the numbers after the dots in the taxa names\n");
-			printf("\n\t3. The equals sign (=), hyphen (-) and space ( ) are special characters in Clann and by default cannot be used in filenames to be read by clann\n\tIf a filename contain some of these characters Clann can only read the name of the file properly by putting the name in inverted commas.\n\t\tFor example: exe \"my-file.txt\"\n");
-			printf("\n\t4. The first command that you should run if you don’t know what to do is \"help\".\n\tThis will display the list of the commands that are available.\n\tCalling any of the commands followed by a question mark (for instance \"hs ?\"), will display the options and defaults associated with that command\n");
-			printf("\n\t5. The command \"!\" runs a shell terminal on Unix and Mac operating systems allowing system commands can be run without having to quit Clann\n");
-			printf("\n\t6. Clann can assess supertrees created using other programs\n\tUsing the \"usertrees\" command, clann will read in the file specified and assess all the trees it contains\n\tThe best supertree found in the file is displayed along with its score\n");
-			printf("\n\t7. All commands in Clann should be written completely in lowercase, typing the command \"boot\" is not the same as \"Boot\" and only the first will be recognised as a valid command\n");
-			printf("\n\t8. Heuristic and exhaustive searches of supertree space can be interrupted using the key combination \"control-c\"\n\tThis dispays the score if the best tree found so far and give the user the option to stop the search now or continue.\n\tIf this is done during the random sampling phase of a heuristic search, it will allow the user to move straight to the heuristic search without completing the random sampling\n");
-			printf("\n\t9. Users can assess different configurations of their data by deleting certain source trees using the \"deletetrees\" command\n\tSource trees can be selected based on their name,the taxa they contain, their size (number of taxa they contain) or their score when compared to a supertree\n");
-			printf("\n\t10. Individual (or multiple) taxa can be pruned from the source trees using the command \"deletetaxa\"\n\tBranch lengths are adjusted to take the deletion of thetaxa into account\n\tIf the deletion of taxa from a source tree means that there are less than 4 taxa remaining, that source tree is removed from the analysis\n\tClann will display the names of the source trees removed if this occurs\n");
+			printf2("\n\t1. Clann can be used to transform nexus formatted tree files into newick formatted files.\n\tThis is done by executing the nexus file as normal and then using the command: \"showtrees savetrees=yes\"\n\tIt is also possible to set the name of the file to which the trees are saved, and to stop clann from displaying a graphical representation of each source tree while this is done\n\n");
+			printf2("\n\t2. Clann can be told only to read the first few characters of each taxa name when reading the source trees into memory\n\tThis is useful when it is necessary to have unique identifiers (for instance gene IDs) on the source trees\n\tThe option \'maxnamelen\' in the \"exe\" command sets this value\n\tIf the names are not fixed widths, the option \'maxnamelen=delimited\' tells Clann to look for the fist dot \".\" which will specify the end of the taxon ID in the trees\n\n\t\tFor instance using \"exe maxnamelen=delimited\" on the following tree:\n\t\t(apple.00121,(orange.1435,lemon.3421),pear.1032);\n\t\tResults in clann ignoring the numbers after the dots in the taxa names\n");
+			printf2("\n\t3. The equals sign (=), hyphen (-) and space ( ) are special characters in Clann and by default cannot be used in filenames to be read by clann\n\tIf a filename contain some of these characters Clann can only read the name of the file properly by putting the name in inverted commas.\n\t\tFor example: exe \"my-file.txt\"\n");
+			printf2("\n\t4. The first command that you should run if you don’t know what to do is \"help\".\n\tThis will display the list of the commands that are available.\n\tCalling any of the commands followed by a question mark (for instance \"hs ?\"), will display the options and defaults associated with that command\n");
+			printf2("\n\t5. The command \"!\" runs a shell terminal on Unix and Mac operating systems allowing system commands can be run without having to quit Clann\n");
+			printf2("\n\t6. Clann can assess supertrees created using other programs\n\tUsing the \"usertrees\" command, clann will read in the file specified and assess all the trees it contains\n\tThe best supertree found in the file is displayed along with its score\n");
+			printf2("\n\t7. All commands in Clann should be written completely in lowercase, typing the command \"boot\" is not the same as \"Boot\" and only the first will be recognised as a valid command\n");
+			printf2("\n\t8. Heuristic and exhaustive searches of supertree space can be interrupted using the key combination \"control-c\"\n\tThis dispays the score if the best tree found so far and give the user the option to stop the search now or continue.\n\tIf this is done during the random sampling phase of a heuristic search, it will allow the user to move straight to the heuristic search without completing the random sampling\n");
+			printf2("\n\t9. Users can assess different configurations of their data by deleting certain source trees using the \"deletetrees\" command\n\tSource trees can be selected based on their name,the taxa they contain, their size (number of taxa they contain) or their score when compared to a supertree\n");
+			printf2("\n\t10. Individual (or multiple) taxa can be pruned from the source trees using the command \"deletetaxa\"\n\tBranch lengths are adjusted to take the deletion of thetaxa into account\n\tIf the deletion of taxa from a source tree means that there are less than 4 taxa remaining, that source tree is removed from the analysis\n\tClann will display the names of the source trees removed if this occurs\n");
 			break;
 
 		}
@@ -19872,4 +20037,122 @@ void tips(int num)
 	}
 
 
+/* This function controls the redirection of output from CLann to a log file (off by default), allow the use of the overwritten "printf" function (below) */
+void do_log(void)
+	{
+	int error = FALSE, newlogfile=FALSE, start=FALSE, stop=FALSE, i=0;
+	
+
+    for(i=0; i<num_commands; i++)
+        {
+
+        if(strcmp(parsed_command[i], "file") == 0)
+             {
+             newlogfile=TRUE;
+             if(logfile!= NULL)
+		     	{
+		     	printf2("closing log file %s \n", logfile_name);
+		     	fclose(logfile);
+		     	}
+		     
+	     	strcpy(logfile_name,parsed_command[i+1]);
+	     	
+	     	if((logfile = fopen(logfile_name, "w")) == NULL)
+				{
+				printf2("Error opening log file named %s\n", logfile_name);
+				error = TRUE;
+				}
+			else
+				printf2("opening log file %s \n", logfile_name);
+		     
+         	 }
+        }
+    for(i=0; i<num_commands; i++)
+        {
+        if(strcmp(parsed_command[i], "status") == 0)
+        	{	
+	        if(strcmp(parsed_command[i+1], "on") == 0)
+		        {
+		        if(print_log == FALSE)
+		        	{	
+			        if(logfile == NULL)
+			        	{
+			        	printf2("opening logfile %s\n", logfile_name);	
+			        	if((logfile = fopen(logfile_name, "w")) == NULL)
+			        		printf2("Error opening log file named %s\n", logfile_name);
+			        	}
+			        printf2("starting logging to logfile %s\n", logfile_name );
+			        print_log = TRUE;
+			        start=TRUE;
+			    	}
+			    else
+			    	{
+			    	printf2("Already logging output, no changes have been made\n");
+			    	}
+			    }
+			else
+				{
+			    if(strcmp(parsed_command[i+1], "off") == 0)
+			        {
+			        if(print_log == TRUE)
+			        	{	
+			        	printf2("stopping logging to file %s\n", logfile_name);
+			        	print_log = FALSE;
+			        	stop=TRUE;
+			        	}
+			        else
+			        	{	
+			        	printf2("Cannot stop logging as there is no logging currently happenning\n");
+			        	}
+			        }
+			    else
+			    	{
+			    	printf2("Error: \"%s\" is not a valid modifer for option \"status\", please choose \"on\" or \"off\"", parsed_command[i+1]);
+			    	}	
+			    }
+		    }
+
+	    }
+	if(newlogfile==FALSE && start==FALSE && stop == FALSE)
+		{
+		printf2("\nLog file status not changed (");
+		if(logfile!= NULL) 
+			{
+			printf2("log file \"%s\" is open ", logfile_name);
+			if(print_log == TRUE)
+				printf2("and logging is currently on)\n");
+			else
+				printf2("and logging is currently off)\n");
+
+			}
+		else printf2("log file not open)\n");
+		}	
+
+
+	}
+
+
+void printf2(char *format, ...)
+	{
+    va_list ap;
+    va_list ap2;
+
+    if(print_log == TRUE)
+    	{	
+	    va_start(ap, format);
+	    va_copy(ap2, ap);
+
+	    vfprintf(logfile, format, ap);
+	    va_end(ap);
+
+	    vprintf(format, ap2);
+	    va_end(ap2);
+		}
+	else
+		{
+		va_start(ap, format);
+		vprintf(format, ap);
+		va_end(ap);
+		}
+	}
 

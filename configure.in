@@ -2,7 +2,7 @@ dnl Process this file with autoconf to produce a configure script.
 
 AC_PREREQ(2.59)
 
-AC_INIT([clann], [4.2.0], [chris.creevey@gmail.com], [clann], [https://github.com/ChrisCreevey/clann])
+AC_INIT([clann], [4.2.1], [chris.creevey@gmail.com], [clann], [https://github.com/ChrisCreevey/clann])
 
 AM_INIT_AUTOMAKE([1.5 foreign])
 AM_CONFIG_HEADER(config.h)
