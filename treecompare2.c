@@ -275,7 +275,7 @@ int malloc_check =0, count_now = FALSE, another_check =0;
 int main(int argc, char *argv[])
     {
 	
-    int i = 0, j=0, k=0, l=0, m=0, error=FALSE, x, doexecute_command = FALSE, command_line = FALSE, tipnum=0;
+    int i = 0, j=0, k=0, l=0, m=0, error=FALSE, x, doexecute_command = FALSE, command_line = FALSE, tipnum=0, autocommands=FALSE;
     char c, s, *command = NULL, *prev_command = NULL, HOME[1000], PATH[1000], exefilename[1000], string[10000];
     time_t time1, time2;
     double diff=0;    
@@ -405,7 +405,11 @@ int main(int argc, char *argv[])
 								{
 								i=0;
 								while((s == ' ' || s == '\n' || s == '\r' || s == '\t' || s == ';') && !feof(commands_file)) s = getc(commands_file);
-								while(s != ';' && !feof(commands_file))
+								if(s == '#') /* skip over lines that start with a '#' -- this allows the user to add comments */
+									{
+									while(!feof(commands_file) && s != '\n' && s != '\r') s = getc(commands_file);
+									}	
+								while(s != ';' && s != '\n' && !feof(commands_file)) /* commands can finish with a ';' or a newline character */
 									{
 									string[i] = s;
 									i++;
@@ -416,6 +420,7 @@ int main(int argc, char *argv[])
 								strcpy(stored_commands[parts], string);
 								parts++;
 								}
+							autocommands=TRUE; /* this is used indicate that we need to print the commands both to screen and log, as otherwise they will not appear */
 							fclose(commands_file);
 			        		}
 			        	break;
@@ -427,7 +432,7 @@ int main(int argc, char *argv[])
 			      		printf("\n\tWhere [tree file] is an optional Nexus or Phylip formatted file of phylogenetic trees\n");
 			      		printf("\t-l turn on logging of screen output to file \"clann.log\"\n");
 			      		printf("\t-n turns off interactive mode - requires commands to be provided in a nexus \'clann block\' or with \'-c\'\n");
-			      		printf("\t-c <file name> specifies a file with commands to be executed (each seperated by \';\')\n");
+			      		printf("\t-c <file name> specifies a file with commands to be executed (one command per line)\n");
 			      		printf("\t-h prints this message\n\n");
 
 				        print_commands(0);
@@ -463,6 +468,12 @@ int main(int argc, char *argv[])
         
         if(num_commands > 0)
             {
+            
+            if(print_log && strcmp(command, "") != 0)
+            	{ 
+            	fprintf(logfile, "clann> %s\n", command);
+            	if(autocommands==TRUE) printf("clann> %s\n", command);
+            	}
             if(strcmp(parsed_command[0], "execute") == 0 || strcmp(parsed_command[0], "exe") == 0)
                 {
                 if(num_commands == 2 && parsed_command[1][0] == '?')
@@ -1036,7 +1047,7 @@ int main(int argc, char *argv[])
  	        fflush(stdout);
  	        command = xgets(command);
 		   #endif
-          	 if(print_log && strcmp(command, "") != 0) fprintf(logfile, "clann> %s\n", command);
+          	autocommands=FALSE; /* indicate that from this point on any commands have been entered by the user and have not come from a commands file */
            
             /* if the commmand doesn't end in a ";" then put one on */
             k=0;

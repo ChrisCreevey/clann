@@ -1,0 +1,23 @@
+# This is a commands file to accompany the file 'tutorial_trees.ph'
+# this demonstrate the use of a commands file in clann
+# To run this file call clann as follows:
+# 'clann -c commands.txt'
+#
+
+# open the input file
+exe tutorial_trees.ph
+
+# build a neighbor-joining tree
+nj;
+
+# delete the taxon 'horse'
+deletetaxa Horse
+
+# Carry out a consesus of all complete trees
+consensus method=minor filename=consensus.txt;
+
+# Use the showtrees command to save all pruned sources trees to a file
+showtrees savetrees=yes display=no filename=pruned_trees.txt;
+
+# Quit clann - not necessary if calling clann with the '-n' option 
+quit;
