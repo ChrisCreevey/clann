@@ -157,7 +157,7 @@ void input_fund_tree(char *intree, int fundnum);
 int nexusparser(FILE *nexusfile);
 void do_consensus(void);
 int comment(FILE *file);
-void showtrees(void);
+void showtrees(int savet);
 void exclude(int do_all);
 void returntree(char *temptree);
 void returntree_fullnames(char *temptree, int treenum);
@@ -729,7 +729,7 @@ int main(int argc, char *argv[])
 																		else
 																			{
 																			if(number_of_taxa > 0)
-																					showtrees();
+																					showtrees(FALSE);
 																			else
 																				printf2("Error: You need to load source trees before using this command\n");
 																			}
@@ -966,7 +966,24 @@ int main(int argc, char *argv[])
 		                                                                                                                            	}
 		                                                                                                                        	}
 		                                                                                                                        else
-	                                                                                                                        		printf2("Error: command not known.\n\tType help at the prompt to get a list of available commands.\n");
+		                                                                                                                            {
+	                                                                                                                        		if(strcmp(parsed_command[0], "savetrees") == 0)
+	                                                                                                                            		{                                     
+	                                                                                                                            		if(num_commands == 2 && parsed_command[1][0] == '?')
+		                                                                                                                                	print_commands(30);
+		                                                                                                                            	else
+		                                                                                                                            		{
+		                                                                                                                            		if(number_of_taxa > 0)
+																																				showtrees(TRUE);
+																																			else
+																																				{
+																																				printf2("Error: You need to load source trees before using this command\n");
+																																				}
+		                                                                                                                            		}
+		                                                                                                                        		}
+		                                                                                                                        	else
+	                                                                                                                        			printf2("Error: command not known.\n\tType help at the prompt to get a list of available commands.\n");
+	                                                                                                                        		}
 	                                                                                                                        	}
 	                                                                                                                        }  
                                                                                                                         }
@@ -1159,7 +1176,7 @@ void print_commands(int num)
         {
         printf2("\nAvailable Commands:\n\n");
         printf2("\nThe following commands are always available:\n\n");
-        printf2("\texecute\t\t- Read in a file of source trees\n");
+        printf2("\texecute (exe)\t- Read in a file of source trees\n");
         printf2("\thelp\t\t- Display this message\n");
         printf2("\tquit\t\t- Quit Clann\n");
         printf2("\tset\t\t- Set global parameters such as optimality criterion for carrying reconstructing a supertree\n");
@@ -1178,8 +1195,9 @@ void print_commands(int num)
         printf2("\tconsensus\t- Calculate a consensus tree of all trees containing all taxa\n");
 
         printf2("\nSource tree selection and modification:\n");
+        printf2("\tsavetrees\t- Save source trees to file in phylip format (subsets of trees can be chosen based on a number of criteria)\n");
         printf2("\tshowtrees\t- Visualise selected source trees in ASCII format (also can save selected trees to file)\n");
-       printf2("\tdeletetrees\t- Specify source trees to delete from memory (based on a variety of criteria)\n"); 
+       	printf2("\tdeletetrees\t- Specify source trees to delete from memory (based on a variety of criteria)\n"); 
       /*  printf2("\tincludetrees\t- Specify trees for inclusion in the analysis (based on a variety of criteria)\n"); */ /* we are excluding the include command because it is problematic*/
         printf2("\tdeletetaxa\t- Specify taxa to delete from all source trees in memory (i.e. prune from the trees while preserving branch lengths)\n");
         printf2("\trandomisetrees\t- Randomises the source trees in memory, while preserving taxa composition in each tree\n");
@@ -1206,7 +1224,7 @@ void print_commands(int num)
 
     if(num == 1)
         {
-        printf2("\nexecute\t<filename>\n");
+        printf2("\nexecute (exe)\t<filename>\n");
         printf2("\nexe\t<filename>\n\n");
 		 printf2("\tOptions\t\tSettings\t\t\tCurrent\n");
         printf2("\t===========================================================\n");
@@ -1572,6 +1590,14 @@ void print_commands(int num)
         else printf2("off");
         printf2("\n\tfile\t\t<output file name>\t\t%s", logfile_name);
         }
+	 if(num == 30)
+		{
+		printf2("\nsavetrees\trange | size | namecontains | containstaxa | score \n\n");
+		printf2("\tOptions\t\tSettings\t\t\tCurrent\n");
+        printf2("\t===========================================================\n");
+		
+		printf2("\n\trange\t\t<integer value> - <integer value> \t*all\n\tsize\t\tequalto <integer value>\n\t\t\tlessthan <integer value>\n\t\t\tgreaterthan <integer value>\t\t*none\n\tnamecontians\t<character string>\t\t\t*none\n\tcontainstaxa\t<character string>\t\t\t*none\n\tscore\t\t<min score> - <max score>\t\t*none\n\tfilename\t<output file name>\t\t\t*savedtrees.txt\n");
+		}
 	
 	
 		
@@ -12563,7 +12589,7 @@ void consensus(int num_trees, char **trees, int num_reps, float percentage, FILE
 
 
 
-void showtrees(void)
+void showtrees(int savet)
 	{
 	int worst = -2, best = -2,savetrees = FALSE, found = TRUE, taxachosen = 0, counter = 0, mode[5] = {TRUE, FALSE, FALSE, FALSE, FALSE}, start = 0, end = Total_fund_trees, error = FALSE, i=0, j=0, k=0, l=0, num=0, equalto = -1, greaterthan =0, lessthan = 1000000000, taxa_count = 0;
 	char *temptree, string_num[10], namecontains[NAME_LENGTH], **containstaxa = NULL, savedfile[100], temptree1[TREE_LENGTH], tmp[TREE_LENGTH];
@@ -12583,7 +12609,15 @@ void showtrees(void)
 	tempsourcetreetag = malloc(Total_fund_trees*sizeof(int));
 	for(i=0; i<Total_fund_trees; i++) tempsourcetreetag[i] = sourcetreetag[i];
 	savedfile[0] = '\0';
-	strcpy(savedfile, "showtrees.txt");
+	if(savet == TRUE)
+		{
+		savetrees=TRUE;
+		display=FALSE;
+		strcpy(savedfile, "savedtrees.txt");
+		}
+	else
+		strcpy(savedfile, "showtrees.txt");
+
 	containstaxa = malloc(number_of_taxa*sizeof(char*));
 	for(i=0; i<number_of_taxa; i++)
 		{
@@ -12629,18 +12663,21 @@ void showtrees(void)
 					}
 				}
 			}
-		if(strcmp(parsed_command[i], "savetrees") == 0)
+		if(savet==FALSE) /* If this has been calledf  from the showtrees command */
 			{
-			if(strcmp(parsed_command[i+1], "yes") == 0)
-				savetrees = TRUE;
-			else
+			if(strcmp(parsed_command[i], "savetrees") == 0)
 				{
-				if(strcmp(parsed_command[i+1], "no") == 0)
-					savetrees = FALSE;
+				if(strcmp(parsed_command[i+1], "yes") == 0)
+					savetrees = TRUE;
 				else
 					{
-					printf2("Error: %s not a valid modifier of \"savetrees\"\n", parsed_command[i+1]);
-					error = TRUE;
+					if(strcmp(parsed_command[i+1], "no") == 0)
+						savetrees = FALSE;
+					else
+						{
+						printf2("Error: %s not a valid modifier of \"savetrees\"\n", parsed_command[i+1]);
+						error = TRUE;
+						}
 					}
 				}
 			}
@@ -12755,7 +12792,10 @@ void showtrees(void)
 		}
 	if(!error)
 		{
-		printf2("showtrees settings:\n\n");
+		if(savet == TRUE)
+			printf2("savetrees settings:\n\n");
+		else
+			printf2("showtrees settings:\n\n");
 		if(savetrees)
 			printf2("\tsaving selection of trees in phylip format to file: %s\n", savedfile);
 		
@@ -12944,8 +12984,10 @@ void showtrees(void)
 				counter++;
 				}
 			} */ /* Old save trees before names were delimited */
-		
-		printf2("\n%d source trees met with the criteria specified\n", counter);
+		if(savet == TRUE)
+			printf2("\n%d source trees met with the criteria specified and saved to file\n", counter);
+		else
+			printf2("\n%d source trees met with the criteria specified\n", counter);
 		}
 	if(savetrees) fclose(showfile);
 	free(temptree);
@@ -19380,7 +19422,7 @@ void random_prune(char *fund_tree)
 		exclude_taxa(FALSE);
 		strcpy(prunecommand, "showtrees savetrees=yes display=no filename=prunedtree.ph");
 		num_commands = parse_command(prunecommand);
-		showtrees();
+		showtrees(FALSE);
 		printf2("\n\tSummary of pruned taxa writtin to file prunedtaxa.txt\n");
 		}
 	else
