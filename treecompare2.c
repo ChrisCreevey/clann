@@ -1161,7 +1161,7 @@ void print_splash(void)
     printf2("\n\t*                  lab: http://www.creeveylab.org                   *");
     printf2("\n\t*                  email: %s                   *", PACKAGE_BUGREPORT);
     printf2("\n\t*                                                                   *");
-    printf2("\n\t*                 Copyright Chris Creevey 2003-2018                 *");
+    printf2("\n\t*                 Copyright Chris Creevey 2003-2020                 *");
     printf2("\n\t*                                                                   *");
     printf2("\n\t*          HINT: Type \"help\" to see all available commands          *");
     printf2("\n\t*********************************************************************\n\n");
