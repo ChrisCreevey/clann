@@ -256,7 +256,7 @@ void controlc4(int signal);
 void controlc5(int signal);
 
 /****************** Global variable definitions ****************/
-FILE * infile = NULL, *BR_file = NULL, *commands_file=NULL, *psfile = NULL, *logfile = NULL, *distributionreconfile = NULL, *onetoonefile = NULL, *strictonetoonefile = NULL;
+FILE * infile = NULL, *BR_file = NULL, *commands_file=NULL, *psfile = NULL, *logfile = NULL, *distributionreconfile = NULL, *onetoonefile = NULL, *strictonetoonefile = NULL, *tempoutfile = NULL;
 char **taxa_names = NULL, *commands_filename = NULL, ***fulltaxanames = NULL, **parsed_command = NULL, **fundamentals = NULL, **stored_funds = NULL, **retained_supers = NULL, **stored_commands = NULL, *tempsuper = NULL, **best_topology = NULL, **tree_names = NULL;
 int  *numtaxaintrees = NULL, fullnamesnum = 0, fullnamesassignments = 1, fundamental_assignments = 0, tree_length_assignments = 1, parsed_command_assignments = 1, name_assignments = 0, *taxa_incidence = NULL, number_of_taxa = 0, Total_fund_trees = 0, *same_tree = NULL, **Cooccurrance = NULL, NUMSWAPS = 0;
 int ***fund_scores = NULL, ***stored_fund_scores = NULL, **super_scores = NULL, *number_of_comparisons = NULL, *stored_num_comparisons = NULL, **presence_of_taxa = NULL, **stored_presence_of_taxa = NULL, *presenceof_SPRtaxa = NULL;
@@ -19752,12 +19752,13 @@ void check_treeisok(struct taxon *position)
 void prune_monophylies(void)
     {
     int i=0, j=0, num_nodes=0, trees_included=0, trees_excluded=0;
-    char *pruned_tree = NULL, *tmp = NULL, filename2[1000], temptree[TREE_LENGTH];
+    char *pruned_tree = NULL, *tmp = NULL, filename2[10000], temptree[TREE_LENGTH], filename3[10000];
     FILE *pm_outfile = NULL; 
     select_longest=FALSE;
-    filename2[0]='\0';
+    filename2[0]= filename3[0] = '\0';
     temptree[0] = '\0';
     strcpy(filename2, "prunedtrees.txt");
+    strcpy(filename3, "prunedtrees_info.txt");
     
     tmp = malloc(TREE_LENGTH*sizeof(char));
     tmp[0] = '\0';
@@ -19773,11 +19774,14 @@ void prune_monophylies(void)
         if(strcmp(parsed_command[i], "filename") == 0)
             {       
             strcpy(filename2, parsed_command[i+1]); 
+            strcpy(filename3, filename2);
+            strcat(filename3, "_info.txt");
             }
 
         }
 
     pm_outfile = fopen(filename2, "w");
+    tempoutfile = fopen(filename3, "w");
 
 
     printf2("input trees will be pruned where clans of single species exist\nOne remaining representative will be chosen by ");
@@ -19807,7 +19811,7 @@ void prune_monophylies(void)
         tree_top = temp_top;
         temp_top = NULL;
         reset_tree(tree_top);
-
+        fprintf(tempoutfile, "\nTree # %d [ %s ]\n\t", j, tree_names[j]);
         identify_species_specific_clades(tree_top);  /* Call recursive function to travel down the tree looking for species-specific clades */
         shrink_tree(tree_top);    /* Shrink the pruned tree by switching off any internal nodes that are not needed */
         pruned_tree[0] = '\0'; /* initialise the string */
@@ -19839,10 +19843,13 @@ void prune_monophylies(void)
         }
     
     printf2("\nPruning finished. %d pruned trees with 4 or more taxa written to the file \"%s\"\n", trees_included, filename2);
+   printf2("Information on pruned and retained taxa in each tree written to the file \"%s\"\n",  filename3); 
     printf2("%d pruned trees with less than 4 taxa were excluded\n",trees_excluded );
     free(tmp);
     free(pruned_tree);
     fclose(pm_outfile);
+    fprintf(tempoutfile, "\n");
+    fclose(tempoutfile);
     }
 
 
@@ -19876,6 +19883,7 @@ void identify_species_specific_clades(struct taxon * position)
     else /* if this was a species-specific clade, then untag everything, except for the longest */
         {
         untag_nodes_below(position);
+        fprintf (tempoutfile, "\n\t");
         }
 
     /* 2) Identify if all preceeding nodes are from the same species. */
@@ -19892,6 +19900,7 @@ void identify_species_specific_clades(struct taxon * position)
         if(count == 1)
             {
             untag_nodes_above(position->parent);
+            fprintf (tempoutfile, "\n\t");
             }
 
     free(foundtaxa);
@@ -20005,7 +20014,15 @@ void untag_nodes_below(struct  taxon * position)
     
     while(position != NULL)
         {
-        if(position != longestseq) position->tag = FALSE;
+        if(position != longestseq) 
+        	{
+        		position->tag = FALSE;
+        		if(position->daughter == NULL) fprintf(tempoutfile, "Removed:%s\t", position->fullname);
+        	}
+        else
+        	{	
+        		if(position->daughter == NULL) fprintf(tempoutfile, "KEPT:%s\t", position->fullname);
+        	}
         if(position->daughter != NULL) untag_nodes_below(position->daughter);
         position = position->next_sibling;
         }
@@ -20019,7 +20036,15 @@ void untag_nodes_above(struct  taxon * position)
 
     while(position != NULL)
         {
-        if(position != longestseq) position->tag = FALSE;
+        if(position != longestseq) 
+        	{
+        		position->tag = FALSE;
+        		if(position->daughter == NULL) fprintf(tempoutfile, "Removed:%s\t", position->fullname);
+        	}
+        else
+        	{	
+        		if(position->daughter == NULL) fprintf(tempoutfile, "KEPT:%s\t", position->fullname);
+        	}
         if(position->daughter != NULL && position != origin) untag_nodes_below(position->daughter);
         if(position->parent != NULL) untag_nodes_above(position->parent);
         position = position->next_sibling;

@@ -180,3 +180,5 @@ Makefile.am~
 v4.2.0_origprintf_treecompare2.c
 
 clann.log
+prunedtrees_info.txt
+all_raxml_bestTrees.txt
