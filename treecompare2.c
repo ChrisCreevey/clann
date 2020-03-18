@@ -53,7 +53,7 @@
 struct taxon {
 	
 	int name;					/* This holds number which refers to the name of the taxon at this node if it doesn't point to a daughter node */
-	char *fullname;				/* This holds the position of the original name in the array fulltaxanames as it was given in the tree file, this allows us to record if there was parts of the name excluded earlier */
+	char *fullname;				/* This holds the original name as it was given in the tree file, this allows us to record if there was parts of the name excluded earlier */
 	float score;
 	struct taxon *daughter;   	/* This points to a daughter node, but is only set if name is null */
 	struct taxon *parent;		/* This points to the parent node, however its only set on the first sibling at each level */
@@ -177,6 +177,7 @@ void clean_pointer_taxa(struct taxon *position);
 struct taxon * get_branch(struct taxon *position, int name);
 float tree_map(struct taxon * gene_top, struct taxon * species_top, int print);
 int number_tree1(struct taxon * position, int num);
+int number_tree2(struct taxon * position, int num);
 void label_gene_tree(struct taxon * gene_position, struct taxon * species_top, int *presence, int xnum);
 int get_min_node(struct taxon * position, int *presence, int num);
 void subtree_id(struct taxon * position, int *tmp);
@@ -233,12 +234,13 @@ void calculate_withins(struct taxon *position, int **within, int *presence);
 long extract_length(char * fullname);
 long list_taxa_in_clade(struct taxon * position, int * foundtaxa, struct taxon * longest, long seqlength); /* descend through the tree finding what taxa are there (and putting result into an array) and also identifying the longest sequence (the first number in the <<full>> name of the sequence, after the first "." and before the first "|") */
 long list_taxa_above(struct taxon * position, int * foundtaxa, struct taxon * longest, long seqlength);
-void identify_species_specific_clades(struct taxon * position);
+int identify_species_specific_clades(struct taxon * position, int numt, int *taxa_fate, int clannID);
 void prune_monophylies();
-void untag_nodes_below(struct  taxon * position);
-void untag_nodes_above(struct  taxon * position);
+void untag_nodes_below(struct  taxon * position, int * taxa_fate, int clannID);
+void untag_nodes_above(struct  taxon * position, int * taxa_fate, int clannID);
 void tips(int num);
 void get_taxa_details(struct taxon *position);
+void get_taxa_names(struct taxon *position, char **taxa_fate_names);
 int basic_tree_build (int c, char *treestring, struct taxon *parent, int fullnames);
 int sort_tree(struct taxon *position);
 int spr_new(struct taxon * master, int maxswaps, int numspectries, int numgenetries);
@@ -5033,7 +5035,7 @@ int shrink_tree (struct taxon * position)
 	{
 	int count = 0, tot = 0, i, j, k, l, havelabel = FALSE;
 	float one, two;
-	char tempstr[100] , tmplabel[100];
+	char tempstr[1000] , tmplabel[1000];
 	struct taxon *tmppos = NULL;
 	
 	tmplabel[0] = '\0';
@@ -16213,6 +16215,25 @@ void get_taxa_details(struct taxon *position)
 		}	
 	}
 
+void get_taxa_names(struct taxon *position, char **taxa_fate_names)
+	{
+	struct taxon *start = position;
+	
+	
+	while(position != NULL)
+		{
+		if(position->daughter != NULL)
+			{
+			get_taxa_names(position->daughter, taxa_fate_names);
+			}
+		else
+			{
+			strcpy(taxa_fate_names[position->tag2], position->fullname);
+			}
+		position = position->next_sibling;
+		}	
+	}
+
 
 struct taxon * get_taxon(struct taxon *position, int name)
 	{
@@ -16838,6 +16859,31 @@ int number_tree1(struct taxon * position, int num)
 		else
 			{
 			position->tag = position->name;
+			}
+		position = position->next_sibling;
+		}
+	return(num);
+	}
+
+int number_tree2(struct taxon * position, int num)
+	{
+	struct taxon * start = position;
+	int i =0;
+	
+	
+	while(position != NULL)
+		{
+		if(position->daughter != NULL)
+			num = number_tree2(position->daughter, num);
+		position = position->next_sibling;
+		}
+	position = start;
+	while(position != NULL)
+		{
+		if(position->daughter == NULL)
+			{
+			position->tag2 = num;
+			num++;
 			}
 		position = position->next_sibling;
 		}
@@ -19751,8 +19797,8 @@ void check_treeisok(struct taxon *position)
 
 void prune_monophylies(void)
     {
-    int i=0, j=0, num_nodes=0, trees_included=0, trees_excluded=0;
-    char *pruned_tree = NULL, *tmp = NULL, filename2[10000], temptree[TREE_LENGTH], filename3[10000];
+    int i=0, j=0, k=0, l=0, num_nodes=0, trees_included=0, trees_excluded=0, numt=0, *taxa_fate = NULL, clannID =0, report=FALSE;
+    char *pruned_tree = NULL, *tmp = NULL, filename2[10000], temptree[TREE_LENGTH], filename3[10000], **taxa_fate_names = NULL;
     FILE *pm_outfile = NULL; 
     select_longest=FALSE;
     filename2[0]= filename3[0] = '\0';
@@ -19811,8 +19857,61 @@ void prune_monophylies(void)
         tree_top = temp_top;
         temp_top = NULL;
         reset_tree(tree_top);
-        fprintf(tempoutfile, "\nTree # %d [ %s ]\n\t", j, tree_names[j]);
-        identify_species_specific_clades(tree_top);  /* Call recursive function to travel down the tree looking for species-specific clades */
+      /*  fprintf(tempoutfile, "\nTree # %d [ %s ]\n\t", j, tree_names[j]); */
+
+        /* Number all taxa in the tree for tracing which taxa were deleted or retained and record the number of taxa in the variable numt */
+        numt=0; clannID=0;
+        numt = number_tree2(tree_top, numt);
+        /* alloc an arrary to hold all the names of hte taxa in the order they are found on the tree */
+        taxa_fate_names = malloc(numt*sizeof(char*));
+        for(k=0; k<numt; k++)
+        	{
+        	taxa_fate_names[k] = malloc(NAME_LENGTH*sizeof(char));
+        	taxa_fate_names[k][0] = '\0';
+        	}
+        get_taxa_names(tree_top, taxa_fate_names); /* copy names into the array taxa_fate_names */
+
+        /* Define an array to record the species that are pruned (and kept) in this tree */
+        taxa_fate = malloc(numt*sizeof(int));
+        for(k=0; k<numt; k++)
+    		{
+    		taxa_fate[k]=0;
+    		}
+
+        clannID = identify_species_specific_clades(tree_top, numt, taxa_fate, clannID);  /* Call recursive function to travel down the tree looking for species-specific clades */
+    	fprintf(tempoutfile, "\nTree # %d [ %s ]\n\t", j, tree_names[j]);
+    	/* Print out the list of deleted and pruned taxa from the taxa_fate array */	
+    	for(k=1; k<=numt; k++)
+    		{
+    		report=FALSE;
+    		/* find out if there are any taxa in clann k for reporting */
+    		for(l=0; l<numt; l++)
+    			{	
+    			if(abs(taxa_fate[l]) == k)
+    				{
+    				report=TRUE;
+    				l=numt;
+    				} 
+    			}
+    		if(report == TRUE)
+    			{	
+    			for(l=0; l<numt; l++)
+    				{	
+    				if(taxa_fate[l] == k*-1)
+    					fprintf(tempoutfile, "Removed:%s\t", taxa_fate_names[l]);
+    				}
+    			for(l=0; l<numt; l++)
+    				{	
+    				if(taxa_fate[l] == k)
+    					fprintf(tempoutfile, "KEPT:%s\n\t", taxa_fate_names[l]);
+    				}
+    			}
+    		}
+
+    	free(taxa_fate);
+	    for(k=0; k<numt; k++) free(taxa_fate_names[k]);
+	    free(taxa_fate_names);
+
         shrink_tree(tree_top);    /* Shrink the pruned tree by switching off any internal nodes that are not needed */
         pruned_tree[0] = '\0'; /* initialise the string */
         if(print_pruned_tree(tree_top, 0, pruned_tree, TRUE, j) >1)
@@ -19853,14 +19952,18 @@ void prune_monophylies(void)
     }
 
 
-void identify_species_specific_clades(struct taxon * position)
+int identify_species_specific_clades(struct taxon * position, int numt, int * taxa_fate, int clannID)
     {
-    float total = 0;
-    int count = 0, taxa_count = 0, all_same_taxon = -1, *foundtaxa = NULL, i;
+    float total = 0, keepnew=FALSE;
+    int k=0, count = 0, taxa_count = 0, all_same_taxon = -1, *foundtaxa = NULL, i, *tmp_taxa_fate = NULL;
     long seqlength = 0;
     struct taxon * starting = position, *longest=NULL;
     foundtaxa = malloc(number_of_taxa*sizeof(int));
 
+    /* Define an array to record the species that are pruned (and kept) in this tree */
+    tmp_taxa_fate = malloc(numt*sizeof(int));
+    for(k=0; k<numt; k++) tmp_taxa_fate[k]=0;
+    
     /* 1) identify if all descendant nodes are from the same species */
     
     for(i=0; i<number_of_taxa; i++) foundtaxa[i] = FALSE;  /* array to keep track of taxa to delete */
@@ -19876,14 +19979,35 @@ void identify_species_specific_clades(struct taxon * position)
         while(position != NULL)
             {
             if(position->daughter != NULL)
-                identify_species_specific_clades(position->daughter); /* if this node has a daughter, then call new instance of the function on the daughter */
+                clannID = identify_species_specific_clades(position->daughter, numt, taxa_fate, clannID); /* if this node has a daughter, then call new instance of the function on the daughter */
             position = position->next_sibling;
             }
         }
     else /* if this was a species-specific clade, then untag everything, except for the longest */
         {
-        untag_nodes_below(position);
-        fprintf (tempoutfile, "\n\t");
+        clannID+=1; /* increment the clann ID */
+        for(k=0; k<numt; k++) tmp_taxa_fate[k]=0;
+        untag_nodes_below(position, tmp_taxa_fate, clannID);
+
+    	/* check through tmp_taxa_fate to see if it overlaps with any clann definitions already in taxa_fate */
+    	/* If there is overlap, it the new clann definition is a superset of the previous definition, then overwrite the previous definition in taxa_fate */
+    	/* Otherwise do nothing */
+    	keepnew=FALSE;
+    	for(k=0; k<numt; k++)
+    		{
+    		if(tmp_taxa_fate[k] != 0 && taxa_fate[k] == 0) keepnew=TRUE;
+    		}
+    	if(keepnew == TRUE)
+    		{
+    		for(k=0; k<numt; k++) 
+    			{
+    			if(tmp_taxa_fate[k] != 0) 
+					{
+					taxa_fate[k] = tmp_taxa_fate[k];
+					}
+    			}
+    		}
+       /* fprintf (tempoutfile, "\n\t"); */
         }
 
     /* 2) Identify if all preceeding nodes are from the same species. */
@@ -19899,12 +20023,33 @@ void identify_species_specific_clades(struct taxon * position)
             }
         if(count == 1)
             {
-            untag_nodes_above(position->parent);
-            fprintf (tempoutfile, "\n\t");
+            clannID+=1; /* increment the clann ID */
+            for(k=0; k<numt; k++) tmp_taxa_fate[k]=0;
+            untag_nodes_above(position->parent, tmp_taxa_fate, clannID);
+
+	    	/* check through tmp_taxa_fate to see if it overlaps with any clann definitions already in taxa_fate */
+	    	/* If there is overlap, it the new clann definition is a superset of the previous definition, then overwrite the previous definition in taxa_fate */
+	    	/* Otherwise do nothing */
+	    	keepnew=FALSE;
+	    	for(k=0; k<numt; k++)
+	    		{
+	    		if(tmp_taxa_fate[k] != 0 && taxa_fate[k] == 0) keepnew=TRUE;
+	    		}
+	    	if(keepnew == TRUE)
+	    		{
+	    		for(k=0; k<numt; k++) 
+	    			{
+	    			if(tmp_taxa_fate[k] != 0) taxa_fate[k] = tmp_taxa_fate[k];
+	    			}
+	    		}
+
+
+          /*  fprintf (tempoutfile, "\n\t"); */
             }
 
     free(foundtaxa);
-
+    free(tmp_taxa_fate);
+    return(clannID);
     }
 
 long list_taxa_above(struct taxon * position, int * foundtaxa, struct taxon * longest, long seqlength) /* this function will check the parts of the tree above this position, it fixes aproblem that the tree rooting may mask monophylys */
@@ -20009,7 +20154,7 @@ long extract_length(char * fullname)
     }
 
 
-void untag_nodes_below(struct  taxon * position)
+void untag_nodes_below(struct  taxon * position, int * taxa_fate, int clannID)
     {
     
     while(position != NULL)
@@ -20017,19 +20162,27 @@ void untag_nodes_below(struct  taxon * position)
         if(position != longestseq) 
         	{
         		position->tag = FALSE;
-        		if(position->daughter == NULL) fprintf(tempoutfile, "Removed:%s\t", position->fullname);
+        	if(position->daughter == NULL) 
+        		{	
+        		taxa_fate[position->tag2] = clannID*-1; /* to indicate its removal, assign tag2 to the negative of the clannID we are on */
+        		/*fprintf(tempoutfile, "Removed:%s\t", position->fullname); */
+        		}
         	}
         else
-        	{	
-        		if(position->daughter == NULL) fprintf(tempoutfile, "KEPT:%s\t", position->fullname);
+        	{
+        	if(position->daughter == NULL) 
+        		{	
+        		taxa_fate[position->tag2] = clannID; /* to indicate that we are keeping this taxon, assign it to the positive of the clannID we are on */
+        		/*fprintf(tempoutfile, "KEPT:%s\t", position->fullname); */
+        		}
         	}
-        if(position->daughter != NULL) untag_nodes_below(position->daughter);
+        if(position->daughter != NULL) untag_nodes_below(position->daughter, taxa_fate, clannID);
         position = position->next_sibling;
         }
     
     }
     
-void untag_nodes_above(struct  taxon * position)
+void untag_nodes_above(struct  taxon * position, int * taxa_fate, int clannID)
     {
     struct taxon * origin = position;
     while(position->prev_sibling != NULL) position = position->prev_sibling;
@@ -20038,15 +20191,23 @@ void untag_nodes_above(struct  taxon * position)
         {
         if(position != longestseq) 
         	{
-        		position->tag = FALSE;
-        		if(position->daughter == NULL) fprintf(tempoutfile, "Removed:%s\t", position->fullname);
+        	position->tag = FALSE;
+        	if(position->daughter == NULL) 
+        		{
+        		taxa_fate[position->tag2] = clannID*-1; /* to indicate its removal, assign tag2 to the negative of the clannID we are on */
+        		/*fprintf(tempoutfile, "Removed:%s\t", position->fullname); */
+        		}
         	}
         else
         	{	
-        		if(position->daughter == NULL) fprintf(tempoutfile, "KEPT:%s\t", position->fullname);
+        	if(position->daughter == NULL) 
+        		{	
+        		taxa_fate[position->tag2] = clannID; /* to indicate that we are keeping this taxon, assign it to the positive of the clannID we are on */
+        		/*fprintf(tempoutfile, "KEPT:%s\t", position->fullname); */
+        		}
         	}
-        if(position->daughter != NULL && position != origin) untag_nodes_below(position->daughter);
-        if(position->parent != NULL) untag_nodes_above(position->parent);
+        if(position->daughter != NULL && position != origin) untag_nodes_below(position->daughter, taxa_fate, clannID);
+        if(position->parent != NULL) untag_nodes_above(position->parent, taxa_fate, clannID);
         position = position->next_sibling;
         }
     

@@ -183,3 +183,6 @@ clann.log
 prunedtrees_info.txt
 all_raxml_bestTrees.txt
 compile
+prune_test.txt
+prune_test.txt_info.txt
+prune_test.txt_info.txt.zip
