@@ -3233,7 +3233,7 @@ void pathmetric(char *string, int **scores)
                         /* this has to be a taxa number */
                         for(j=0; j<30; j++) number[j] = '\0';  /* initialise the array to hold the number in text form */
                         j=0;
-                        while(string[i] != '(' && string[i] != ')' && string[i] != ',' && string[i] != ':')
+                        while(string[i] != '(' && string[i] != ')' && string[i] != ',' && string[i] != ';' && string[i] != ':')
                             {
                             number[j] = string[i];
                             i++; j++;
