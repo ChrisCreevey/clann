@@ -1728,14 +1728,14 @@ void execute_command(char *commandline, int do_all)
     /********** open the input file ************/
     filename[0] = '\0';
  
-    if(commandline == '\0')
+    if(commandline == NULL)
         {
         strcpy(filename, parsed_command[1]);
         }
     else
         strcpy(filename, commandline);
     
-    if((infile = fopen(filename, "r")) == '\0')		/* check to see if the file is there */
+    if((infile = fopen(filename, "r")) == NULL)		/* check to see if the file is there */
         {								/* Open the source tree file */
         printf2("Cannot open file %s\n", filename);
         error = TRUE;
@@ -1744,7 +1744,7 @@ void execute_command(char *commandline, int do_all)
     if(!error)
         {
 		largest_tree = 0;
-		if(yaptp_results != '\0')
+		if(yaptp_results != NULL)
 			{
 			free(yaptp_results);
 			yaptp_results = NULL;
