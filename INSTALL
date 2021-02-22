@@ -6,6 +6,23 @@ followed by:
 
 Clann will then be located in this directory
 
+######
+
+	Note: If running "make" returns an error such as:
+
+		CDPATH="${ZSH_VERSION+.}:" && cd . && aclocal-1.16
+		/bin/sh: aclocal-1.16: command not found
+		make: *** [aclocal.m4] Error 127
+
+	try running:
+		"autoreconf -f -i"
+	followed by:
+		"./configure"
+		"make"
+	to resolve the issue (Thanks to Michael Broe for suggesting this fix).
+
+#######
+
 the use of "make install" may not work depending on write privileges
 
 =======
