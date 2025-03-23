@@ -99,7 +99,7 @@ void alltrees_search(int user);
 float compare_trees(int spr);
 struct taxon * make_taxon(void);
 void intTotree(int tree_num, char *array, int num_taxa);
-int tree_build (int c, char *treestring, struct taxon *parent, int fromfile, int fund_num);
+int tree_build (int c, char *treestring, struct taxon *parent, int fromfile, int fund_num, int taxaorder);
 void prune_tree(struct taxon * super_pos, int fund_num);
 int treeToInt(char *array);
 int shrink_tree (struct taxon * position);
@@ -114,6 +114,7 @@ void dismantle_tree(struct taxon * position);
 void bootstrap_search(void);
 void memory_error(int error_num);
 void print_named_tree(struct taxon * position, char *tree);
+void print_fullnamed_tree(struct taxon * position, char *tree, int fundtreenum);
 void print_tree(struct taxon * position, char *tree);
 int toint(char *number);
 void reallocate_retained_supers(void);
@@ -269,7 +270,7 @@ float *score_of_bootstraps = NULL, *yaptp_results = NULL, largest_length = 0, du
 time_t interval1, interval2;
 double sup=1;
 char saved_supertree[TREE_LENGTH],  *test_array, inputfilename[10000], delimiter_char = '.', logfile_name[10000], system_call[100000];
-int trees_in_memory = 0, *sourcetreetag = NULL, remainingtrees = 0, GC, user_break = FALSE, delimiter = FALSE, print_log = FALSE, num_gene_nodes, testarraypos = 0, taxaorder=0;
+int trees_in_memory = 0, *sourcetreetag = NULL, remainingtrees = 0, GC, user_break = FALSE, delimiter = FALSE, print_log = FALSE, num_gene_nodes, testarraypos = 0;
 int malloc_check =0, count_now = FALSE, another_check =0;
 
 
@@ -487,17 +488,6 @@ int main(int argc, char *argv[])
                         {
                         delimiter = FALSE;
                         execute_command(parsed_command[1], TRUE);
-							
-						/* test fulltaxaname allocations */
-						/*for(l=0; l<Total_fund_trees; l++)
-							{
-							printf2("fund tree number: %d\n", l);
-							for(m=0; m<numtaxaintrees[l]; m++)
-								{
-								printf2("\ttaxa %d: %s\n", m, fulltaxanames[l][m]);
-								}
-							}
-							printf2("here\n"); */
 							
 						/*spr_dist(); */ 
                         }
@@ -1294,6 +1284,7 @@ void print_commands(int num)
             printf2("\n\tswap\t\tnni | spr | tbr\t\t\t");
             if(method == 1) printf2("nni");
             if(method == 2) printf2("spr"); 
+            if(method == 3) printf2("tbr");
             printf2("\n\tnsteps\t\t<integer number>\t\t%d", number_of_steps);
 			printf2("\n\tstart\t\tnj | random | <filename>\tnj");
 
@@ -3859,7 +3850,7 @@ int treeToInt(char *tree)
     /* Step 1 Buid the tree in memory */
 
     temp_top = NULL;
-    tree_build(1, tree, sorted_tree, FALSE, -1);
+    tree_build(1, tree, sorted_tree, FALSE, -1, 0);
     sorted_tree = temp_top;
     temp_top = NULL;
 
@@ -4282,19 +4273,23 @@ void alltrees_search(int user)
         printf2("\n\nAlltrees (exhaustive search) settings:\n\trange: tree numbers %d to %d inclusive\n\tOutput file: %s\n\tCreate all trees? ", start, end, outfilename );
         if(treesfile != NULL) printf2("Yes\n");
         else printf2("No\n");
-        printf2("\tWeighting Scheme = ");
+        printf2("\tCriterion = ");
+        
         if(criterion==0)
             {
+            printf2("DFIT\n\tWeighting Scheme = ");
             if(dweight == 0) printf2("equal\n");
             if(dweight == 1) printf2("comparisons\n");
             }
         if(criterion == 2)
             {
+            printf2("SFIT\n\tWeighting Scheme = ");
             if(splits_weight == 1) printf2("equal\n");
             if(splits_weight == 2) printf2("splits\n");
             }
         if(criterion == 3)
             {
+            printf2("QFIT\n\tWeighting Scheme = ");
             if(quartet_normalising == 1) printf2("equal\n");
             if(quartet_normalising == 2) printf2("taxa\n");
             if(quartet_normalising == 3) printf2("quartets\n");
@@ -4402,7 +4397,7 @@ void alltrees_search(int user)
                     tree_top = NULL;
                     }
                 temp_top = NULL;
-                tree_build(1, tree, tree_top, FALSE, -1);
+                tree_build(1, tree, tree_top, FALSE, -1, 0);
                 tree_top = temp_top;
                 temp_top = NULL;
                 score = compare_trees(FALSE);
@@ -4492,7 +4487,7 @@ void alltrees_search(int user)
                     tree_top = NULL;
                     }
                 temp_top = NULL;
-                tree_build(1, retained_supers[i], tree_top, FALSE, -1);
+                tree_build(1, retained_supers[i], tree_top, FALSE, -1, 0);
                 tree_top = temp_top;
                 temp_top = NULL;
             
@@ -4645,7 +4640,7 @@ float compare_trees(int spr)
 /* Tree_build:
 	This function reads in a file and from it builds the tree in memory using the taxon_type definition */
 	
-int tree_build (int c, char *treestring, struct taxon *parent, int fromfile, int fundnum)
+int tree_build (int c, char *treestring, struct taxon *parent, int fromfile, int fundnum, int taxaorder)
 	{
 	
 	char temp[NAME_LENGTH], tmptag[100];
@@ -4664,7 +4659,6 @@ int tree_build (int c, char *treestring, struct taxon *parent, int fromfile, int
 		(position->parent)->daughter = position;
 		}
 		
-	taxaorder=0;
 	out = FALSE;
 	while(!out && treestring[c] != ';')
 		{
@@ -4681,7 +4675,7 @@ int tree_build (int c, char *treestring, struct taxon *parent, int fromfile, int
 					position = extra;
 					}
                                 c++;
-				c = tree_build(c, treestring, position, fromfile, fundnum);
+				c = tree_build(c, treestring, position, fromfile, fundnum, taxaorder);
 				i=0;
 				onlylength = FALSE;
 				if(treestring[c] == ':') onlylength=TRUE;
@@ -5756,7 +5750,7 @@ void bootstrap_search(void)
 									tree_top = NULL;
 									}
 								temp_top = NULL;
-								tree_build(1, retained_supers[k], tree_top, FALSE, -1);
+								tree_build(1, retained_supers[k], tree_top, FALSE, -1, 0);
 								tree_top = temp_top;
 								temp_top = NULL;
 							
@@ -6044,6 +6038,47 @@ void print_named_tree(struct taxon * position, char *tree)
 	strcat(tree, ")");
 	free(name);
 	}
+
+void print_fullnamed_tree(struct taxon * position, char *tree, int fundtreenum)
+	{
+	struct taxon *place = position;
+	int count = 0, j=0;
+        char *name = NULL;
+	strcat(tree, "(");
+        
+	name = malloc(30*sizeof(char));
+	name[0] = '\0';
+	while(position != NULL)
+		{
+		if(count >0) strcat(tree, ",");
+		if(position->daughter != NULL)
+			{
+			print_fullnamed_tree(position->daughter, tree, fundtreenum);
+		/*	sprintf(name, "%d", position->tag);
+			strcat(tree, name);  */ /* This is here for the development of the gene tree mapping */
+
+			}
+		else
+			{
+			if(position -> fullname != NULL)
+			{	
+				strcat(tree, position -> fullname);
+			}
+			else
+			{
+				strcat(tree, taxa_names[position->name]);
+			}
+			/*strcat(tree, fulltaxanames[fundtreenum][position->name]);*/
+			}
+		count++;
+		position = position->next_sibling;
+
+		}
+	strcat(tree, ")");
+	free(name);
+	}
+
+
 
 
 void print_tree(struct taxon * position, char *tree)
@@ -6417,7 +6452,7 @@ void usertrees_search(void)
 				tree_top = NULL;
 				}
 			temp_top = NULL;
-			tree_build(1, user_super, tree_top, TRUE, -1);
+			tree_build(1, user_super, tree_top, TRUE, -1, 0);
 			tree_top = temp_top;
 			temp_top = NULL;
 			/*check_tree(tree_top); */
@@ -6517,7 +6552,7 @@ void usertrees_search(void)
 					temp_top = NULL;
 
 					temp_top = NULL;
-					tree_build(1, retained_supers[i], tree_top, TRUE, -1);
+					tree_build(1, retained_supers[i], tree_top, TRUE, -1, 0);
 					tree_top = temp_top;
 					temp_top = NULL;
 					/*check_tree(tree_top); */
@@ -7298,7 +7333,7 @@ void heuristic_search(int user, int print, int sample, int nreps)
                         tree_top = NULL;
                         }
                     temp_top = NULL;
-                    tree_build(1, tree, tree_top, TRUE, -1);
+                    tree_build(1, tree, tree_top, TRUE, -1, 0);
                     tree_top = temp_top;
                     temp_top = NULL;
             
@@ -7449,7 +7484,7 @@ void heuristic_search(int user, int print, int sample, int nreps)
 							tree_top = NULL;
 							}
 						temp_top = NULL;
-						tree_build(1, tree, tree_top, user, -1);
+						tree_build(1, tree, tree_top, user, -1, 0);
 						tree_top = temp_top;
 						temp_top = NULL;
 						
@@ -7597,7 +7632,7 @@ void heuristic_search(int user, int print, int sample, int nreps)
 								}
 							temp_top = NULL;
 							
-							tree_build(1, retained_supers[i], tree_top, TRUE, -1);
+							tree_build(1, retained_supers[i], tree_top, TRUE, -1, 0);
 							tree_top = temp_top;
 							temp_top = NULL;
 							
@@ -7813,7 +7848,7 @@ int do_search(char *tree, int user, int print, int maxswaps, FILE *outfile, int 
             tree_top = NULL;
             }
         temp_top = NULL;
-        tree_build(1, tree, tree_top, user, -1);
+        tree_build(1, tree, tree_top, user, -1, 0);
         tree_top = temp_top;
         temp_top = NULL;
 /*		print_tree(tree_top, temporary_tree);
@@ -8481,7 +8516,7 @@ void yaptp_search(void)
 								tree_top = NULL;
 								}
 							temp_top = NULL;
-							tree_build(1, retained_supers[k], tree_top, FALSE, -1);
+							tree_build(1, retained_supers[k], tree_top, FALSE, -1, 0);
 							tree_top = temp_top;
 							temp_top = NULL;
 						
@@ -10126,7 +10161,7 @@ int spr_new(struct taxon * master, int maxswaps, int numspectries, int numgenetr
 					dismantle_tree(newbie);
 					newbie = NULL;
 					temp_top = NULL;
-					tree_build(1, debugtree, newbie, FALSE, -1);
+					tree_build(1, debugtree, newbie, FALSE, -1, 0);
 					newbie = temp_top;
 					temp_top = NULL;
 					
@@ -10376,7 +10411,7 @@ int spr(struct taxon * position, int maxswaps, int numspectries, int numgenetrie
 									dismantle_tree(newbie);
 									newbie = NULL;
 									temp_top = NULL;
-									tree_build(1, debugtree, newbie, FALSE, -1);
+									tree_build(1, debugtree, newbie, FALSE, -1, 0);
 									newbie = temp_top;
 									temp_top = NULL;
 									
@@ -11096,11 +11131,11 @@ void print_coordinates(struct taxon *position, char **treearray, int taxa_count,
     
     }
 
-
+/* Print the tree graphically to screen */
 void tree_coordinates(char *tree, int bootstrap, int build, int mapping, int fundnum)
     {
     char **treearray = NULL;
-    int i=0, j=0, taxa_count = 0, deepest = 0, acrosssize = 20, upsize = 5;
+    int i=0, j=0, taxa_count = 0, deepest = 0, acrosssize = 20, upsize = 5, taxaorder=0;
     
 	if(build)
 		{
@@ -11113,8 +11148,8 @@ void tree_coordinates(char *tree, int bootstrap, int build, int mapping, int fun
 			}
 		temp_top = NULL;
 		largest_length = 0;
-		taxaorder = 0;
-		tree_build(1, tree, tree_top, 1, fundnum);
+		/*tree_build(1, tree, tree_top, 1, fundnum, 0); */ /* removed 21/03/25 to allow fullnames to be displayed in showtrees */ 
+		basic_tree_build(1, tree, tree_top, TRUE);
 		tree_top = temp_top;
 		temp_top = NULL;
 		}
@@ -11512,7 +11547,7 @@ void generatetrees(void)
 						}
 					temp_top = NULL;
 					if(super == 1)
-						tree_build(1, retained_supers[0], tree_top, TRUE, -1);
+						tree_build(1, retained_supers[0], tree_top, TRUE, -1, 0);
 					else
 						{
 						if((superfile = fopen(superfilename, "r")) == NULL)
@@ -11533,7 +11568,7 @@ void generatetrees(void)
 								}
 							tmp[i] = ';'; tmp[i+1] = '\0';
 							fclose(superfile);
-							tree_build(1, tmp, tree_top, TRUE, -1);
+							tree_build(1, tmp, tree_top, TRUE, -1, 0);
 							}
 						}
 					tree_top = temp_top;
@@ -11635,8 +11670,8 @@ void generatetrees(void)
 						}
 					temp_top = NULL;
 					
-					if(gen_method == 1)tree_build(1, rand_tree, tree_top, FALSE, -1);
-					if(gen_method == 2)tree_build(1, rand_tree, tree_top, TRUE, -1);
+					if(gen_method == 1)tree_build(1, rand_tree, tree_top, FALSE, -1, 0);
+					if(gen_method == 2)tree_build(1, rand_tree, tree_top, TRUE, -1, 0);
 					tree_top = temp_top;
 					temp_top = NULL;
 			/**** evaluate its fit to the source trees in memory *****/
@@ -12597,7 +12632,7 @@ void showtrees(int savet)
 	char *temptree, string_num[10], namecontains[NAME_LENGTH], **containstaxa = NULL, savedfile[100], temptree1[TREE_LENGTH], tmp[TREE_LENGTH];
 	FILE *showfile = NULL;
 	float bestscore =10000000, worstscore = 0, **tempscores = NULL;
-	int *tempsourcetreetag = NULL, display = TRUE, best_total = -1, total = 0, display_fullnames = FALSE;
+	int *tempsourcetreetag = NULL, display = TRUE, best_total = -1, total = 0, display_fullnames = FALSE, taxaorder=0;
 	struct taxon *position = NULL, *species_tree = NULL, *gene_tree = NULL, *best_mapping = NULL, *unknown_fund = NULL, *pos = NULL,*copy = NULL;
 	
 	tempscores = malloc(Total_fund_trees*sizeof(float *));
@@ -12803,7 +12838,7 @@ void showtrees(int savet)
 		
 		
 		
-		if(mode[0])
+		if(mode[0])  /* Specifies a particular range of trees - usually true by default */
 			{
 			for(i=0; i<start; i++)
 				tempsourcetreetag[i] = FALSE;
@@ -12811,7 +12846,7 @@ void showtrees(int savet)
 				tempsourcetreetag[i] = FALSE;
 			}
 			
-		if(mode[1])
+		if(mode[1]) /* Looks for trees of a particular size */
 			{
 			for(i=0; i<Total_fund_trees; i++)
 				{
@@ -12825,7 +12860,7 @@ void showtrees(int savet)
 					tree_top = NULL;
 					}
 				temp_top = NULL;
-				tree_build(1, temptree, tree_top, 1, -1);
+				tree_build(1, temptree, tree_top, 1, -1, 0);
 
 				tree_top = temp_top;
 				temp_top = NULL;
@@ -12855,7 +12890,7 @@ void showtrees(int savet)
 					}
 				}
 			}
-		if(mode[3])
+		if(mode[3]) /* Look for trees that contain a particular taxon */
 			{
 			for(i=0; i<Total_fund_trees; i++)
 				{
@@ -12869,7 +12904,7 @@ void showtrees(int savet)
 					tree_top = NULL;
 					}
 				temp_top = NULL;
-				tree_build(1, temptree, tree_top, 1, -1);
+				tree_build(1, temptree, tree_top, 1, -1, 0);
 
 				tree_top = temp_top;
 				temp_top = NULL;
@@ -12948,9 +12983,12 @@ void showtrees(int savet)
 					{
 					temptree[0] = '\0';
 					strcpy(temptree, fundamentals[j]);
-					returntree(temptree);
-					printf2("\n\n\nTree number %d\nTree name = %s\n", i+1, tree_names[j]);
-					printf2("Weight = %f\n", tree_weights[j]);
+					returntree_fullnames(temptree, j);
+
+					/*returntree(temptree); */
+					printf2("\n\n\nTree number %d",j+1);
+					if(strcmp(tree_names[j], "")!=0) printf2("\nTree name = %s", tree_names[j]); 
+					printf2("\nWeight = %f\n", tree_weights[j]);
 					if(trees_in_memory > 0)printf2("Score = %f\n", sourcetree_scores[j]);
 					tree_coordinates(temptree, TRUE, TRUE, FALSE, -1);
 					}
@@ -13044,7 +13082,7 @@ void exclude(int do_all)
 	char *temptree, string_num[10], namecontains[100], **containstaxa = NULL, savedfile[100], *command = NULL, tmp[TREE_LENGTH];
 	FILE *showfile = NULL, *tempfile = NULL;
 	float bestscore =10000000, worstscore = 0, **tempscores = NULL;
-	int *tempsourcetreetag = NULL, countedout =0, *temp_incidence = NULL;
+	int *tempsourcetreetag = NULL, countedout =0, *temp_incidence = NULL, taxaorder=0;
 	
 	
 	
@@ -13163,7 +13201,7 @@ void exclude(int do_all)
 
 			
 		}
-	if(mode[4])
+	if(mode[4]) /* Look for trees that meet a particular score */
 		{
 		if(trees_in_memory == 0)
 			{
@@ -13208,7 +13246,7 @@ void exclude(int do_all)
 					tree_top = NULL;
 					}
 				temp_top = NULL;
-				tree_build(1, temptree, tree_top, 1, -1);
+				tree_build(1, temptree, tree_top, 1, -1, 0);
 
 				tree_top = temp_top;
 				temp_top = NULL;
@@ -13259,7 +13297,7 @@ void exclude(int do_all)
 					tree_top = NULL;
 					}
 				temp_top = NULL;
-				tree_build(1, temptree, tree_top, 1, -1);
+				tree_build(1, temptree, tree_top, 1, -1, 0);
 
 				tree_top = temp_top;
 				temp_top = NULL;
@@ -13279,7 +13317,7 @@ void exclude(int do_all)
 				}
 			}
 
-		if(mode[4])
+		if(mode[4]) /* Look for trees that meet a particular score */
 			{
 			for(i=0; i<Total_fund_trees; i++)
 				{
@@ -13301,7 +13339,7 @@ void exclude(int do_all)
 					}
 				}
 			}
-		if(mode[5] || mode[6])
+		if(mode[5] || mode[6]) /* Look for trees that are single copy of multicopy */
 			{
 			for(l=0; l<Total_fund_trees; l++)
 				{
@@ -13335,7 +13373,7 @@ void exclude(int do_all)
 						tree_top = NULL;
 						}
 					temp_top = NULL;
-					tree_build(1, temptree, tree_top, 1, -1);
+					tree_build(1, temptree, tree_top, 1, -1, 0);
 
 					tree_top = temp_top;
 					temp_top = NULL;
@@ -13382,7 +13420,7 @@ void exclude(int do_all)
 								returntree_fullnames(temptree, j);
 			                    basic_tree_build(1, temptree, tree_top, TRUE);
 
-						       /*  tree_build(1, fundamentals[j], tree_top, 0, j); build the tree passed to the function */
+						       /*  tree_build(1, fundamentals[j], tree_top, 0, j, 0); build the tree passed to the function */
 
 						        tree_top = temp_top;
 						        temp_top = NULL;
@@ -13586,7 +13624,7 @@ void returntree(char *temptree) /* returns the tree with the names of the taxa i
 void returntree_fullnames(char *temptree, int treenum) /* returns the tree with the names of the taxa included */
 	{
 	char string_num[10], string[TREE_LENGTH];
-	int i=0, j=0, k=0, l=0, num;
+	int i=0, j=0, k=0, l=0, num, taxaorder=0;
 	
 	string[0] = '\0';
 	strcpy(string, temptree);
@@ -13771,7 +13809,7 @@ void include(int do_all)
 
 			
 		}
-	if(mode[4])
+	if(mode[4]) /* Look for trees that meet a particular score */
 		{
 		if(trees_in_memory == 0)
 			{
@@ -13805,7 +13843,7 @@ void include(int do_all)
 					tree_top = NULL;
 					}
 				temp_top = NULL;
-				tree_build(1, temptree, tree_top, 1, -1);
+				tree_build(1, temptree, tree_top, 1, -1, 0);
 
 				tree_top = temp_top;
 				temp_top = NULL;
@@ -13831,7 +13869,7 @@ void include(int do_all)
 					}
 				}
 			}
-		if(mode[2])
+		if(mode[2]) /* Looks for trees with a particular name, or part of name */
 			{
 			for(i=0; i<Total_fund_trees; i++)
 				{
@@ -13856,7 +13894,7 @@ void include(int do_all)
 					tree_top = NULL;
 					}
 				temp_top = NULL;
-				tree_build(1, temptree, tree_top, 1, -1);
+				tree_build(1, temptree, tree_top, 1, -1, 0);
 
 				tree_top = temp_top;
 				temp_top = NULL;
@@ -13875,7 +13913,7 @@ void include(int do_all)
 					}
 				}
 			}
-		if(mode[4])
+		if(mode[4]) /* Look for trees that meet a particular score */
 			{
 			for(i=0; i<Total_fund_trees; i++)
 				{
@@ -14856,9 +14894,9 @@ void spr_dist(void)
 			temp_top = NULL;
 			
 
-			if(starting_super != 2) tree_build(1, retained_supers[0], tree_top, TRUE, -1);
+			if(starting_super != 2) tree_build(1, retained_supers[0], tree_top, TRUE, -1, 0);
 			else
-				tree_build(1, inputtree, tree_top, TRUE, -1);
+				tree_build(1, inputtree, tree_top, TRUE, -1, 0);
 
 			tree_top = temp_top;
 			temp_top = NULL;
@@ -15238,7 +15276,7 @@ int string_SPR(char * string)
 			}
 		temp_top = NULL;
 		
-		tree_build(1, string1, tree_top, FALSE, -1);
+		tree_build(1, string1, tree_top, FALSE, -1, 0);
 
 		tree_top = temp_top;
 		temp_top = NULL;
@@ -15610,7 +15648,7 @@ void exhaustive_SPR(char * string)
 				tree_top = NULL;
 				}
 			temp_top = NULL;
-			tree_build(1, tmp_tree, tree_top, FALSE, -1);
+			tree_build(1, tmp_tree, tree_top, FALSE, -1, 0);
 
 			tree_top = temp_top;
 			temp_top = NULL;
@@ -16470,6 +16508,7 @@ float tree_map(struct taxon * gene_top, struct taxon * species_top, int print)
 	num_losses = count_losses(gene_top);
 	free(presence);
 	free(treetmp);
+
 	if(print)fprintf(distributionreconfile, "%d\t%d\n", num_dups, num_losses);
 	return((dup_weight*(float)num_dups)+(loss_weight*(float)num_losses));
 	}
@@ -17438,7 +17477,7 @@ void mapunknowns()
 	/* build the tree in memory */
 	/****** We now need to build the Supertree in memory *******/
 	temp_top = NULL;
-	tree_build(1, temptree, species_tree, 1, -1);
+	tree_build(1, temptree, species_tree, 1, -1, 0);
 	species_tree = temp_top;
 	temp_top = NULL;
 	/** add an extra node to the top of the tree */
@@ -17460,7 +17499,7 @@ void mapunknowns()
 		/* build the tree in memory */
 		/****** We now need to build the Supertree in memory *******/
 		temp_top = NULL;
-		tree_build(1, temptree, gene_tree, 1, -1);
+		tree_build(1, temptree, gene_tree, 1, -1, 0);
 		gene_tree = temp_top;
 		temp_top = NULL;
 		strcpy(temptree1, temptree);
@@ -17599,7 +17638,7 @@ void mapunknowns()
 float get_recon_score(char *giventree, int numspectries, int numgenetries)
 	{
 	struct taxon *position = NULL, *species_tree = NULL, *gene_tree = NULL, *best_mapping = NULL, *copy = NULL, *temp_top1 = NULL, *temp_top2 = NULL, *spec_copy = NULL;
-	int i, j, k, l, m, q, r, spec_start=0, spec_end, gene_start, gene_end, num_species_internal = 0, error = FALSE, num_species_roots = 0, basescore = 1, rand1=0, rand2=0, dospecrand = 1, dogenerand=1;
+	int i, j, k, l, m, q, r, spec_start=0, spec_end, gene_start, gene_end, num_species_internal = 0, error = FALSE, num_species_roots = 0, basescore = 1, rand1=0, rand2=0, dospecrand = 1, dogenerand=1, taxaorder=0;
 	float *overall_placements = NULL, biggest = -1, total, best_total = -1, sum_of_totals = 0, rooting_score = -1;
 	char *temptree, temptree1[TREE_LENGTH];
 
@@ -17615,7 +17654,7 @@ float get_recon_score(char *giventree, int numspectries, int numgenetries)
 		/* build the tree in memory */
 		/****** We now need to build the Supertree in memory *******/
 		temp_top = NULL;
-		tree_build(1, temptree, species_tree, 1, -1);
+		tree_build(1, temptree, species_tree, 1, -1, 0);
 		species_tree = temp_top;
 		temp_top = NULL;
 
@@ -17673,7 +17712,7 @@ float get_recon_score(char *giventree, int numspectries, int numgenetries)
 					/****** We now need to build the genetree in memory *******/
 					temp_top = NULL;
 					taxaorder=0;
-					tree_build(1, temptree, gene_tree, 1, l);
+					tree_build(1, temptree, gene_tree, 1, l, 0);
 					gene_tree = temp_top;
 					temp_top = NULL;
 					strcpy(temptree1, temptree);
@@ -17987,12 +18026,12 @@ void make_unrooted(struct taxon * position)
 		}
 	}
 
-void reconstruct(int print_settings)
+void reconstruct(int print_settings)  /* Carry out gene-tree reconciliation of trees in memory, using the first tree in memory as the species tree */
 	{
 	struct taxon *position = NULL, *species_tree = NULL, *gene_tree = NULL, *best_mapping = NULL, *unknown_fund = NULL, *pos = NULL, *copy = NULL, *newbie = NULL;
-	int i, j, k, l, xnum=0, *presence = NULL, **label_results = NULL, num_species_internal = 0, error = FALSE, printfiles = TRUE, how_many = 0, diff_overall =0, dorecon = FALSE, basescore = 1;
+	int i, j, k, l, xnum=0, *presence = NULL, **label_results = NULL, num_species_internal = 0, error = FALSE, printfiles = FALSE, how_many = 0, diff_overall =0, dorecon = FALSE, basescore = 1, taxaorder=0;
 	float *overall_placements = NULL, biggest = -1, total, best_total = -1;
-	char *temptree, temptree1[TREE_LENGTH], reconfilename[100], otherfilename[100], *tmp1 = NULL, c = '\0';
+	char *temptree, temptree1[TREE_LENGTH],temptree2[TREE_LENGTH], reconfilename[100], otherfilename[100], *tmp1 = NULL, c = '\0';
 	FILE *reconstructionfile = NULL, *descendentsfile = NULL, *genebirthfile = NULL;
 	
 	temptree = malloc(TREE_LENGTH*sizeof(char));
@@ -18009,8 +18048,8 @@ void reconstruct(int print_settings)
         {
         if(strcmp(parsed_command[i], "printfiles") == 0)
 			{
-			if(strcmp(parsed_command[i+1], "no") == 0)
-				printfiles = FALSE;
+			if(strcmp(parsed_command[i+1], "yes") == 0)
+				printfiles = TRUE;
 			}
 		if(strcmp(parsed_command[i], "showrecon") == 0)
 			{
@@ -18094,11 +18133,11 @@ void reconstruct(int print_settings)
 		if(print_settings)printf2("\nReconstruction of Most likely Duplications and Losses\n\tDuplication weight = %f\n\tLosses weight = %f\n\nTree name:\tReconstruction score\n", dup_weight, loss_weight);
 		/**** BUILD THE SPECIES TREE *****/
 		strcpy(temptree, fundamentals[0]);
-		returntree(temptree);
+		returntree(temptree); 
 		/* build the tree in memory */
 		/****** We now need to build the Species tree in memory *******/
 		temp_top = NULL;
-		tree_build(1, temptree, species_tree, 1, -1);
+		tree_build(1, temptree, species_tree, TRUE, -1, 0); 
 		species_tree = temp_top;
 		temp_top = NULL;
 		/** add an extra node to the top of the tree */
@@ -18107,7 +18146,6 @@ void reconstruct(int print_settings)
 		species_tree->parent = temp_top;
 		species_tree = temp_top;
 		temp_top = NULL;
-		printf2("1\n");
 		number_tree1(species_tree, number_of_taxa);
 		num_species_internal = count_internal_branches(species_tree, 0);
 		if(printfiles)
@@ -18126,7 +18164,6 @@ void reconstruct(int print_settings)
 			}
 		
 		
-		
 		for(l=1; l<Total_fund_trees; l++)
 			{
 			temp_top = NULL;
@@ -18134,22 +18171,21 @@ void reconstruct(int print_settings)
 			strcpy(temptree, fundamentals[l]);
 			unroottree(temptree);
 			
-			returntree(temptree);
-			
-			
+			/*returntree(temptree); */ /* add in the actual names in the tree */
 			/* build the tree in memory */
 			/****** We now need to build the gene tree in memory *******/
 			temp_top = NULL;
 			how_many++;
 			taxaorder=0;
-			tree_build(1, temptree, gene_tree, 1, l);
+			tree_build(1, temptree, gene_tree, FALSE, l, 0);
 			gene_tree = temp_top;
+
 			temp_top = NULL;
 			strcpy(temptree1, temptree);
 			i = count_taxa(gene_tree, 0);
-			
 			if(presence_of_trichotomies(gene_tree))
 				{
+				printf("Doing resolving of trichotomies\n");
 				gene_tree = do_resolve_tricotomies(gene_tree, species_tree, basescore);
 				}
 			tree_top = gene_tree;
@@ -18159,22 +18195,27 @@ void reconstruct(int print_settings)
 			duplicate_tree(gene_tree, NULL);
 			how_many++;
 			copy = temp_top;
-						
 			tree_top = NULL;
-			i = number_tree(gene_tree, 0);
+			i = number_tree(gene_tree, 0); /* number every branch of the gene tree so we can use this to reroot */
 			best_total = -1;
-			if(i>2)
+
+			if(i>2) /* if there are more than two branches in this gene tree */
 				{
-				for(j=0; j<i; j++)
+				for(j=0; j<i; j++) /* For every possible rerooting of the gene tree */
 					{
+
 					malloc_check=0;
-					position = get_branch(gene_tree, j);
+					position = get_branch(gene_tree, j); /* find branch numbered j on the gene tree */ 
 					temp_top = gene_tree;
-					reroot_tree(position);
-					gene_tree = temp_top;
+					reroot_tree(position); /* reroot at this position */
+
+					/* add a node at the top of the re-rooted tree */
+					gene_tree = make_taxon();
+					gene_tree->daughter = temp_top;
+
 					
 					diff_overall -= malloc_check;
-					total = tree_map(gene_tree, species_tree,1); 
+					total = tree_map(gene_tree, species_tree, printfiles); 
 					diff_overall += malloc_check;
 					if(total < best_total || best_total == -1)
 						{
@@ -18213,7 +18254,7 @@ void reconstruct(int print_settings)
 				gene_tree = newbie;
 				newbie = NULL;
 				
-				total = tree_map(gene_tree, species_tree,1);				
+				total = tree_map(gene_tree, species_tree,printfiles);				
 				best_total = total;
 				best_mapping = gene_tree;
 				gene_tree = NULL;
@@ -18223,9 +18264,14 @@ void reconstruct(int print_settings)
 			else
 				printf2("%s\t%f\n", tree_names[l], best_total);
 			tree_top = best_mapping;
+			/** ADD IN PRINTFULLNAMED TREE HERE **/
+			temptree[0] = '\0';
+			print_fullnamed_tree(tree_top, temptree, l); 
+			/*print_named_tree(tree_top, temptree); */
+
 			if(dorecon == TRUE)
 				{
-				tree_coordinates(temptree, TRUE, FALSE, FALSE, l);
+				tree_coordinates(temptree, TRUE, FALSE, FALSE, l); /* char *tree, int bootstrap, int build, int mapping, int fundnum */
 				}
 			/******* PRINT_TREE_LABELS TEST *******/	
 			/****	label_results[0] = number of copies of the gene at this internal branch
@@ -18408,7 +18454,7 @@ void hgt_reconstruction()
 	int i, j, k, l,  *presence = NULL,*presence1 = NULL, *presence2 = NULL, hgt_receipient1, hgt_receipient2, **overall_presence = NULL, *overall_reconstruction = NULL, *overall_receptor = NULL, receptor, **tmp_presence1 = NULL, **tmp_presence2 = NULL, *before1 = NULL, *before2 = NULL, *after1 = NULL, *after2 = NULL, *temporary = NULL;
 	float *overall_placements = NULL, biggest = -1,  total, best_total = -1,  best_total1 = -1, best_total2 = -1, HGT1 = 0, HGT2 = 0, original = 0, best_HGT_recon = -1, best_reconstruction = -1, sum, HGT_score = -1, donor_score = -1, tmp_allow = FALSE;
 	char *temptree = NULL, temptree1[TREE_LENGTH];
-	int **species_allowed = NULL, **dependent_species_allowed = NULL, *previous = NULL, xnum =0, x, y, z, partA, partB, q, r, s, allow_HGT1 = TRUE, allow_HGT2 = TRUE, numparts = 1,  place_marker = 1, found_better = FALSE, error = FALSE; 
+	int **species_allowed = NULL, **dependent_species_allowed = NULL, *previous = NULL, xnum =0, x, y, z, partA, partB, q, r, s, allow_HGT1 = TRUE, allow_HGT2 = TRUE, numparts = 1,  place_marker = 1, found_better = FALSE, error = FALSE, taxaorder=0; 
 	int basescore = 1; /** see reconstrution command **/
 	
 	temptree = malloc(TREE_LENGTH*sizeof(char));
@@ -18478,7 +18524,7 @@ void hgt_reconstruction()
 	/* build the tree in memory */
 	/****** We now need to build the Species tree in memory *******/
 	temp_top = NULL;
-	tree_build(1, temptree, species_tree, 1, -1);
+	tree_build(1, temptree, species_tree, 1, -1, 0);
 	species_tree = temp_top;
 	temp_top = NULL;
 	/** add an extra node to the top of the tree */
@@ -18508,7 +18554,7 @@ void hgt_reconstruction()
 		/****** We now need to build the genetree in memory *******/
 		temp_top = NULL;
 		taxaorder=0;
-		tree_build(1, temptree, gene_tree, 1, l);
+		tree_build(1, temptree, gene_tree, 1, l, 0);
 		gene_tree = temp_top;
 		temp_top = NULL;
 			
@@ -19446,7 +19492,7 @@ void random_prune(char *fund_tree)
 	tree_top = NULL;
 	
 	temp_top = NULL;
-	tree_build(1, fund_tree, tree_top, 0, -1);
+	tree_build(1, fund_tree, tree_top, 0, -1, 0);
 	tree_top = temp_top;
 	temp_top = NULL;
 	
@@ -19797,7 +19843,7 @@ void check_treeisok(struct taxon *position)
 
 void prune_monophylies(void)
     {
-    int i=0, j=0, k=0, l=0, num_nodes=0, trees_included=0, trees_excluded=0, numt=0, *taxa_fate = NULL, clannID =0, report=FALSE;
+    int i=0, j=0, k=0, l=0, num_nodes=0, trees_included=0, trees_excluded=0, numt=0, *taxa_fate = NULL, clannID =0, report=FALSE, taxaorder=0;
     char *pruned_tree = NULL, *tmp = NULL, filename2[10000], temptree[TREE_LENGTH], filename3[10000], **taxa_fate_names = NULL;
     FILE *pm_outfile = NULL; 
     select_longest=FALSE;
@@ -19853,7 +19899,7 @@ void prune_monophylies(void)
 	    temp_top = NULL;
 	    basic_tree_build(1, temptree, tree_top, TRUE);
 
-       /* tree_build(1, fundamentals[j], tree_top, 0, j);  build the tree passed to the function */
+       /* tree_build(1, fundamentals[j], tree_top, 0, j, 0);  build the tree passed to the function */
         tree_top = temp_top;
         temp_top = NULL;
         reset_tree(tree_top);
