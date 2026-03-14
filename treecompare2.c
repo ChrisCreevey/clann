@@ -576,6 +576,7 @@ int main(int argc, char *argv[])
                                     {
                                     if(number_of_taxa > 0)
                                         {
+                                  
                                         heuristic_search(TRUE, TRUE, 10000, 10);
 										
                                         }
@@ -5463,13 +5464,13 @@ void bootstrap_search(void)
             if(strcmp(parsed_command[i+1], "all") == 0) search = 0;
             else
                 {
-                if(strcmp(parsed_command[i+1], "nni") == 0) search = 1;
+                if(strcmp(parsed_command[i+1], "nni") == 0) { search = 1; method = 1; }
                 else
                     {
-					if(strcmp(parsed_command[i+1], "spr") == 0) search = 1;   /* should be set to 1 when SPR is implemented  NOTE: THE HEURISTIC SEARCH ALGORITHM WILL PICK UP THE SETTINGS AND IMPLEMENT THE CORRECT SEARCH METHOD*/
+					if(strcmp(parsed_command[i+1], "spr") == 0) { search = 1; method = 2; }
                     else
                         {
-						if(strcmp(parsed_command[i+1], "tbr") == 0) search = 1;   /* should be set to 1 when tbr is implemented */
+						if(strcmp(parsed_command[i+1], "tbr") == 0) { search = 1; method = 3; }
 						else
 							{
 							printf2("Error: swap option '%s' unknown\n", parsed_command[i+1]);
@@ -8332,10 +8333,10 @@ void yaptp_search(void)
             if(strcmp(parsed_command[i+1], "all") == 0) search = 0;
             else
                 {
-                if(strcmp(parsed_command[i+1], "nni") == 0) search = 1;
+                if(strcmp(parsed_command[i+1], "nni") == 0) { search = 1; method = 1; }
                 else
                     {
-                    if(strcmp(parsed_command[i+1], "spr") == 0) search = 1;   /* should be set to 2 when SPR is implemented */
+                    if(strcmp(parsed_command[i+1], "spr") == 0) { search = 1; method = 2; }
                     else
                         {
                         printf2("Error: search option '%s' unknown\n", parsed_command[i+1]);
@@ -10014,8 +10015,6 @@ int spr_new(struct taxon * master, int maxswaps, int numspectries, int numgenetr
     
 
 	start = master;
-	print_tree(master, debugtree);
-	debugtree[0] = '\0';
 
 
 
@@ -10031,9 +10030,6 @@ int spr_new(struct taxon * master, int maxswaps, int numspectries, int numgenetr
 	/* 2) count the number of nodes that it is possible to break this tree (internal and external branches) */
 	
 	y = number_tree(master, 0); /* count the parts of newbie */
-							debugtree[0] = '\0';
-							print_tree_withinternals(master, debugtree);
-							debugtree[0] = '\0';
 
 	
 	/* end 2) */
@@ -10110,8 +10106,6 @@ int spr_new(struct taxon * master, int maxswaps, int numspectries, int numgenetr
 				free(tmp);
 				}
 			newbie = position;
-				print_tree(newbie, debugtree);
-				debugtree[0] = '\0';
 			
 			tmp = latest;
 			while(tmp->prev_sibling != NULL) tmp = tmp->prev_sibling;  /* rewinding */
@@ -10135,8 +10129,6 @@ int spr_new(struct taxon * master, int maxswaps, int numspectries, int numgenetr
 				temper= NULL;
 				newbie->spr = TRUE;
 				
-				print_tree(newbie, debugtree);
-				debugtree[0] = '\0';
 				
 				better_score = regraft(latest, newbie, NULL, 1, maxswaps, numspectries, numgenetries);
 				
@@ -10166,8 +10158,6 @@ int spr_new(struct taxon * master, int maxswaps, int numspectries, int numgenetr
 					temp_top = NULL;
 					
 					debugtree[0] = '\0';
-					print_tree(newbie, debugtree);
-					debugtree[0] = '\0';	
 					
 					r = number_tree(newbie, 0); /* count the parts of newbie */
 					temp_top = NULL;
@@ -10175,8 +10165,6 @@ int spr_new(struct taxon * master, int maxswaps, int numspectries, int numgenetr
 					copy = temp_top;
 					temp_top = NULL;
 					
-					print_tree_withinternals(copy, debugtree);
-					debugtree[0] = '\0';
 					
 				
 					for(q=0; q<r; q++) /* reroot newbie at each of the "r" positions on the subtree */
@@ -10187,8 +10175,6 @@ int spr_new(struct taxon * master, int maxswaps, int numspectries, int numgenetr
 						temp_top = newbie;
 						reroot_tree(temper1);
 						newbie = temp_top;
-							print_tree_withinternals(newbie, debugtree);
-							debugtree[0] = '\0';
 
 						
 						temper = make_taxon();
@@ -10229,8 +10215,6 @@ int spr_new(struct taxon * master, int maxswaps, int numspectries, int numgenetr
 					temper= NULL;
 					newbie->spr = TRUE;
 					
-					print_tree(newbie, debugtree);
-					debugtree[0] = '\0';
 					
 					better_score = regraft(latest, newbie, NULL, 1, maxswaps, numspectries, numgenetries); 
 					}
@@ -10285,9 +10269,6 @@ int spr(struct taxon * position, int maxswaps, int numspectries, int numgenetrie
     
 		
 								start = position;
-								print_tree(position, debugtree);
-								printf2("%s\n", debugtree);
-								debugtree[0] = '\0';
 
 	
         /* travel down to the bottom of the tree */
@@ -10315,7 +10296,7 @@ int spr(struct taxon * position, int maxswaps, int numspectries, int numgenetrie
                     position = position->next_sibling;
                     }
                 }
-	*/		printf2("numsiblingd=%d\n", numofsiblings);
+	*/
             position = start;
             if(!better_score && start->parent != NULL && tried_regrafts < maxswaps && !user_break)
                     {
@@ -10360,9 +10341,6 @@ int spr(struct taxon * position, int maxswaps, int numspectries, int numgenetrie
                                 free(tmp);
                                 }
 							newbie = position;
-								print_tree(newbie, debugtree);
-								printf2("NEWBIE=%s\n", debugtree);
-								debugtree[0] = '\0';
 							
                             tmp = latest;
                             while(tmp->prev_sibling != NULL) tmp = tmp->prev_sibling;  /* rewinding */
@@ -10383,9 +10361,6 @@ int spr(struct taxon * position, int maxswaps, int numspectries, int numgenetrie
 								temper= NULL;
 								newbie->spr = TRUE;
 								
-								print_tree(newbie, debugtree);
-								printf2("%s\n", debugtree);
-								debugtree[0] = '\0';
 								
 								better_score = regraft(tmp, newbie, NULL, 1, maxswaps, numspectries, numgenetries);
 								
@@ -10406,7 +10381,6 @@ int spr(struct taxon * position, int maxswaps, int numspectries, int numgenetrie
 									print_tree(newbie, debugtree);
 									strcat(debugtree, ";");
 									unroottree(debugtree);
-									printf2("unrooted = %s\n", debugtree);
 									
 									dismantle_tree(newbie);
 									newbie = NULL;
@@ -10416,37 +10390,24 @@ int spr(struct taxon * position, int maxswaps, int numspectries, int numgenetrie
 									temp_top = NULL;
 									
 									debugtree[0] = '\0';
-									print_tree(newbie, debugtree);
-									printf2("now = %s\n", debugtree);
-									debugtree[0] = '\0';	
 									
 									i = number_tree(newbie, 0); /* count the parts of newbie */
-									printf2("i=%d\n", i);
 									temp_top = NULL;
 									duplicate_tree(newbie, NULL); /* make a copy of the subtree */
 									copy = temp_top;
 									temp_top = NULL;
 									
-									print_tree_withinternals(copy, debugtree);
-									printf2("copy = %s\n", debugtree);
-									debugtree[0] = '\0';
 									
 								
 									for(j=0; j<i; j++) /* reroot newbie at each of the "i" positions on the subtree */
 										{
-										printf2("j=%d\n", j);
 										temper1 = get_branch(newbie, j);
 										
 										
-										printf2("I\n");
 										temp_top = newbie;
 										reroot_tree(temper1);
 										newbie = temp_top;
-											print_tree_withinternals(newbie, debugtree);
-											printf2("rerooted: %d\t%s\n", temper1->tag, debugtree);
-											debugtree[0] = '\0';
 
-										printf2("II\n");
 										
 										temper = make_taxon();
 										temper->daughter = newbie; 
@@ -10456,26 +10417,21 @@ int spr(struct taxon * position, int maxswaps, int numspectries, int numgenetrie
 										newbie->spr = TRUE;
 
 
-										printf2("a=\n");
 										better_score = regraft(tmp, newbie, NULL, 1, maxswaps, numspectries, numgenetries);
 										
-										printf2("b\n");
 
 										if(better_score || user_break) j = i;
 										else
 											{
-											printf2("change\n");
 											dismantle_tree(newbie);
 											newbie = NULL;
 											temp_top = NULL;
-											printf2("dismantled\n");
 
 											duplicate_tree(copy, NULL); /* make a copy of the subtree */
 											newbie = temp_top;
 											temp_top = NULL;
 											number_tree(newbie, 0);
 											newbie->spr = TRUE;
-											printf2("end\n");
 											}
 										}
 									}
@@ -10488,9 +10444,6 @@ int spr(struct taxon * position, int maxswaps, int numspectries, int numgenetrie
 									temper= NULL;
 									newbie->spr = TRUE;
 									
-									print_tree(newbie, debugtree);
-									printf2("%s\n", debugtree);
-									debugtree[0] = '\0';
 									
 									better_score = regraft(tmp, newbie, NULL, 1, maxswaps, numspectries, numgenetries);
 									}
