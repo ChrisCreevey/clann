@@ -5389,7 +5389,7 @@ int check_taxa(struct taxon * position)
 	{
 	struct taxon * start = position;
 	int i =0, number = 0;
-	
+
 	while(position != NULL)
 		{
 		if(position->daughter != NULL)
@@ -7932,8 +7932,8 @@ int branchswap(int number_of_swaps, float score, int numspectries, int numgenetr
 					
         float number = score, last_number = 0;
         int  i=0, j=0, last = 0;
-        
-        
+
+
         while(i < number_of_swaps && !user_break)
             {
             last_number = number;
@@ -8029,12 +8029,27 @@ int find_swaps(float * number, struct taxon * position, int number_of_swaps, int
 	}
 		 		
 		 		
-/* This function actually does the swapping */	
-/* Part 3 */	
+/* Helper: returns TRUE if ancestor is in the parent-chain of node.
+   Used to prevent do_swap from placing a node inside its own subtree,
+   which would create a cycle in the tree structure. */
+static int is_ancestor_of(struct taxon *ancestor, struct taxon *node)
+	{
+	struct taxon *pos = node ? node->parent : NULL;
+	while(pos != NULL)
+		{
+		if(pos == ancestor) return TRUE;
+		pos = pos->parent;
+		}
+	return FALSE;
+	}
+
+/* This function actually does the swapping */
+/* Part 3 */
 void do_swap(struct taxon * first, struct taxon * second)
 	{
-	struct taxon *next = NULL, *prev = NULL, *parent = NULL, *tmp = NULL;
-	
+	struct taxon *f_parent, *f_prev, *f_next;
+	struct taxon *s_parent, *s_prev, *s_next;
+
         interval2 = time(NULL);
         if(difftime(interval2, interval1) > 5) /* every 5 seconds print a dot to the screen */
             {
@@ -8042,54 +8057,74 @@ void do_swap(struct taxon * first, struct taxon * second)
             fflush(stdout);
             interval1 = time(NULL);
             }
-            
-	/* Change everything pointing to the two being swapped */
-	if(first->parent != NULL)
-		(first->parent)->daughter = second;	
-		
-	if(second->parent != NULL)
-		(second->parent)->daughter = first;
-		
-	if(first->prev_sibling != NULL)
-		(first->prev_sibling)->next_sibling = second;
-		
-	if(second->prev_sibling != NULL)
-		(second->prev_sibling)->next_sibling = first;
-		
-	if(first->next_sibling != NULL)
-		(first->next_sibling)->prev_sibling = second;
-		
-	if(second->next_sibling != NULL)
-		(second->next_sibling)->prev_sibling = first;
-		
-	
-	
-	
-	/* Change what the two are pointing to */
-	next = first->next_sibling;
-	prev = first->prev_sibling;
-	parent = first->parent;
-	
-	first->next_sibling = second->next_sibling;
-	first->prev_sibling = second->prev_sibling;
-	first->parent = second->parent;
-	
-	second->next_sibling = next;
-	second->prev_sibling = prev;
-	second->parent = parent;
-	
-	if(tree_top == first)
+
+	/* Save ALL original pointer values before any modifications.
+	   This prevents order-of-operations bugs when the two nodes are adjacent
+	   siblings (first->next_sibling == second or second->next_sibling == first),
+	   where naive in-place updates create pointer self-loops. */
+	f_parent = first->parent;
+	f_prev   = first->prev_sibling;
+	f_next   = first->next_sibling;
+	s_parent = second->parent;
+	s_prev   = second->prev_sibling;
+	s_next   = second->next_sibling;
+
+	/* === Update EXTERNAL pointers that reference first or second === */
+	/* Use saved values only.  Skip updates where the "neighbour" IS the
+	   other node (adjacent-sibling case) — those are fixed up below. */
+
+	/* Parent's first-child (daughter) pointer */
+	if(f_parent != NULL && f_prev == NULL)
+		f_parent->daughter = second;
+	if(s_parent != NULL && s_prev == NULL &&
+	   !(s_parent == f_parent && f_prev == NULL))   /* avoid double-update when same parent */
+		s_parent->daughter = first;
+
+	/* Previous sibling's next pointer */
+	if(f_prev != NULL && f_prev != second)
+		f_prev->next_sibling = second;
+	if(s_prev != NULL && s_prev != first)
+		s_prev->next_sibling = first;
+
+	/* Next sibling's prev pointer */
+	if(f_next != NULL && f_next != second)
+		f_next->prev_sibling = second;
+	if(s_next != NULL && s_next != first)
+		s_next->prev_sibling = first;
+
+	/* === Update first's own pointers to second's old position === */
+	first->parent       = s_parent;
+	first->prev_sibling = s_prev;
+	first->next_sibling = s_next;
+
+	/* === Update second's own pointers to first's old position === */
+	second->parent       = f_parent;
+	second->prev_sibling = f_prev;
+	second->next_sibling = f_next;
+
+	/* === Fix up cross-references when the two nodes were adjacent siblings ===
+	   After the own-pointer swap above, adjacent nodes point at each other
+	   using the OLD saved value.  Correct those now. */
+	if(f_next == second)
 		{
-		 tree_top = second;
-		 }
-	else
-		{
-		if(tree_top == second)
-			{
-			tree_top = first;
-			}
+		/* first was immediately before second.
+		   After swap: second occupies first's old slot, first occupies second's.
+		   They are still adjacent but in the opposite order. */
+		second->next_sibling = first;
+		first->prev_sibling  = second;
 		}
-	
+	else if(s_next == first)
+		{
+		/* second was immediately before first — symmetric case. */
+		first->next_sibling  = second;
+		second->prev_sibling = first;
+		}
+
+	/* === Handle tree_top change === */
+	if(tree_top == first)
+		tree_top = second;
+	else if(tree_top == second)
+		tree_top = first;
 	}
 	
 
@@ -8145,7 +8180,7 @@ int swapper(struct taxon * position,struct taxon * prev_pos, int stepstaken, str
 			{
 			while(second_swap != NULL && *swaps < number_of_swaps && !better_score && !user_break)
 				{
-				if(second_swap->daughter != prev_pos )   /* As long as the sibling at the previous level is not the one that defines the clade we are in */
+				if(second_swap->daughter != prev_pos && !is_ancestor_of(second_swap, first_swap))   /* Do not swap if second_swap is an ancestor of first_swap (would create a cycle) */
 					{
 					do_swap(first_swap, second_swap);
 
