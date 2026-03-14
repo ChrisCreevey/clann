@@ -4555,7 +4555,7 @@ float compare_trees(int spr)
 			found = FALSE; here1 = TRUE; here2 = TRUE;
 			
 			/*** Next check to see if the pruning used affected this fundamental tree ***/
-			if(presenceof_SPRtaxa[i] != -1 && sourcetree_scores[i] != -1 && spr)
+			if(sourcetree_scores[i] != -1 && spr)
 				{
 				
 				/** check to see if any of the taxa from this source tree were in the subtree that was pruned **/
@@ -15355,7 +15355,7 @@ int string_SPR(char * string)
 		strcat(tmp, ",");
 		strcpy(extracted, tmp);
 		l = strlen(extracted)+strlen(string1);
-		for(j=l; j>=i; j--) {
+		for(j=l; j >= i + (int)strlen(extracted); j--) {
 			string1[j] = string1[j-strlen(extracted)];
 			}
 		for(j=0; j<strlen(extracted); j++)
