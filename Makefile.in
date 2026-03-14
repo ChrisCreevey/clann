@@ -104,11 +104,11 @@ CONFIG_CLEAN_FILES =
 CONFIG_CLEAN_VPATH_FILES =
 am__installdirs = "$(DESTDIR)$(bindir)"
 PROGRAMS = $(bin_PROGRAMS)
-am_clann_OBJECTS = treecompare2.$(OBJEXT)
+am_clann_OBJECTS = clann-treecompare2.$(OBJEXT)
 clann_OBJECTS = $(am_clann_OBJECTS)
 am__DEPENDENCIES_1 =
 clann_DEPENDENCIES = $(am__DEPENDENCIES_1)
-clann_LINK = $(CCLD) $(AM_CFLAGS) $(CFLAGS) $(clann_LDFLAGS) \
+clann_LINK = $(CCLD) $(clann_CFLAGS) $(CFLAGS) $(clann_LDFLAGS) \
 	$(LDFLAGS) -o $@
 AM_V_P = $(am__v_P_@AM_V@)
 am__v_P_ = $(am__v_P_@AM_DEFAULT_V@)
@@ -125,8 +125,12 @@ am__v_at_1 =
 DEFAULT_INCLUDES = -I.@am__isrc@
 depcomp = $(SHELL) $(top_srcdir)/depcomp
 am__maybe_remake_depfiles = depfiles
-am__depfiles_remade = ./$(DEPDIR)/treecompare2.Po
+am__depfiles_remade = ./$(DEPDIR)/clann-treecompare2.Po
 am__mv = mv -f
+AM_V_lt = $(am__v_lt_@AM_V@)
+am__v_lt_ = $(am__v_lt_@AM_DEFAULT_V@)
+am__v_lt_0 = --silent
+am__v_lt_1 = 
 COMPILE = $(CC) $(DEFS) $(DEFAULT_INCLUDES) $(INCLUDES) $(AM_CPPFLAGS) \
 	$(CPPFLAGS) $(AM_CFLAGS) $(CFLAGS)
 AM_V_CC = $(am__v_CC_@AM_V@)
@@ -282,7 +286,8 @@ top_builddir = @top_builddir@
 top_srcdir = @top_srcdir@
 clann_SOURCES = treecompare2.c
 clann_LDADD = $(LDADD) $(LIBREADLINE) -lm
-clann_LDFLAGS = -g -O0 -Wall -funroll-loops -fsanitize=address
+clann_CFLAGS = -g -O0 -Wall -funroll-loops -fsanitize=address
+clann_LDFLAGS = -fsanitize=address
 all: config.h
 	$(MAKE) $(AM_MAKEFLAGS) all-am
 
@@ -389,7 +394,7 @@ mostlyclean-compile:
 distclean-compile:
 	-rm -f *.tab.c
 
-@AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/treecompare2.Po@am__quote@ # am--include-marker
+@AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/clann-treecompare2.Po@am__quote@ # am--include-marker
 
 $(am__depfiles_remade):
 	@$(MKDIR_P) $(@D)
@@ -410,6 +415,20 @@ am--depfiles: $(am__depfiles_remade)
 @AMDEP_TRUE@@am__fastdepCC_FALSE@	$(AM_V_CC)source='$<' object='$@' libtool=no @AMDEPBACKSLASH@
 @AMDEP_TRUE@@am__fastdepCC_FALSE@	DEPDIR=$(DEPDIR) $(CCDEPMODE) $(depcomp) @AMDEPBACKSLASH@
 @am__fastdepCC_FALSE@	$(AM_V_CC@am__nodep@)$(COMPILE) -c -o $@ `$(CYGPATH_W) '$<'`
+
+clann-treecompare2.o: treecompare2.c
+@am__fastdepCC_TRUE@	$(AM_V_CC)$(CC) $(DEFS) $(DEFAULT_INCLUDES) $(INCLUDES) $(AM_CPPFLAGS) $(CPPFLAGS) $(clann_CFLAGS) $(CFLAGS) -MT clann-treecompare2.o -MD -MP -MF $(DEPDIR)/clann-treecompare2.Tpo -c -o clann-treecompare2.o `test -f 'treecompare2.c' || echo '$(srcdir)/'`treecompare2.c
+@am__fastdepCC_TRUE@	$(AM_V_at)$(am__mv) $(DEPDIR)/clann-treecompare2.Tpo $(DEPDIR)/clann-treecompare2.Po
+@AMDEP_TRUE@@am__fastdepCC_FALSE@	$(AM_V_CC)source='treecompare2.c' object='clann-treecompare2.o' libtool=no @AMDEPBACKSLASH@
+@AMDEP_TRUE@@am__fastdepCC_FALSE@	DEPDIR=$(DEPDIR) $(CCDEPMODE) $(depcomp) @AMDEPBACKSLASH@
+@am__fastdepCC_FALSE@	$(AM_V_CC@am__nodep@)$(CC) $(DEFS) $(DEFAULT_INCLUDES) $(INCLUDES) $(AM_CPPFLAGS) $(CPPFLAGS) $(clann_CFLAGS) $(CFLAGS) -c -o clann-treecompare2.o `test -f 'treecompare2.c' || echo '$(srcdir)/'`treecompare2.c
+
+clann-treecompare2.obj: treecompare2.c
+@am__fastdepCC_TRUE@	$(AM_V_CC)$(CC) $(DEFS) $(DEFAULT_INCLUDES) $(INCLUDES) $(AM_CPPFLAGS) $(CPPFLAGS) $(clann_CFLAGS) $(CFLAGS) -MT clann-treecompare2.obj -MD -MP -MF $(DEPDIR)/clann-treecompare2.Tpo -c -o clann-treecompare2.obj `if test -f 'treecompare2.c'; then $(CYGPATH_W) 'treecompare2.c'; else $(CYGPATH_W) '$(srcdir)/treecompare2.c'; fi`
+@am__fastdepCC_TRUE@	$(AM_V_at)$(am__mv) $(DEPDIR)/clann-treecompare2.Tpo $(DEPDIR)/clann-treecompare2.Po
+@AMDEP_TRUE@@am__fastdepCC_FALSE@	$(AM_V_CC)source='treecompare2.c' object='clann-treecompare2.obj' libtool=no @AMDEPBACKSLASH@
+@AMDEP_TRUE@@am__fastdepCC_FALSE@	DEPDIR=$(DEPDIR) $(CCDEPMODE) $(depcomp) @AMDEPBACKSLASH@
+@am__fastdepCC_FALSE@	$(AM_V_CC@am__nodep@)$(CC) $(DEFS) $(DEFAULT_INCLUDES) $(INCLUDES) $(AM_CPPFLAGS) $(CPPFLAGS) $(clann_CFLAGS) $(CFLAGS) -c -o clann-treecompare2.obj `if test -f 'treecompare2.c'; then $(CYGPATH_W) 'treecompare2.c'; else $(CYGPATH_W) '$(srcdir)/treecompare2.c'; fi`
 
 ID: $(am__tagged_files)
 	$(am__define_uniq_tagged_files); mkid -fID $$unique
@@ -684,7 +703,7 @@ clean-am: clean-binPROGRAMS clean-generic mostlyclean-am
 
 distclean: distclean-am
 	-rm -f $(am__CONFIG_DISTCLEAN_FILES)
-	-rm -f ./$(DEPDIR)/treecompare2.Po
+	-rm -f ./$(DEPDIR)/clann-treecompare2.Po
 	-rm -f Makefile
 distclean-am: clean-am distclean-compile distclean-generic \
 	distclean-hdr distclean-tags
@@ -732,7 +751,7 @@ installcheck-am:
 maintainer-clean: maintainer-clean-am
 	-rm -f $(am__CONFIG_DISTCLEAN_FILES)
 	-rm -rf $(top_srcdir)/autom4te.cache
-	-rm -f ./$(DEPDIR)/treecompare2.Po
+	-rm -f ./$(DEPDIR)/clann-treecompare2.Po
 	-rm -f Makefile
 maintainer-clean-am: distclean-am maintainer-clean-generic
 

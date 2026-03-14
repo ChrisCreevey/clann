@@ -5,7 +5,7 @@ AC_PREREQ(2.59)
 AC_INIT([clann], [4.3.0], [chris.creevey@gmail.com], [clann], [https://github.com/ChrisCreevey/clann])
 
 AM_INIT_AUTOMAKE([1.5 foreign])
-AM_CONFIG_HEADER(config.h)
+AC_CONFIG_HEADERS([config.h])
 
 dnl do check for readline
 
