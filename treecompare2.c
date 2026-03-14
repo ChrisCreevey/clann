@@ -4414,19 +4414,31 @@ void alltrees_search(int user)
                 score = (float)quartet_compatibility(tree);
                 }
                 
-            if(treesfile != NULL)  /* if the create option was selected */
+            /* Always populate best_tree with named tree for retained_supers storage.
+               For criterion==0 (MSSA) tree_top is already built; for MRC/QC we convert
+               the integer-indexed tree string directly using returntree(). This ensures
+               retained_supers[] always holds actual taxon names so that
+               'reconstruct speciestree memory' works correctly after alltrees. */
+            if(criterion == 0 && tree_top != NULL)
                 {
                 strcpy(best_tree, "");
                 print_named_tree(tree_top, best_tree);
-                fprintf(treesfile,"%s;\t[%f]\n", best_tree, score);
                 }
-    
-    
-            
+            else
+                {
+                strcpy(best_tree, tree);
+                returntree(best_tree);
+                }
+
+            if(treesfile != NULL)  /* if the create option was selected */
+                fprintf(treesfile,"%s;\t[%f]\n", best_tree, score);
+
+
+
             if(i==1)
                 {
-				retained_supers[0] = realloc(retained_supers[0], (strlen(tree)+10)*sizeof(char));
-                strcpy(retained_supers[0], tree);
+				retained_supers[0] = realloc(retained_supers[0], (strlen(best_tree)+10)*sizeof(char));
+                strcpy(retained_supers[0], best_tree);
                 scores_retained_supers[0] = score;
                 best_score = score;
                 }
@@ -4434,8 +4446,8 @@ void alltrees_search(int user)
                 {
                 if(score < best_score)
                     {
-					retained_supers[0] = realloc(retained_supers[0], (strlen(tree)+10)*sizeof(char));
-                    strcpy(retained_supers[0], tree);
+					retained_supers[0] = realloc(retained_supers[0], (strlen(best_tree)+10)*sizeof(char));
+                    strcpy(retained_supers[0], best_tree);
                     scores_retained_supers[0] = score;
                     best_score = score;
                     j=1;
@@ -4456,8 +4468,8 @@ void alltrees_search(int user)
                             j++;
                             if(j+1 == number_retained_supers) reallocate_retained_supers();
                             }
-						retained_supers[j] = realloc(retained_supers[j], (strlen(tree)+10)*sizeof(char));
-                        strcpy(retained_supers[j], tree);
+						retained_supers[j] = realloc(retained_supers[j], (strlen(best_tree)+10)*sizeof(char));
+                        strcpy(retained_supers[j], best_tree);
                         scores_retained_supers[j] = score;
                         }
                     }
@@ -4488,14 +4500,15 @@ void alltrees_search(int user)
                     tree_top = NULL;
                     }
                 temp_top = NULL;
-                tree_build(1, retained_supers[i], tree_top, FALSE, -1, 0);
+                /* retained_supers[] now stores named trees (actual taxon names), so use TRUE */
+                tree_build(1, retained_supers[i], tree_top, TRUE, -1, 0);
                 tree_top = temp_top;
                 temp_top = NULL;
-            
+
                 strcpy(best_tree, "");
-            
+
                 print_named_tree(tree_top, best_tree);
-                
+
                 if(userfile != NULL) fprintf(userfile, "%s;\t[%f]\n", best_tree, scores_retained_supers[i] );
 
                 tree_coordinates(best_tree, FALSE, TRUE, FALSE, -1);
@@ -4503,12 +4516,9 @@ void alltrees_search(int user)
                 i++;
                 }
 
-            while(i>=0)
-                {
-                strcpy(retained_supers[i], "");
-                scores_retained_supers[i] = -1;
-                i--;
-                }
+            /* Keep retained_supers[] in memory (like hs/nj) so 'reconstruct speciestree memory'
+               can use the alltrees result. Set trees_in_memory to the count of best trees found. */
+            trees_in_memory = j;
             
           
             }
@@ -17190,7 +17200,7 @@ void add_losses(struct taxon * position, struct taxon *species_top)
 	int *presence = NULL, i;
 	
 	presence = malloc((2*number_of_taxa)*sizeof(int));
-	for(i=0; i<number_of_taxa; i++) presence[i] = FALSE;
+	for(i=0; i<2*number_of_taxa; i++) presence[i] = FALSE;
 	
 	/** Go down the gene tree to the bottom */
 	while(position != NULL)
@@ -17242,9 +17252,15 @@ struct taxon * construct_tree(struct taxon * spec_pos, struct taxon *gene_pos, i
 			/*** Find the position on the gene tree extra */
 			position = extra_gene;
 			count = 0;
-			while(position->tag != spec_pos->tag)
+			while(position != NULL && position->tag != spec_pos->tag)
 					position = position->next_sibling;
-					
+			if(position == NULL)
+				{
+				/* Tag not found — should not happen in a consistent reconciliation; skip this species node */
+				spec_pos = spec_pos->next_sibling;
+				continue;
+				}
+
 			/*** uncouple this from extra_gene and place in the gene tree ***/
 			if(position == extra_gene)
 				extra_gene = position->next_sibling;
