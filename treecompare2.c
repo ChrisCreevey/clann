@@ -1543,7 +1543,7 @@ void print_commands(int num)
 		printf2("\tOptions\t\tSettings\t\t\tCurrent\n");
         printf2("\t===========================================================\n");
 		printf2("\n\tduplications\t<value>\t\t\t\t*1.0\n\tlosses\t\t<value>\t\t\t\t*1.0");
-		printf2("\n\tshowrecon\tyes | no\t\t\t*no\n\tbasescore\t<value>\t\t\t\t*1.0\n\tprintfiles\tyes | no\t\t\t*yes");
+		printf2("\n\tshowrecon\tyes | no\t\t\t*no\n\tbasescore\t<value>\t\t\t\t*1.0\n\tprintfiles\tyes | no\t\t\t*yes\n\tspeciestree\tmemory | first | <file>\t\t*memory");
 		}
      if(num == 25)
         {
@@ -17979,16 +17979,17 @@ void make_unrooted(struct taxon * position)
 		}
 	}
 
-void reconstruct(int print_settings)  /* Carry out gene-tree reconciliation of trees in memory, using the first tree in memory as the species tree */
+void reconstruct(int print_settings)  /* Carry out gene-tree reconciliation of source trees against a species tree */
 	{
 	struct taxon *position = NULL, *species_tree = NULL, *gene_tree = NULL, *best_mapping = NULL, *unknown_fund = NULL, *pos = NULL, *copy = NULL, *newbie = NULL;
-	int i, j, k, l, xnum=0, *presence = NULL, **label_results = NULL, num_species_internal = 0, error = FALSE, printfiles = FALSE, how_many = 0, diff_overall =0, dorecon = FALSE, basescore = 1, taxaorder=0;
+	int i, j, k, l, xnum=0, *presence = NULL, **label_results = NULL, num_species_internal = 0, error = FALSE, printfiles = FALSE, how_many = 0, diff_overall =0, dorecon = FALSE, basescore = 1, taxaorder=0, species_source = 0, gene_tree_start = 0;
 	float *overall_placements = NULL, biggest = -1, total, best_total = -1;
-	char *temptree, temptree1[TREE_LENGTH],temptree2[TREE_LENGTH], reconfilename[100], otherfilename[100], *tmp1 = NULL, c = '\0';
+	char *temptree, temptree1[TREE_LENGTH],temptree2[TREE_LENGTH], reconfilename[100], otherfilename[100], *tmp1 = NULL, c = '\0', speciestree_file[1000];
 	FILE *reconstructionfile = NULL, *descendentsfile = NULL, *genebirthfile = NULL;
 	
 	temptree = malloc(TREE_LENGTH*sizeof(char));
 	temptree[0] = '\0';
+	speciestree_file[0] = '\0';
 	temptree1[0] = '\0';
 	reconfilename[0] ='\0';
 	otherfilename[0] = '\0';
@@ -18003,6 +18004,19 @@ void reconstruct(int print_settings)  /* Carry out gene-tree reconciliation of t
 			{
 			if(strcmp(parsed_command[i+1], "yes") == 0)
 				printfiles = TRUE;
+			}
+		if(strcmp(parsed_command[i], "speciestree") == 0)
+			{
+			/* values: "memory", "first", or a filename */
+			if(strcmp(parsed_command[i+1], "memory") == 0)
+				species_source = 1;
+			else if(strcmp(parsed_command[i+1], "first") == 0)
+				species_source = 2;
+			else
+				{
+				species_source = 3;
+				strcpy(speciestree_file, parsed_command[i+1]);
+				}
 			}
 		if(strcmp(parsed_command[i], "showrecon") == 0)
 			{
@@ -18081,12 +18095,61 @@ void reconstruct(int print_settings)  /* Carry out gene-tree reconciliation of t
 				}
 			}
 		}
+	/* Resolve species tree source and validate */
+	if(species_source == 0)
+		{
+		if(trees_in_memory > 0)
+			species_source = 1;
+		else
+			{
+			printf2("Error: No supertree is in memory. Run 'hs', 'nj' or 'alltrees' first,\n");
+			printf2("       or specify a species tree with: reconstruct speciestree <file>\n");
+			error = TRUE;
+			}
+		}
+	if(species_source == 1 && trees_in_memory == 0)
+		{
+		printf2("Error: No supertree in memory for 'speciestree memory'.\n");
+		error = TRUE;
+		}
+	if(species_source == 3 && !error)
+		{
+		FILE *stcheck = fopen(speciestree_file, "r");
+		if(stcheck == NULL)
+			{
+			printf2("Error: Cannot open species tree file '%s'\n", speciestree_file);
+			error = TRUE;
+			}
+		else fclose(stcheck);
+		}
+	gene_tree_start = (species_source == 2) ? 1 : 0;
 	if(!error)
 		{
 		if(print_settings)printf2("\nReconstruction of Most likely Duplications and Losses\n\tDuplication weight = %f\n\tLosses weight = %f\n\nTree name:\tReconstruction score\n", dup_weight, loss_weight);
 		/**** BUILD THE SPECIES TREE *****/
-		strcpy(temptree, fundamentals[0]);
-		returntree(temptree); 
+		if(species_source == 1)
+			{
+			/* Use supertree from memory -- already has actual taxon names */
+			strcpy(temptree, retained_supers[0]);
+			printf2("Using supertree in memory as species tree.\n");
+			}
+		else if(species_source == 3)
+			{
+			/* Read species tree from user-specified file */
+			FILE *stfile = fopen(speciestree_file, "r");
+			int si = 0; int sc;
+			while((sc = getc(stfile)) != EOF && sc != ';') { temptree[si++] = (char)sc; }
+			temptree[si++] = ';'; temptree[si] = '\0';
+			fclose(stfile);
+			printf2("Using species tree from file: %s\n", speciestree_file);
+			}
+		else
+			{
+			/* Legacy: use first source tree (fundamentals[0]) */
+			strcpy(temptree, fundamentals[0]);
+			returntree(temptree);
+			printf2("Using first source tree as species tree (legacy mode).\n");
+			}
 		/* build the tree in memory */
 		/****** We now need to build the Species tree in memory *******/
 		temp_top = NULL;
@@ -18117,7 +18180,7 @@ void reconstruct(int print_settings)  /* Carry out gene-tree reconciliation of t
 			}
 		
 		
-		for(l=1; l<Total_fund_trees; l++)
+		for(l=gene_tree_start; l<Total_fund_trees; l++)
 			{
 			temp_top = NULL;
 			strcpy(temptree, "");
