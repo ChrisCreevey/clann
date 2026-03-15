@@ -37,6 +37,7 @@
 #define TREE_LENGTH 1000000
 #define TAXA_NUM 1000
 #define NAME_LENGTH 1000
+#define LOG10E 0.43429448190325182765  /* log10(e): for L.U.st ML likelihood conversion */
 
 
 
@@ -82,6 +83,13 @@ typedef struct {
     int       zero_present; /* special-case: was key==0 inserted? */
 } VisitedSet;
 
+typedef struct {
+    uint64_t *hashes;   /* sorted array of canonical bipartition hashes */
+    int       count;
+} BipartSet;
+
+BipartSet *fund_bipart_sets = NULL;  /* [Total_fund_trees], precomputed once per analysis */
+
 
 /*********** Function definitions ********************/
 
@@ -119,6 +127,9 @@ static int         vs_contains(VisitedSet *vs, uint64_t key);
 static void        vs_insert(VisitedSet *vs, uint64_t key);
 static uint64_t    tree_topo_hash(struct taxon *root);
 float compare_trees(int spr);
+void  rf_precompute_fund_biparts(void);
+float compare_trees_rf(int spr);
+float compare_trees_ml(int spr);
 struct taxon * make_taxon(void);
 void intTotree(int tree_num, char *array, int num_taxa);
 int tree_build (int c, char *treestring, struct taxon *parent, int fromfile, int fund_num, int taxaorder);
@@ -289,6 +300,8 @@ int seed, num_commands = 0, number_retained_supers = 10, number_of_steps = 3, la
 struct taxon *tree_top = NULL, *temp_top = NULL, *temp_top2 = NULL, *branchpointer = NULL, *longestseq = NULL;
 float *scores_retained_supers = NULL, *partition_number = NULL, num_partitions = 0, total_partitions = 0, sprscore = -1, *best_topology_scores = NULL, **weighted_scores = NULL, *sourcetree_scores = NULL, *tree_weights = NULL;
 float *score_of_bootstraps = NULL, *yaptp_results = NULL, largest_length = 0, dup_weight = 1, loss_weight = 1, hgt_weight = 1, BESTSCORE = -1;
+float ml_beta = 1.0f;   /* L.U.st exponential slope parameter (default 1.0) */
+int   ml_lust_compat = FALSE; /* TRUE: multiply score by log10(e) to match L.U.st output exactly */
 time_t interval1, interval2;
 double sup=1;
 char saved_supertree[TREE_LENGTH],  *test_array, inputfilename[10000], delimiter_char = '.', logfile_name[10000], system_call[100000];
@@ -559,7 +572,7 @@ int main(int argc, char *argv[])
                             {
                             if(number_of_taxa > 0)
                                 {                                        
-                                if(criterion == 0 || criterion == 2 || criterion == 3)    /** MRP or MSS or QC **/
+                                if(criterion == 0 || criterion == 2 || criterion == 3 || criterion == 5 || criterion == 6 || criterion == 7)
                                     alltrees_search(TRUE);
                                 else
                                     {
@@ -1333,7 +1346,7 @@ void print_commands(int num)
         printf2("\tOptions\t\tSettings\t\t\tCurrent\n");
         printf2("\t===========================================================\n");
         if(delimiter) printf2("\n\t(Note: delimiter mode is ON -- multicopy gene trees will be automatically\n\texcluded from the search; use 'maxnamelen=full' to disable)\n");
-        if(criterion == 0 || criterion == 2 || criterion == 3 || criterion==5)
+        if(criterion == 0 || criterion == 2 || criterion == 3 || criterion==5 || criterion==6 || criterion==7)
             {
             printf2("\n\tsample\t\t<integer number>\t\t*10,000\n\tnreps\t\t<integer number>\t\t*10");
             printf2("\n\tswap\t\tnni | spr | tbr\t\t\t");
@@ -1475,12 +1488,16 @@ void print_commands(int num)
         printf2("\nset [options]  \n\n\n");
         printf2("\tOptions\t\tSettings\t\t\tCurrent\n");
         printf2("\t===========================================================\n");
-        printf2("\n\tcriterion\tdfit | sfit | qfit | mrp | avcon\t");
+        printf2("\n\tcriterion\tdfit | sfit | qfit | mrp | avcon | rf | ml\t");
+        printf2("\n\tmlbeta\t\t<float > 0>\t\t\t\t%.4f", ml_beta);
+        printf2("\n\tmlscale\t\tpaper | lust\t\t\t\t%s", ml_lust_compat ? "lust" : "paper");
         if(criterion == 0) printf2("dfit");
         if(criterion == 1) printf2("mrp");
         if(criterion == 2) printf2("sfit");
         if(criterion == 3) printf2("qfit");
         if(criterion == 4) printf2("avcon");
+        if(criterion == 6) printf2("rf");
+        if(criterion == 7) printf2("ml");
         printf2("\n");
         printf2("\n\tseed\t\t<integer number>\t\t\t%d", seed);
 /*        printf2("\n\n\t\t\tdfit = best Distance Fit\n\t\t\tsfit = maximum Splits Fit\n\t\t\tqfit = maximum Quartet Fit\n\t\t\tmrp = Matrix representation using parsimony\n");
@@ -4437,8 +4454,9 @@ void alltrees_search(int user)
             coding(0,0,0);
             if(criterion == 2) condense_coding();
             }
-    
-    
+        if(criterion == 6 || criterion == 7) rf_precompute_fund_biparts();
+
+
         if(start == 0 && end == 0)
             {
             start = 1;
@@ -4494,13 +4512,23 @@ void alltrees_search(int user)
                 unroottree(tree);
                 score = (float)quartet_compatibility(tree);
                 }
-                
+            if(criterion == 6 || criterion == 7)  /* RF or ML: build tree_top then score */
+                {
+                if(tree_top != NULL) { dismantle_tree(tree_top); tree_top = NULL; }
+                temp_top = NULL;
+                tree_build(1, tree, tree_top, FALSE, -1, 0);
+                tree_top = temp_top;
+                temp_top = NULL;
+                if(criterion == 6) score = compare_trees_rf(FALSE);
+                else               score = compare_trees_ml(FALSE);
+                }
+
             /* Always populate best_tree with named tree for retained_supers storage.
-               For criterion==0 (MSSA) tree_top is already built; for MRC/QC we convert
+               For criterion==0/6/7 tree_top is already built; for MRC/QC we convert
                the integer-indexed tree string directly using returntree(). This ensures
                retained_supers[] always holds actual taxon names so that
                'reconstruct speciestree memory' works correctly after alltrees. */
-            if(criterion == 0 && tree_top != NULL)
+            if((criterion == 0 || criterion == 6 || criterion == 7) && tree_top != NULL)
                 {
                 strcpy(best_tree, "");
                 print_named_tree(tree_top, best_tree);
@@ -4673,6 +4701,7 @@ float compare_trees(int spr)
 					strcpy(pruned_tree, tmp);
 					}
 				strcat(pruned_tree, ";");
+				while(unroottree(pruned_tree));  /* remove bifurcating root from SPR-at-root grafts */
 			
 				/* initialise the super_scores array */
 				for(j=0; j<number_of_taxa; j++)
@@ -7107,6 +7136,253 @@ static uint64_t tree_topo_hash(struct taxon *root)
     }
 
 
+/* --- Robinson-Foulds bipartition hash-set infrastructure -----------------
+ *
+ * collect_biparts_newick: parse an integer-indexed Newick string and fill
+ *   out[] with canonical bipartition hashes (sorted ascending).  Returns
+ *   the count.  Excludes trivial bipartitions (canonical hash == 0).
+ *   The source tree must already be unrooted (trifurcating root).
+ *
+ * bipart_intersection_count: merge-walk two sorted uint64_t arrays and
+ *   return the number of equal elements.
+ *
+ * rf_precompute_fund_biparts: precompute BipartSet for every source tree
+ *   once before the heuristic search begins.  Safe to call multiple times.
+ *
+ * compare_trees_rf: score the current supertree (tree_top) against all
+ *   source trees using normalised RF distance.  Follows compare_trees().
+ */
+
+static int cmp_uint64(const void *a, const void *b)
+    {
+    uint64_t x = *(const uint64_t*)a, y = *(const uint64_t*)b;
+    return (x > y) - (x < y);
+    }
+
+static int collect_biparts_newick(const char *nwk, uint64_t total_hash, uint64_t *out)
+    {
+    uint64_t stack[2 * NAME_LENGTH + 4];  /* depth bounded by number of taxa */
+    int depth = 0, cnt = 0, i = 0;
+    stack[0] = 0;
+    while(nwk[i] && nwk[i] != ';')
+        {
+        if(nwk[i] == '(')
+            { stack[++depth] = 0; i++; }
+        else if(nwk[i] == ')')
+            {
+            uint64_t child_sh = stack[depth--];
+            uint64_t comp = total_hash ^ child_sh;
+            uint64_t bh   = (child_sh < comp) ? child_sh : comp;
+            if(bh != 0) out[cnt++] = bh;  /* skip trivial bipartitions */
+            stack[depth] ^= child_sh;
+            i++;
+            }
+        else if(nwk[i] == ',')
+            { i++; }
+        else if(nwk[i] == ':')
+            { while(nwk[i] && nwk[i] != ',' && nwk[i] != ')' && nwk[i] != ';') i++; }
+        else
+            {  /* taxon integer index */
+            char num[64]; int j = 0;
+            while(nwk[i] && nwk[i] != '(' && nwk[i] != ')' && nwk[i] != ',' && nwk[i] != ':')
+                num[j++] = nwk[i++];
+            num[j] = '\0';
+            int tidx = atoi(num);
+            if(tidx >= 0 && tidx < number_of_taxa)
+                stack[depth] ^= taxon_hash_vals[tidx];
+            }
+        }
+    qsort(out, cnt, sizeof(uint64_t), cmp_uint64);
+    return cnt;
+    }
+
+static int bipart_intersection_count(const uint64_t *a, int na,
+                                     const uint64_t *b, int nb)
+    {
+    int i = 0, j = 0, shared = 0;
+    while(i < na && j < nb)
+        {
+        if(a[i] == b[j])      { shared++; i++; j++; }
+        else if(a[i] < b[j])  i++;
+        else                  j++;
+        }
+    return shared;
+    }
+
+void rf_precompute_fund_biparts(void)
+    {
+    int i, j;
+    if(fund_bipart_sets != NULL)
+        {
+        for(i = 0; i < Total_fund_trees; i++) free(fund_bipart_sets[i].hashes);
+        free(fund_bipart_sets);
+        }
+    fund_bipart_sets = malloc(Total_fund_trees * sizeof(BipartSet));
+    for(i = 0; i < Total_fund_trees; i++)
+        {
+        fund_bipart_sets[i].hashes = malloc(number_of_taxa * sizeof(uint64_t));
+        fund_bipart_sets[i].count  = 0;
+        if(!sourcetreetag[i]) continue;
+        uint64_t total_hash = 0;
+        for(j = 0; j < number_of_taxa; j++)
+            if(presence_of_taxa[i][j]) total_hash ^= taxon_hash_vals[j];
+        char *tmp = malloc(strlen(fundamentals[i]) + 10);
+        strcpy(tmp, fundamentals[i]);
+        unroottree(tmp);
+        fund_bipart_sets[i].count =
+            collect_biparts_newick(tmp, total_hash, fund_bipart_sets[i].hashes);
+        free(tmp);
+        }
+    }
+
+float compare_trees_rf(int spr)
+    {
+    int i, j;
+    float total = 0.0f;
+    char *pruned_nwk    = malloc(TREE_LENGTH * sizeof(char));
+    char *tmp           = malloc(TREE_LENGTH * sizeof(char));
+    uint64_t *super_bp  = malloc(number_of_taxa * sizeof(uint64_t));
+
+    for(i = 0; i < Total_fund_trees; i++)
+        {
+        if(!sourcetreetag[i]) continue;
+
+        int found = FALSE, here1 = TRUE, here2 = TRUE;
+        if(sourcetree_scores[i] != -1 && spr)
+            {
+            for(j = 0; j < number_of_taxa; j++)
+                {
+                if(presence_of_taxa[i][j] > 0 && presenceof_SPRtaxa[j] == TRUE)  here1 = FALSE;
+                if(presence_of_taxa[i][j] > 0 && presenceof_SPRtaxa[j] == FALSE) here2 = FALSE;
+                }
+            if(here1 || here2) found = TRUE;
+            }
+
+        if(!found || !spr)
+            {
+            int ntaxa_i = 0;
+            uint64_t total_hash = 0;
+            for(j = 0; j < number_of_taxa; j++)
+                if(presence_of_taxa[i][j]) { ntaxa_i++; total_hash ^= taxon_hash_vals[j]; }
+            if(ntaxa_i < 4) { sourcetree_scores[i] = 0.0f; continue; }
+
+            prune_tree(tree_top, i);
+            shrink_tree(tree_top);
+
+            pruned_nwk[0] = '\0';
+            if(print_pruned_tree(tree_top, 0, pruned_nwk, FALSE, 0) > 1)
+                {
+                tmp[0] = '\0';
+                strcpy(tmp, "("); strcat(tmp, pruned_nwk); strcat(tmp, ")");
+                strcpy(pruned_nwk, tmp);
+                }
+            strcat(pruned_nwk, ";");
+
+            while(unroottree(pruned_nwk));  /* remove bifurcating root from SPR-at-root grafts */
+            int super_cnt = collect_biparts_newick(pruned_nwk, total_hash, super_bp);
+            reset_tree(tree_top);
+
+            int gene_cnt = fund_bipart_sets[i].count;
+            int shared   = bipart_intersection_count(super_bp, super_cnt,
+                                                     fund_bipart_sets[i].hashes, gene_cnt);
+            float rf = (float)(super_cnt + gene_cnt - 2 * shared);
+            int max_rf = 2 * (ntaxa_i - 3);
+            if(max_rf > 0) rf /= (float)max_rf;
+            rf *= tree_weights[i];
+            sourcetree_scores[i] = rf;
+            total += rf;
+            }
+        else
+            {
+            total += sourcetree_scores[i];
+            }
+        }
+
+    free(super_bp);
+    free(tmp);
+    free(pruned_nwk);
+    return total;
+    }
+
+/* --- ML (L.U.st) scoring function ----------------------------------------
+ * compare_trees_ml: identical to compare_trees_rf() but uses raw (unnormalised)
+ * RF distance and applies the L.U.st exponential log-likelihood transform.
+ * Score stored = beta * d * log10(e)  (negated log-likelihood, >=0, minimised).
+ * Reuses fund_bipart_sets precomputed by rf_precompute_fund_biparts().
+ */
+float compare_trees_ml(int spr)
+    {
+    int i, j;
+    float total = 0.0f;
+    char *pruned_nwk   = malloc(TREE_LENGTH * sizeof(char));
+    char *tmp          = malloc(TREE_LENGTH * sizeof(char));
+    uint64_t *super_bp = malloc(number_of_taxa * sizeof(uint64_t));
+
+    for(i = 0; i < Total_fund_trees; i++)
+        {
+        if(!sourcetreetag[i]) continue;
+
+        int found = FALSE, here1 = TRUE, here2 = TRUE;
+        if(sourcetree_scores[i] != -1 && spr)
+            {
+            for(j = 0; j < number_of_taxa; j++)
+                {
+                if(presence_of_taxa[i][j] > 0 && presenceof_SPRtaxa[j] == TRUE)  here1 = FALSE;
+                if(presence_of_taxa[i][j] > 0 && presenceof_SPRtaxa[j] == FALSE) here2 = FALSE;
+                }
+            if(here1 || here2) found = TRUE;
+            }
+
+        if(!found || !spr)
+            {
+            int ntaxa_i = 0;
+            uint64_t total_hash = 0;
+            for(j = 0; j < number_of_taxa; j++)
+                if(presence_of_taxa[i][j]) { ntaxa_i++; total_hash ^= taxon_hash_vals[j]; }
+            if(ntaxa_i < 4) { sourcetree_scores[i] = 0.0f; continue; }
+
+            prune_tree(tree_top, i);
+            shrink_tree(tree_top);
+
+            pruned_nwk[0] = '\0';
+            if(print_pruned_tree(tree_top, 0, pruned_nwk, FALSE, 0) > 1)
+                {
+                tmp[0] = '\0';
+                strcpy(tmp, "("); strcat(tmp, pruned_nwk); strcat(tmp, ")");
+                strcpy(pruned_nwk, tmp);
+                }
+            strcat(pruned_nwk, ";");
+
+            while(unroottree(pruned_nwk));  /* remove bifurcating root from SPR-at-root grafts */
+            int super_cnt = collect_biparts_newick(pruned_nwk, total_hash, super_bp);
+            reset_tree(tree_top);
+
+            int gene_cnt = fund_bipart_sets[i].count;
+            int shared   = bipart_intersection_count(super_bp, super_cnt,
+                                                     fund_bipart_sets[i].hashes, gene_cnt);
+            /* Raw RF distance — no normalisation */
+            float d = (float)(super_cnt + gene_cnt - 2 * shared);
+            /* Negated log-likelihood: -ln L = beta * d  (paper formula, default).
+             * With ml_lust_compat, multiply by log10(e) to match L.U.st output exactly. */
+            float ml_score = (float)(ml_beta * d * (ml_lust_compat ? LOG10E : 1.0f)) * tree_weights[i];
+            sourcetree_scores[i] = ml_score;
+            total += ml_score;
+            }
+        else
+            {
+            total += sourcetree_scores[i];
+            }
+        }
+
+    free(super_bp);
+    free(tmp);
+    free(pruned_nwk);
+    return total;
+    }
+
+/* --- end RF/ML functions ------------------------------------------------- */
+
+
 /*  hs_same_topology -------------------------------------------------------
  *  Returns TRUE if the two named-taxon Newick strings t1 and t2 represent
  *  the same unrooted topology, using the path-metric comparison (identical
@@ -7226,8 +7502,8 @@ static void hs_merge_results(char ***par_retained, float **par_scores, int *par_
                 }
             }
 
-        /* Add tree if it matches the current best score (use 1e-4 to handle float ULP at ~10). */
-        if(fabsf(msc - *par_best) < 1e-4f)
+        /* Add tree if it matches the current best score (relative tolerance scales with score magnitude). */
+        if(fabsf(msc - *par_best) <= 1e-5f * (fabsf(*par_best) + 1e-6f))
             {
             is_dup = FALSE;
             for(mj=0; mj<*par_n; mj++)
@@ -7620,6 +7896,33 @@ void heuristic_search(int user, int print, int sample, int nreps)
 				error = TRUE;
 				}
 			}
+		if(strcmp(parsed_command[i], "mlbeta") == 0)
+			{
+			ml_beta = atof(parsed_command[i+1]);
+			if(ml_beta <= 0)
+				{
+				printf2("Error: mlbeta must be > 0\n");
+				ml_beta = 1.0f;
+				error = TRUE;
+				}
+			else
+				printf2("ML beta parameter set to %.4f\n", ml_beta);
+			}
+		if(strcmp(parsed_command[i], "mlscale") == 0)
+			{
+			if(strcmp(parsed_command[i+1], "lust") == 0 || strcmp(parsed_command[i+1], "LUSt") == 0)
+				{
+				ml_lust_compat = TRUE;
+				printf2("ML scoring: L.U.st-compatible scaling (beta * d * log10(e))\n");
+				}
+			else if(strcmp(parsed_command[i+1], "paper") == 0)
+				{
+				ml_lust_compat = FALSE;
+				printf2("ML scoring: paper formula (beta * d, -ln L)\n");
+				}
+			else
+				printf2("Error: mlscale must be 'paper' or 'lust'\n");
+			}
 
 
         }
@@ -7669,6 +7972,13 @@ void heuristic_search(int user, int print, int sample, int nreps)
 				case 5:
 					printf2("Reconstruction of duplications and losses (RECON)\n");
 					break;
+                case 6:
+                    printf2("Robinson-Foulds distance (RF)\n");
+                    break;
+                case 7:
+                    printf2("Maximum likelihood supertree (beta=%.2f, scale=%s)\n",
+                            ml_beta, ml_lust_compat ? "lust" : "paper");
+                    break;
                 default:
                     printf2("Maximum quartet fit (QFIT)\n");
                     break;
@@ -7965,6 +8275,11 @@ void heuristic_search(int user, int print, int sample, int nreps)
                         unroottree(temptree);
 						distance = get_recon_score(temptree, numspectries, numgenetries);
 						}
+				if(criterion == 7)
+					{
+					if(fund_bipart_sets == NULL) rf_precompute_fund_biparts();
+					distance = compare_trees_ml(FALSE);
+					}
                     
                     
                     /**** check to see if this is one of the top n trees ***/
@@ -8026,6 +8341,7 @@ void heuristic_search(int user, int print, int sample, int nreps)
                         par_scores[k] = -1;
                         }
 
+                    if(criterion == 6 || criterion == 7) rf_precompute_fund_biparts();
                     par_progress_best    = -1.0f;
                     par_last_print_score = -1.0f;
                     par_search_start     = time(NULL);
@@ -8073,6 +8389,7 @@ void heuristic_search(int user, int print, int sample, int nreps)
 #endif
                     {
                     /* ---- Sequential while loop ---- */
+                    if(criterion == 6 || criterion == 7) rf_precompute_fund_biparts();
                     while(i != nreps && !user_break) /* Start searching tree space */
                         {
 					    if(print)printf2("\nRepetition %d of %d:", i+1, nreps);
@@ -8136,6 +8453,7 @@ void heuristic_search(int user, int print, int sample, int nreps)
 							par_scores[k] = -1;
 							}
 
+						if(criterion == 6 || criterion == 7) rf_precompute_fund_biparts();
 						par_progress_best    = -1.0f;
 						par_last_print_score = -1.0f;
 						par_search_start     = time(NULL);
@@ -8189,6 +8507,7 @@ void heuristic_search(int user, int print, int sample, int nreps)
 #endif
 						{
 						/* ---- Sequential nreps loop ---- */
+						if(criterion == 6 || criterion == 7) rf_precompute_fund_biparts();
 						for(i=0; i<nreps; i++)
 							{
 							if(print) printf2("\nRepetition %d of %d:", i+1, nreps);
@@ -8206,6 +8525,7 @@ void heuristic_search(int user, int print, int sample, int nreps)
 					}
 				else/* if we are to use a tree (or trees) from a file as the starting tree */
 					{
+					if(criterion == 6 || criterion == 7) rf_precompute_fund_biparts();
 					c = getc(userfile);
 					while((c == ' ' || c == '\r'  || c == '\n' || c == '[') && !feof(userfile))  /* skip past all the non tree characters */
 						{
@@ -8598,7 +8918,7 @@ int do_search(char *tree, int user, int print, int maxswaps, FILE *outfile, int 
 	
 	
 	temporary_tree[0] = '\0';
-    unroottree(tree);
+    while(unroottree(tree));  /* fully unroot — one call may not suffice for bifurcating root */
         /****** We now need to build the Supertree in memory *******/
         if(tree_top != NULL)
             {
@@ -8627,6 +8947,7 @@ int do_search(char *tree, int user, int print, int maxswaps, FILE *outfile, int 
             {
             sprscore = -1;
             tried_regrafts = 0;
+            for(i=0; i<Total_fund_trees; i++) sourcetree_scores[i] = -1;  /* invalidate per-rep cache */
             /* if SPR is to be carried out */
 /*            while(better_score == TRUE && tried_regrafts < maxswaps && !user_break)
                 {
@@ -10402,6 +10723,17 @@ int MRP_matrix(char **trees, int num_trees, int consensus)
 									if(criterion != 5) printf2("Scoring criterion set to duplication and loss reconstruction (RECON)\n");
 									criterion = 5;
 									}
+								else if(strcmp(parsed_command[i+1], "rf") == 0 || strcmp(parsed_command[i+1], "RF") == 0)
+									{
+									if(criterion != 6) printf2("Scoring criterion set to Robinson-Foulds distance (RF)\n");
+									criterion = 6;
+									}
+								else if(strcmp(parsed_command[i+1], "ml") == 0 || strcmp(parsed_command[i+1], "ML") == 0
+									     || strcmp(parsed_command[i+1], "lust") == 0)
+									{
+									if(criterion != 7) printf2("Scoring criterion set to ML supertree likelihood (L.U.st)\n");
+									criterion = 7;
+									}
 								else
 									printf2("Error: %s not known as criterion tpye\n", parsed_command[i+1]);
 								}
@@ -11386,9 +11718,11 @@ int regraft(struct taxon * position, struct taxon * newbie, struct taxon * last,
 		while(position != NULL && !better_score && tried_regrafts < maxswaps && !user_break
 		      && (hs_maxskips == 0 || skip_streak < hs_maxskips))
 			{
-			if(!better_score && steps <= number_of_steps && !user_break)
+			if(!better_score && steps <= number_of_steps && position != tree_top && !user_break)
 				{
-				/* regraft newbie here */
+				/* regraft newbie here -- skip position==tree_top: inserting there creates a
+				 * degree-2 internal node (invalid in a binary unrooted tree). The 3 edges
+				 * adjacent to tree_top are covered by grafting at its daughters instead. */
                                 
                                 
 			/*	if((newbie->daughter)->name != -1)printf2("newbie daughter = %d\n", newbie->daughter->name);
@@ -11487,13 +11821,14 @@ int regraft(struct taxon * position, struct taxon * newbie, struct taxon * last,
                                     strcpy(best_tree, "");
                                     print_named_tree(tree_top, best_tree);
                                     strcat(best_tree, ";");
+                                    while(unroottree(best_tree));  /* ensure unrooted even if graft was at root */
                                     if(criterion == 0) tmpscore = compare_trees(TRUE);  /* calculate the distance from the super tree to all the fundamental trees */
                                     if(criterion == 2)  /* calculate the distance using the MRC criterion */
                                         {
 										strcpy(temptree, "");
                                         print_tree(tree_top, temptree);
                                         strcat(temptree, ";");
-                                        unroottree(temptree);
+                                        while(unroottree(temptree));
                                         tmpscore = (float)MRC(temptree);
                                         }
                                     if(criterion == 3)
@@ -11501,7 +11836,7 @@ int regraft(struct taxon * position, struct taxon * newbie, struct taxon * last,
 										strcpy(temptree, "");
                                         print_tree(tree_top, temptree);
                                         strcat(temptree, ";");
-                                        unroottree(temptree);
+                                        while(unroottree(temptree));
                                         tmpscore = (float)quartet_compatibility(temptree);
                                         }
 														
@@ -11513,6 +11848,10 @@ int regraft(struct taxon * position, struct taxon * newbie, struct taxon * last,
 										while(unroottree(temptree));
 										tmpscore = get_recon_score(temptree, numspectries, numgenetries);
 										}
+									if(criterion == 6)
+										tmpscore = compare_trees_rf(TRUE);
+									if(criterion == 7)
+										tmpscore = compare_trees_ml(TRUE);
 
                                     /*printf("scores_retained_supers[0] = %f\n", scores_retained_supers[0]); */
                                     if(scores_retained_supers[0] == -1 || sprscore == -1)  /* Then this is the first tree to be checked */
@@ -11545,6 +11884,7 @@ int regraft(struct taxon * position, struct taxon * newbie, struct taxon * last,
                                                 strcpy(best_tree, "");
                                                 print_named_tree(tree_top, best_tree);
                                                 strcat(best_tree, ";");
+                                                while(unroottree(best_tree));  /* ensure unrooted */
 												retained_supers[0] = realloc(retained_supers[0], (strlen(best_tree)+10)*sizeof(char));
                                                 strcpy(retained_supers[0], best_tree);
                                                 scores_retained_supers[0] = tmpscore;
@@ -11565,6 +11905,7 @@ int regraft(struct taxon * position, struct taxon * newbie, struct taxon * last,
                                                 strcpy(best_tree, "");
                                                 print_named_tree(tree_top, best_tree);
                                                 strcat(best_tree, ";");
+                                                while(unroottree(best_tree));  /* ensure unrooted */
                                                 different = TRUE;
                                                 if(!check_if_diff_tree(best_tree))
 													{
