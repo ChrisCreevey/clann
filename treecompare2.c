@@ -7239,7 +7239,9 @@ void heuristic_search(int user, int print, int sample, int nreps)
 				
 			}
 		
-        saved_tags = apply_singlecopy_filter();
+        /* criterion=recon scores all trees (single-copy and multicopy); skip the filter */
+        if(criterion != 5)
+            saved_tags = apply_singlecopy_filter();
 
         for(i=0; i<Total_fund_trees; i++) sourcetree_scores[i] = -1;
         if(criterion == 1 || criterion == 4)
