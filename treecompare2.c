@@ -73,11 +73,14 @@ struct taxon {
 		float length;
 		int *donor; /* THis is for the HGT analysis */
 	} taxon_type;
-	
-	
 
-
-
+/* Open-addressed hash set for visited tree topologies */
+typedef struct {
+    uint64_t *keys;        /* 0 = empty slot */
+    size_t    cap;         /* always a power of 2 */
+    size_t    count;
+    int       zero_present; /* special-case: was key==0 inserted? */
+} VisitedSet;
 
 
 /*********** Function definitions ********************/
@@ -108,6 +111,13 @@ static void hs_free_thread_state(void);
 static void hs_merge_results(char ***par_retained, float **par_scores, int *par_n, float *par_best, int *par_NUMSWAPS);
 static int  hs_same_topology(char *t1, char *t2);
 #endif
+/* Visited-set and topology-hash (used in single- and multi-threaded builds) */
+static VisitedSet *vs_create(size_t cap);
+static void        vs_free(VisitedSet *vs);
+static void        vs_clear(VisitedSet *vs);
+static int         vs_contains(VisitedSet *vs, uint64_t key);
+static void        vs_insert(VisitedSet *vs, uint64_t key);
+static uint64_t    tree_topo_hash(struct taxon *root);
 float compare_trees(int spr);
 struct taxon * make_taxon(void);
 void intTotree(int tree_num, char *array, int num_taxa);
@@ -285,6 +295,8 @@ char saved_supertree[TREE_LENGTH],  *test_array, inputfilename[10000], delimiter
 int trees_in_memory = 0, *sourcetreetag = NULL, remainingtrees = 0, GC, user_break = FALSE, delimiter = TRUE, print_log = FALSE, num_gene_nodes, testarraypos = 0;
 int malloc_check =0, count_now = FALSE, another_check =0;
 unsigned int thread_seed = 0;   /* per-thread random seed for rand_r(); see threadprivate block below */
+uint64_t *taxon_hash_vals = NULL; /* shared read-only: splitmix64 weight per taxon; set at taxa load time */
+VisitedSet *visited_set   = NULL; /* threadprivate: per-replicate visited topology hash set */
 
 /****** OpenMP thread-private state: one independent copy per thread in parallel regions ******/
 #ifdef _OPENMP
@@ -295,7 +307,8 @@ unsigned int thread_seed = 0;   /* per-thread random seed for rand_r(); see thre
     retained_supers, scores_retained_supers, \
     best_topology, best_topology_scores, number_retained_supers, \
     BESTSCORE, NUMSWAPS, \
-    thread_seed \
+    thread_seed, \
+    visited_set \
 )
 #endif
 
@@ -2081,6 +2094,19 @@ void execute_command(char *commandline, int do_all)
 		if(presenceof_SPRtaxa) free(presenceof_SPRtaxa);
 		presenceof_SPRtaxa = malloc(number_of_taxa*sizeof(int));
 		for(i=0; i<number_of_taxa; i++) presenceof_SPRtaxa[i] = -1;
+		/* Initialise per-taxon weights for bipartition tree hashing (splitmix64 finaliser) */
+		taxon_hash_vals = realloc(taxon_hash_vals, number_of_taxa * sizeof(uint64_t));
+		{
+		uint64_t thv_x;
+		for(i=0; i<number_of_taxa; i++)
+			{
+			thv_x = (uint64_t)(i + 1);
+			thv_x += 0x9e3779b97f4a7c15ULL;
+			thv_x = (thv_x ^ (thv_x >> 30)) * 0xbf58476d1ce4e5b9ULL;
+			thv_x = (thv_x ^ (thv_x >> 27)) * 0x94d049bb133111ebULL;
+			taxon_hash_vals[i] = thv_x ^ (thv_x >> 31);
+			}
+		}
 	weighted_scores = malloc(number_of_taxa * sizeof(float*));
 	if(!weighted_scores) memory_error(94);
 	for(k=0; k<number_of_taxa; k++)
@@ -6933,6 +6959,142 @@ static void hs_free_thread_state(void)
     }
 
 
+/*  VisitedSet — open-addressed uint64_t hash set for topology fingerprints -----
+ *  Key 0 is reserved as "empty"; if the computed hash is 0 we remap it to 1
+ *  (one ghost collision possible; negligible in practice).
+ */
+static VisitedSet *vs_create(size_t cap)
+    {
+    VisitedSet *vs = malloc(sizeof(VisitedSet));
+    if(!vs) memory_error(201);
+    vs->keys = calloc(cap, sizeof(uint64_t));
+    if(!vs->keys) memory_error(202);
+    vs->cap  = cap;
+    vs->count = 0;
+    vs->zero_present = 0;
+    return vs;
+    }
+
+static void vs_free(VisitedSet *vs)
+    {
+    if(!vs) return;
+    free(vs->keys);
+    free(vs);
+    }
+
+static void vs_clear(VisitedSet *vs)
+    {
+    if(!vs) return;
+    memset(vs->keys, 0, vs->cap * sizeof(uint64_t));
+    vs->count = 0;
+    vs->zero_present = 0;
+    }
+
+static int vs_contains(VisitedSet *vs, uint64_t key)
+    {
+    size_t idx;
+    if(!vs) return 0;
+    if(key == 0) return vs->zero_present;
+    idx = (size_t)(key & (vs->cap - 1));
+    while(vs->keys[idx] != 0)
+        {
+        if(vs->keys[idx] == key) return 1;
+        idx = (idx + 1) & (vs->cap - 1);
+        }
+    return 0;
+    }
+
+/* Maximum table size: 128 MB = 16M uint64_t slots */
+#define VS_MAX_CAP (1u << 24)
+
+static void vs_insert(VisitedSet *vs, uint64_t key)
+    {
+    size_t idx;
+    if(!vs) return;
+    if(key == 0) { vs->zero_present = 1; return; }
+    /* Grow if >75% full and below the cap */
+    if(vs->count > vs->cap * 3 / 4 && vs->cap < VS_MAX_CAP)
+        {
+        size_t newcap = vs->cap * 2;
+        uint64_t *newkeys = calloc(newcap, sizeof(uint64_t));
+        size_t i;
+        if(newkeys)
+            {
+            for(i = 0; i < vs->cap; i++)
+                if(vs->keys[i] != 0)
+                    {
+                    size_t ni = (size_t)(vs->keys[i] & (newcap - 1));
+                    while(newkeys[ni] != 0) ni = (ni + 1) & (newcap - 1);
+                    newkeys[ni] = vs->keys[i];
+                    }
+            free(vs->keys);
+            vs->keys = newkeys;
+            vs->cap  = newcap;
+            }
+        /* if calloc failed, continue with old table (some false negatives) */
+        }
+    /* Stop inserting if at max cap and >75% full (act as probabilistic filter) */
+    if(vs->count > vs->cap * 3 / 4) return;
+    idx = (size_t)(key & (vs->cap - 1));
+    while(vs->keys[idx] != 0)
+        {
+        if(vs->keys[idx] == key) return;  /* already present */
+        idx = (idx + 1) & (vs->cap - 1);
+        }
+    vs->keys[idx] = key;
+    vs->count++;
+    }
+
+
+/*  tree_topo_hash -------------------------------------------------------
+ *  Returns a 64-bit canonical hash of the unrooted topology rooted at
+ *  `root`.  Uses the random-XOR bipartition method: each taxon i has a
+ *  fixed weight taxon_hash_vals[i] (splitmix64); the hash of a bipartition
+ *  is min(XOR of one side, XOR of other side); the tree hash is the XOR
+ *  of all non-trivial bipartition hashes.  Rooting-independent.
+ */
+static uint64_t sth_aux(struct taxon *pos, uint64_t total, uint64_t *tree_h)
+    {
+    uint64_t sh = 0;
+    while(pos != NULL)
+        {
+        uint64_t child_sh;
+        if(pos->daughter != NULL)
+            {
+            child_sh = sth_aux(pos->daughter, total, tree_h);
+            /* non-trivial bipartition contribution (canonical: take smaller half) */
+            uint64_t comp = total ^ child_sh;
+            *tree_h ^= (child_sh < comp ? child_sh : comp);
+            }
+        else
+            {
+            /* leaf: trivial bipartition — do not add to tree_h */
+            if(pos->name >= 0 && pos->name < number_of_taxa)
+                child_sh = taxon_hash_vals[pos->name];
+            else
+                child_sh = (uint64_t)(pos->name + 1);  /* fallback */
+            }
+        sh ^= child_sh;
+        pos = pos->next_sibling;
+        }
+    return sh;
+    }
+
+static uint64_t tree_topo_hash(struct taxon *root)
+    {
+    uint64_t total = 0, tree_h = 0;
+    int ti;
+    if(!root || !taxon_hash_vals) return 0;
+    for(ti = 0; ti < number_of_taxa; ti++) total ^= taxon_hash_vals[ti];
+    /* Traverse from root's daughters — the root node itself is the
+       unrooted tree's trifurcation/multifurcation, not an internal edge */
+    if(root->daughter)
+        sth_aux(root->daughter, total, &tree_h);
+    /* Remap 0 → 1 so that 0 remains the "empty" sentinel in VisitedSet */
+    return (tree_h == 0) ? 1 : tree_h;
+    }
+
+
 /*  hs_same_topology -------------------------------------------------------
  *  Returns TRUE if the two named-taxon Newick strings t1 and t2 represent
  *  the same unrooted topology, using the path-metric comparison (identical
@@ -8411,6 +8573,8 @@ int do_search(char *tree, int user, int print, int maxswaps, FILE *outfile, int 
         tree_build(1, tree, tree_top, user, -1, 0);
         tree_top = temp_top;
         temp_top = NULL;
+        /* Allocate per-replicate visited-topology hash set */
+        visited_set = vs_create(1u << 20);
 /*		print_tree(tree_top, temporary_tree);
 		printf2("built tree = %s\n", temporary_tree);
   */      if(method == 1)
@@ -8448,6 +8612,9 @@ int do_search(char *tree, int user, int print, int maxswaps, FILE *outfile, int 
 
             
             }
+    /* Free per-replicate visited-topology hash set */
+    vs_free(visited_set);
+    visited_set = NULL;
     return(swaps);
     }
 
@@ -11215,7 +11382,12 @@ int regraft(struct taxon * position, struct taxon * newbie, struct taxon * last,
                                 
                                 if(check_taxa(tree_top) == number_of_taxa && !user_break)
                                     {
-                                    tried_regrafts++;
+                                    /* Skip trees already scored in this replicate */
+                                    uint64_t topo_h = tree_topo_hash(tree_top);
+                                    if(visited_set == NULL || !vs_contains(visited_set, topo_h))
+                                        {
+                                        if(visited_set != NULL) vs_insert(visited_set, topo_h);
+                                        tried_regrafts++;
 									NUMSWAPS++;
                                     
                                     strcpy(best_tree, "");
@@ -11338,7 +11510,28 @@ int regraft(struct taxon * position, struct taxon * newbie, struct taxon * last,
                                             
                                             }  /*else */
                                         } /* else */
-                                    } /* if */
+                                        }  /* end !already_visited */
+                                    else /* topology already scored this replicate — undo graft and skip */
+                                        {
+                                        /* put the node back */
+                                        position->next_sibling = newbie->next_sibling;
+                                        position->prev_sibling = newbie->prev_sibling;
+                                        position->parent = newbie->parent;
+                                        if(tree_top == newbie) tree_top = position;
+
+                                        if(position->prev_sibling != NULL) (position->prev_sibling)->next_sibling = position;
+                                        if(position->next_sibling != NULL) (position->next_sibling)->prev_sibling = position;
+                                        if(position->parent != NULL) (position->parent)->daughter = position;
+
+                                        newbie->next_sibling = NULL;
+                                        newbie->prev_sibling = NULL;
+                                        newbie->parent = NULL;
+                                        (newbie->daughter)->next_sibling = NULL;
+
+                                        /* the node is now back in position */
+                                        for(i=0; i<Total_fund_trees; i++) sourcetree_scores[i] = tmp_fund_scores[i];
+                                        }
+                                    } /* if check_taxa */
                                 else /* the new supertree is not valid */
                                     {
 									if(!user_break)
