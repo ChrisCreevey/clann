@@ -304,6 +304,8 @@ float   last_status_score = -1.0f;/* threadprivate: sprscore at last periodic st
 float  par_progress_best   = -1.0f; /* best score seen so far across ALL parallel threads */
 float  par_last_print_score= -1.0f; /* par_progress_best at last status line (thread-0 only) */
 time_t par_search_start    = 0;     /* wall-clock time when the parallel region began */
+int    skip_streak         = 0;     /* threadprivate: consecutive already-visited skips since last new topology */
+int    hs_maxskips         = 1000;  /* shared: stop replicate when skip_streak reaches this (0=disabled) */
 
 /****** OpenMP thread-private state: one independent copy per thread in parallel regions ******/
 #ifdef _OPENMP
@@ -316,7 +318,8 @@ time_t par_search_start    = 0;     /* wall-clock time when the parallel region 
     BESTSCORE, NUMSWAPS, \
     thread_seed, \
     visited_set, \
-    rep_start_time, hs_do_print, last_status_score \
+    rep_start_time, hs_do_print, last_status_score, \
+    skip_streak \
 )
 #endif
 
@@ -1344,6 +1347,7 @@ void print_commands(int num)
 #ifdef _OPENMP
             printf2("\n\tnthreads\t<integer number>\t\t*%-3d (OpenMP threads; default=all CPUs; not available for criterion=recon)", omp_get_num_procs());
 #endif
+            printf2("\n\tmaxskips\t<integer number>\t\t*1000 (stop replicate after this many consecutive already-visited SPR moves; 0=disabled)");
             if(criterion == 0)
                 {
                 printf2("\n\tweight\t\tequal | comparisons\t\t");
@@ -7606,6 +7610,16 @@ void heuristic_search(int user, int print, int sample, int nreps)
 				error = TRUE;
 				}
 			}
+		if(strcmp(parsed_command[i], "maxskips") == 0)
+			{
+			hs_maxskips = toint(parsed_command[i+1]);
+			if(hs_maxskips < 0)
+				{
+				printf2("Error: maxskips must be >= 0\n");
+				hs_maxskips = 1000;
+				error = TRUE;
+				}
+			}
 
 
         }
@@ -7672,6 +7686,10 @@ void heuristic_search(int user, int print, int sample, int nreps)
 #ifdef _OPENMP
                 printf2("\tOpenMP threads = %d (of %d available)\n", nthreads, omp_get_num_procs());
 #endif
+                if(hs_maxskips > 0)
+                    printf2("\tMax consecutive visited skips (maxskips) = %d\n", hs_maxskips);
+                else
+                    printf2("\tMax consecutive visited skips (maxskips) = disabled\n");
                 if(criterion != 5)
 					printf2("\tWeighting Scheme = ");
                 if(criterion==0)
@@ -8597,6 +8615,7 @@ int do_search(char *tree, int user, int print, int maxswaps, FILE *outfile, int 
         rep_start_time    = time(NULL);
         hs_do_print       = print;
         last_status_score = -1.0f;
+        skip_streak       = 0;
 /*		print_tree(tree_top, temporary_tree);
 		printf2("built tree = %s\n", temporary_tree);
   */      if(method == 1)
@@ -8627,7 +8646,8 @@ int do_search(char *tree, int user, int print, int maxswaps, FILE *outfile, int 
 				{
 				branchpointer = NULL;
 				better_score = spr_new(tree_top, maxswaps, numspectries, numgenetries);
-				}while(better_score == TRUE && tried_regrafts < maxswaps && !user_break);
+				}while(better_score == TRUE && tried_regrafts < maxswaps && !user_break
+			       && (hs_maxskips == 0 || skip_streak < hs_maxskips));
 				
             swaps = tried_regrafts;
 		   
@@ -11005,7 +11025,8 @@ int spr_new(struct taxon * master, int maxswaps, int numspectries, int numgenetr
 			if(!better_score && newbie != NULL) dismantle_tree(newbie);
 			newbie = NULL;
             }
-		if(better_score == TRUE || (position == branchpointer) || donenextlevel || tried_regrafts >= maxswaps || user_break) 
+		if(better_score == TRUE || (position == branchpointer) || donenextlevel || tried_regrafts >= maxswaps || user_break
+		   || (hs_maxskips > 0 && skip_streak >= hs_maxskips))
 			{
 			x = y;
 			}
@@ -11342,16 +11363,18 @@ int regraft(struct taxon * position, struct taxon * newbie, struct taxon * last,
 	while(position->prev_sibling != NULL && !user_break) position = position->prev_sibling; /* rewinding */
 	start = position;
 	
-	while(position != NULL && !better_score && tried_regrafts < maxswaps && !user_break)
+	while(position != NULL && !better_score && tried_regrafts < maxswaps && !user_break
+	      && (hs_maxskips == 0 || skip_streak < hs_maxskips))
 		{
 		if(steps < number_of_steps && position->parent != NULL && position->parent != last && !user_break) better_score = regraft(position->parent, newbie, position, steps+1, maxswaps, numspectries, numgenetries);  /* go up the tree */
 		position = position->next_sibling;
 		}
-	
+
 	position = start;
 	if(!better_score && !user_break)
 		{
-		while(position != NULL && !better_score && tried_regrafts < maxswaps && !user_break)
+		while(position != NULL && !better_score && tried_regrafts < maxswaps && !user_break
+		      && (hs_maxskips == 0 || skip_streak < hs_maxskips))
 			{
 			if(steps < number_of_steps && !user_break)
 				if(position->daughter != NULL && position->daughter != last && !user_break) better_score = regraft(position->daughter, newbie, position, steps+1, maxswaps, numspectries, numgenetries);
@@ -11360,7 +11383,8 @@ int regraft(struct taxon * position, struct taxon * newbie, struct taxon * last,
 			}
 		position = start;
 
-		while(position != NULL && !better_score && tried_regrafts < maxswaps && !user_break)
+		while(position != NULL && !better_score && tried_regrafts < maxswaps && !user_break
+		      && (hs_maxskips == 0 || skip_streak < hs_maxskips))
 			{
 			if(!better_score && steps <= number_of_steps && !user_break)
 				{
@@ -11456,6 +11480,7 @@ int regraft(struct taxon * position, struct taxon * newbie, struct taxon * last,
                                     if(visited_set == NULL || !vs_contains(visited_set, topo_h))
                                         {
                                         if(visited_set != NULL) vs_insert(visited_set, topo_h);
+                                        skip_streak = 0;  /* new topology found — reset convergence counter */
                                         tried_regrafts++;
 									NUMSWAPS++;
                                     
@@ -11582,6 +11607,7 @@ int regraft(struct taxon * position, struct taxon * newbie, struct taxon * last,
                                         }  /* end !already_visited */
                                     else /* topology already scored this replicate — undo graft and skip */
                                         {
+                                        skip_streak++;  /* one more consecutive already-visited hit */
                                         /* put the node back */
                                         position->next_sibling = newbie->next_sibling;
                                         position->prev_sibling = newbie->prev_sibling;
