@@ -31,6 +31,19 @@ Either or both of these publications should be cited if you use Clann in publish
 
 For a list of papers that have cited Clann in their work see the [Clann google scholar page](https://scholar.google.co.uk/citations?view_op=view_citation&hl=en&citation_for_view=7JkjEd4AAAAJ:UeHWp8X0CEIC)
 
+# Documentation
+
+A complete reference for every command and its options is provided in **[USER_MANUAL.md](USER_MANUAL.md)**. It covers:
+
+- All command-line flags and startup options
+- Input file formats (Phylip/Newick and Nexus)
+- All optimality criteria and when to use each
+- Delimiter mode and single-copy/multicopy gene family handling
+- Full option tables for every command (`hs`, `nj`, `alltrees`, `bootstrap`, `reconstruct`, and more)
+- Worked examples for common workflows
+- Output file reference
+- Troubleshooting
+
 # Usage
 
 Usage:
@@ -150,4 +163,4 @@ See `reconstruct ?` for full options including supplying an external species tre
 
 Type a command followed by '?' in interactive mode to get information on the options available i.e.: `exe ?`
 
-Full descriptions of the commands are available in the manual
+Full descriptions of all commands and options are available in **[USER_MANUAL.md](USER_MANUAL.md)**.
