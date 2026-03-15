@@ -1340,7 +1340,14 @@ void print_commands(int num)
             printf2("\n\tweight\t\tequal | taxa | quartets\t\t");
             if(quartet_normalising == 1) printf2("equal\n");if(quartet_normalising == 2) printf2("taxa\n");if(quartet_normalising == 3) printf2("quartets\n");
             }
-		printf2("\n\tprintsourcescores\tyes | no\t\t*no\n");
+		printf2("\n\tprintsourcescores\tyes | no\t\t\t*no");
+	if(criterion == 7)
+		{
+		printf2("\n\ttests\t\tyes | no\t\t\t*no (ML topology tests; criterion=ml only)");
+		printf2("\n\tnboot\t\t<integer>\t\t\t*1000 (SH bootstrap replicates)");
+		printf2("\n\ttestsfile\t<filename>\t\t\t*mltest_results.txt");
+		}
+	printf2("\n");
         }
     if(num == 4)
         {
@@ -6321,10 +6328,193 @@ void reallocate_retained_supers(void)
 
 
 
+/* --- ML topology test helpers ------------------------------------------- */
+
+/* Exact two-sided binomial p-value using log-space arithmetic (avoids overflow). */
+static double ml_binomial_p2(int n_plus, int n_minus)
+    {
+    int n = n_plus + n_minus;
+    if(n == 0) return 1.0;
+    int k_obs = (n_plus < n_minus) ? n_plus : n_minus;
+    double lh = -n * log(2.0);
+    double p = 0.0, log_binom = 0.0;
+    for(int k = 0; k <= k_obs; k++)
+        {
+        if(k > 0) log_binom += log((double)(n-k+1)) - log((double)k);
+        p += exp(log_binom + lh);
+        }
+    p *= 2.0;
+    return (p > 1.0) ? 1.0 : p;
+    }
+
+/* One-sided normal p-value: P(Z > z). */
+static double ml_normal_p(double z)
+    { return erfc(z / sqrt(2.0)) / 2.0; }
+
+/* Significance asterisks. */
+static const char *ml_sig_label(double p, float alpha)
+    {
+    if(p < 0.001) return "***";
+    if(p < 0.01)  return "**";
+    if(p < (double)alpha) return "*";
+    return "ns";
+    }
+
+/* Run Winning-Sites, KH and SH tests comparing each candidate tree to the best.
+ * all_gene_scores[t][k] = sourcetree_scores[k] for candidate tree t.
+ * all_total_scores[t]   = total ML score (positive, minimised) for tree t.
+ */
+static void run_usertrees_ml_tests(
+        float **all_gene_scores, float *all_total_scores,
+        int n_all, int nboot, float alpha, const char *testsfile_name)
+    {
+    int i, b, k;
+
+    /* Find best (minimum score = maximum lnL). */
+    int best_idx = 0;
+    for(i = 1; i < n_all; i++)
+        if(all_total_scores[i] < all_total_scores[best_idx]) best_idx = i;
+    float best_score_ml = all_total_scores[best_idx];
+
+    printf2("\nML topology tests  (T1 = tree %d,  lnL = %.4f,  beta = %.2f)\n",
+            best_idx+1, -(double)best_score_ml, ml_beta);
+    printf2("=============================================================================\n");
+    printf2("  %-8s  %-10s  %-12s  %-14s  %-12s\n",
+            "Tree", "lnL", "WinSites p", "KH z / p", "SH p");
+    printf2("-----------------------------------------------------------------------------\n");
+
+    FILE *tfile = fopen(testsfile_name, "w");
+    if(tfile)
+        {
+        fprintf(tfile, "# ML supertree topology tests\n");
+        fprintf(tfile, "# Best tree: T%d  lnL=%.6f  beta=%.4f\n",
+                best_idx+1, -(double)best_score_ml, ml_beta);
+        fprintf(tfile, "# tree\tdelta_lnL\tn_inform\tn_plus\tn_minus\tWS_p\tKH_z\tKH_p\tSH_p\n");
+        }
+
+    for(i = 0; i < n_all; i++)
+        {
+        if(i == best_idx) continue;
+
+        int n_plus = 0, n_minus = 0, n_inform = 0;
+        double delta_total = 0.0;
+        float *delta = malloc(Total_fund_trees * sizeof(float));
+
+        for(k = 0; k < Total_fund_trees; k++)
+            {
+            if(!sourcetreetag[k]) { delta[k] = 0.0f; continue; }
+            float d = all_gene_scores[i][k] - all_gene_scores[best_idx][k];
+            delta[k] = d;
+            if(all_gene_scores[best_idx][k] == 0.0f && all_gene_scores[i][k] == 0.0f)
+                continue;  /* uninformative for both trees */
+            n_inform++;
+            delta_total += d;
+            if(d > 0.0f) n_plus++;
+            else if(d < 0.0f) n_minus++;
+            }
+
+        if(n_inform < 4)
+            printf2("  WARNING: tree %d has only %d informative gene trees — results unreliable\n",
+                    i+1, n_inform);
+
+        /* Winning Sites */
+        double ws_p = ml_binomial_p2(n_plus, n_minus);
+
+        /* KH parametric */
+        double kh_z = 0.0, kh_p = 0.5;
+        if(n_inform > 1)
+            {
+            double c_bar = delta_total / n_inform;
+            double var = 0.0;
+            for(k = 0; k < Total_fund_trees; k++)
+                {
+                if(!sourcetreetag[k]) continue;
+                if(all_gene_scores[best_idx][k]==0.0f && all_gene_scores[i][k]==0.0f) continue;
+                double diff = delta[k] - c_bar;
+                var += diff * diff;
+                }
+            var /= (n_inform - 1);
+            double se = sqrt((double)n_inform * var);
+            if(se > 0.0) { kh_z = delta_total / se; kh_p = ml_normal_p(kh_z); }
+            }
+
+        /* SH bootstrap */
+        double sh_p = 1.0;
+        if(n_inform > 1 && nboot > 0)
+            {
+            double c_bar = delta_total / n_inform;
+            float *c_star = malloc(Total_fund_trees * sizeof(float));
+            int *inform_idx = malloc(n_inform * sizeof(int));
+            int n_inf2 = 0;
+            for(k = 0; k < Total_fund_trees; k++)
+                {
+                if(!sourcetreetag[k]) continue;
+                if(all_gene_scores[best_idx][k]==0.0f && all_gene_scores[i][k]==0.0f) continue;
+                c_star[k] = (float)(delta[k] - c_bar);
+                inform_idx[n_inf2++] = k;
+                }
+            int exceed = 0;
+            for(b = 0; b < nboot; b++)
+                {
+                double boot_sum = 0.0;
+                int s;
+                for(s = 0; s < n_inf2; s++)
+                    boot_sum += c_star[inform_idx[rand() % n_inf2]];
+                if(boot_sum >= delta_total) exceed++;
+                }
+            sh_p = (double)exceed / nboot;
+            free(c_star);
+            free(inform_idx);
+            }
+        else if(nboot == 0)
+            sh_p = -1.0;  /* sentinel: skipped */
+
+        printf2("  T%-7d  lnL=%-6.3f  p=%-8.4f  z=%-5.2f p=%-5.3f %-3s  p=%-6.4f %-3s\n",
+                i+1, -(double)all_total_scores[i],
+                ws_p,
+                kh_z, kh_p, ml_sig_label(kh_p, alpha),
+                sh_p >= 0 ? sh_p : 9.9999, sh_p >= 0 ? ml_sig_label(sh_p, alpha) : "--");
+
+        if(tfile)
+            fprintf(tfile, "T%d\t%.6f\t%d\t%d\t%d\t%.6f\t%.4f\t%.6f\t%.6f\n",
+                    i+1, -(delta_total),
+                    n_inform, n_plus, n_minus,
+                    ws_p, kh_z, kh_p, sh_p >= 0 ? sh_p : -1.0);
+
+        free(delta);
+        }
+
+    printf2("-----------------------------------------------------------------------------\n");
+    printf2("  %s p<alpha=%g; ** p<0.01; *** p<0.001; ns=not significant\n", "*", (double)alpha);
+    if(nboot > 0)
+        printf2("  SH test: %d bootstrap replicates\n", nboot);
+    else
+        printf2("  SH test: skipped (nboot=0)\n");
+    printf2("  AU test: not yet implemented\n");
+    printf2("  Ref: Steel & Rodrigo (2008) Syst Biol 57:243; Kishino & Hasegawa (1989)\n");
+    printf2("       J Mol Evol 29:170; Shimodaira & Hasegawa (1999) Mol Biol Evol 16:1114\n");
+    if(tfile)
+        {
+        printf2("  Per-gene-tree details written to: %s\n", testsfile_name);
+        fclose(tfile);
+        }
+    }
+
+/* --- end ML topology test helpers --------------------------------------- */
+
+
 void usertrees_search(void)
     {
     FILE *userfile = NULL, *outfile = NULL, *sourcescoresfile = NULL;
     int keep = 0, nbest = 0, error = FALSE, i=0, tree_number = 0, j=0, k=0, prev = 0, print_source_scores = FALSE;
+    /* ML topology test state */
+    int    run_ml_tests = FALSE, nboot_tests = 1000;
+    float  alpha_tests  = 0.05f;
+    char   testsfile_name[10000];
+    int    n_all = 0, n_all_alloc = 0;
+    float **all_gene_scores = NULL;
+    float  *all_total_scores = NULL;
+    strcpy(testsfile_name, "mltest_results.txt");
     char *user_super = NULL, c = '\0', best_tree[TREE_LENGTH], *temp = NULL;
     float score = 0, best_score = 0;
     
@@ -6414,6 +6604,16 @@ void usertrees_search(void)
                     }
                 }
 
+            if(strcmp(parsed_command[i], "tests") == 0)
+                {
+                if(strcmp(parsed_command[i+1], "yes") == 0)
+                    run_ml_tests = TRUE;
+                }
+            if(strcmp(parsed_command[i], "nboot") == 0)
+                nboot_tests = atoi(parsed_command[i+1]);
+            if(strcmp(parsed_command[i], "testsfile") == 0)
+                strcpy(testsfile_name, parsed_command[i+1]);
+
             }
         if(outfile == NULL)
             {
@@ -6463,10 +6663,17 @@ void usertrees_search(void)
 			case 5:
 				printf2("Reconstruction of duplications and losses (RECON)\n");
 				break;
+			case 6:
+				printf2("Robinson-Foulds distance (RF)\n");
+				break;
+			case 7:
+				printf2("Maximum likelihood supertree (beta=%.2f, scale=%s)\n",
+						ml_beta, ml_scale==1?"lust":ml_scale==2?"lnl":"Steel & Rodrigo 2008");
+				break;
 			default:
 				printf2("Maximum quartet fit (QFIT)\n");
 				break;
-				
+
 			}
 		if(criterion != 1 && criterion != 4)
 			{
@@ -6507,6 +6714,8 @@ void usertrees_search(void)
 			cal_fund_scores(FALSE);    /* calculate the path metrics for all the fundamental trees */
 			calculated_fund_scores = TRUE;
 			}
+        if(criterion == 6 || criterion == 7)
+            rf_precompute_fund_biparts();
 		for(i=0; i<number_of_taxa; i++)presenceof_SPRtaxa[i] = -1;
 		
         if(super_scores == NULL)
@@ -6613,9 +6822,27 @@ void usertrees_search(void)
 				unroottree(temp);
 				score = (float)quartet_compatibility(temp);
 				}
-							
+			if(criterion == 6) score = compare_trees_rf(FALSE);
+			if(criterion == 7) score = compare_trees_ml(FALSE);
+
+			/* Collect per-gene-tree scores for ML topology tests */
+			if(run_ml_tests && criterion == 7)
+				{
+				if(n_all == n_all_alloc)
+					{
+					n_all_alloc += 64;
+					all_gene_scores  = realloc(all_gene_scores,  n_all_alloc * sizeof(float *));
+					all_total_scores = realloc(all_total_scores, n_all_alloc * sizeof(float));
+					}
+				all_gene_scores[n_all] = malloc(Total_fund_trees * sizeof(float));
+				for(k = 0; k < Total_fund_trees; k++)
+					all_gene_scores[n_all][k] = sourcetree_scores[k];
+				all_total_scores[n_all] = score;
+				n_all++;
+				}
+
 			/*printf("%s\t[%f]\n", user_super, score); */
-			
+
 			c = getc(userfile);
 			while((c == ' ' || c == '\r'  || c == '\n'|| c == '\t' || c == '[') && !feof(userfile))  /* skip past all the non tree characters */
 				{
@@ -6697,6 +6924,8 @@ void usertrees_search(void)
 					temp_top = NULL;
 					/*check_tree(tree_top); */
 					if(criterion == 0) score = compare_trees(FALSE);
+					if(criterion == 6) score = compare_trees_rf(FALSE);
+					if(criterion == 7) score = compare_trees_ml(FALSE);
 					for(k=0; k<Total_fund_trees; k++)
 						{
 						if(strcmp(tree_names[k], "") != 0)
@@ -6714,8 +6943,28 @@ void usertrees_search(void)
 				}
 
 			trees_in_memory = i;
-		
-        
+
+			/* Run ML topology tests if requested */
+			if(run_ml_tests)
+				{
+				if(criterion != 7)
+					printf2("WARNING: tests=yes requires criterion=ml; topology tests skipped.\n");
+				else if(n_all < 2)
+					printf2("NOTE: only %d tree(s) scored; topology tests require at least 2 trees.\n", n_all);
+				else
+					run_usertrees_ml_tests(all_gene_scores, all_total_scores,
+										   n_all, nboot_tests, alpha_tests, testsfile_name);
+				}
+
+			/* Cleanup ML test arrays */
+			if(all_gene_scores != NULL)
+				{
+				for(i = 0; i < n_all; i++)
+					free(all_gene_scores[i]);
+				free(all_gene_scores);
+				}
+			if(all_total_scores != NULL) free(all_total_scores);
+
             fclose(userfile);
             if(outfile != NULL) fclose(outfile);
             free(temp);

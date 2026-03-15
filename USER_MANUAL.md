@@ -425,7 +425,7 @@ bootstrap nreps=100 treefile=bs_trees.ph consensusfile=bs_consensus.ph
 
 ### usertrees
 
-Score one or more user-provided supertree topologies against the source trees in memory using the current criterion. Useful for testing specific hypotheses.
+Score one or more user-provided supertree topologies against the source trees in memory using the current criterion. Useful for testing specific hypotheses, scoring reference topologies, or statistical comparison of candidate trees under `criterion=ml`.
 
 ```
 usertrees <filename> [options]
@@ -435,13 +435,57 @@ usertrees <filename> [options]
 |--------|--------|---------|-------------|
 | `outfile` | `<filename>` | `Usertrees_result.txt` | Output file for scores. |
 | `printsourcescores` | `yes`, `no` | `no` | Also print the score of each individual source tree against the best user tree. |
+| `tests` | `yes`, `no` | `no` | Run ML topology tests after scoring. Only valid with `criterion=ml`. |
+| `nboot` | `<integer>` | `1000` | Bootstrap replicates for the SH test. |
+| `testsfile` | `<filename>` | `mltest_results.txt` | File for per-gene-tree δ breakdown table. |
 
 **Weight options** are criterion-dependent (same as `hs`).
+
+#### ML topology tests (`tests=yes`)
+
+When `criterion=ml` is active and `tests=yes` is specified, CLANN runs three standard topology tests comparing each candidate tree to the best-scoring tree (T1):
+
+- **Winning Sites (Steel & Rodrigo 2008):** Counts gene trees that favour T1 (n+) versus the candidate (n−). Reports an exact two-sided binomial p-value.
+- **Kishino–Hasegawa (KH) test (Kishino & Hasegawa 1989):** Parametric test. Computes the per-gene-tree log-likelihood difference δ_i, estimates its standard error under the null, and reports a one-sided normal p-value.
+- **Shimodaira–Hasegawa (SH) test (Shimodaira & Hasegawa 1999):** Bootstrap version of the KH test that corrects for the selection of the best tree. Resamples gene trees with replacement (`nboot` replicates) after centring the differences.
+
+The AU (approximately unbiased) test is not yet implemented.
+
+Each gene tree contributes one independent observation (analogous to a site in sequence-based tests). Only gene trees that are informative for at least one topology (score > 0) are counted. A warning is issued when fewer than 4 informative gene trees are available.
+
+**Typical workflow:**
+```
+exe examples/tutorial_trees.ph
+set criterion=ml
+alltrees savetrees=all.ph create=yes   # or produce candidate topologies any other way
+usertrees all.ph tests=yes
+usertrees all.ph tests=yes nboot=5000 testsfile=detailed_results.txt
+```
+
+**Output example:**
+```
+ML topology tests  (T1 = tree 1,  lnL = -43.0000,  beta = 1.00)
+=============================================================================
+  Tree      lnL         WinSites p    KH z / p         SH p
+-----------------------------------------------------------------------------
+  T2        lnL=-44.000  p=0.2380      z=1.42 p=0.078 ns  p=0.1430 ns
+  T3        lnL=-47.000  p=0.0312      z=2.30 p=0.011 *   p=0.0280 *
+-----------------------------------------------------------------------------
+  * p<alpha=0.05; ** p<0.01; *** p<0.001; ns=not significant
+```
+
+A tab-separated table with full per-gene-tree details is written to `testsfile`.
+
+**References:**
+- Steel, M. & Rodrigo, A. (2008) *Maximum likelihood supertrees.* Syst. Biol. 57:243–250.
+- Kishino, H. & Hasegawa, M. (1989) *Evaluation of the maximum likelihood estimate of the evolutionary tree topologies from DNA sequence data.* J. Mol. Evol. 29:170–179.
+- Shimodaira, H. & Hasegawa, M. (1999) *Multiple comparisons of log-likelihoods with applications to phylogenetic inference.* Mol. Biol. Evol. 16:1114–1116.
 
 **Examples:**
 ```
 usertrees mytopology.ph
 usertrees candidates.ph outfile=scores.txt printsourcescores=yes
+usertrees candidates.ph tests=yes nboot=1000
 ```
 
 ---
@@ -848,6 +892,7 @@ hs nreps=10
 | `NJ-tree.ph` | `nj` | Neighbour-joining supertree |
 | `top_alltrees.txt` | `alltrees` | Best-scoring supertree(s) from exhaustive search |
 | `Usertrees_result.txt` | `usertrees` | Scores for each user-provided topology |
+| `mltest_results.txt` | `usertrees tests=yes` | Per-gene-tree δ table for ML topology tests (criterion=ml only) |
 | `robinson_foulds.txt` | `rfdists` | Pairwise RF distances between source trees |
 | `SPRdistances.txt` | `sprdists` | SPR distance analysis results |
 | `prunedtrees.txt` | `prunemonophylies` | Pruned source trees |
