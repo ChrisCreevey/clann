@@ -340,6 +340,171 @@ int    hs_maxskips         = 1000;  /* shared: stop replicate when skip_streak r
 
 
 
+/* ===== CLI direct-command interface ===================================
+ *
+ * Allows CLANN to be called as:
+ *   clann <command> <treefile> [key=value ...]
+ *   clann usertrees <source> <candidates> [key=value ...]
+ *   clann --help
+ *   clann hs --help
+ *
+ * Options with '=' are parsed as key=value pairs.
+ * Global options (criterion, nthreads, mlbeta, mlscale, seed) become
+ * "set X Y" commands; all others are appended to the command string.
+ * Leading '--' is stripped so GNU-style --criterion=ml also works.
+ * ===================================================================== */
+
+static const char *cli_known_commands[] = {
+    "hs", "hsearch", "alltrees", "usertrees", "consensus", "nj", NULL
+};
+
+static int is_cli_command(const char *s)
+    {
+    int i;
+    for(i = 0; cli_known_commands[i]; i++)
+        if(strcmp(s, cli_known_commands[i]) == 0) return TRUE;
+    return FALSE;
+    }
+
+/* Print usage.  cmd==NULL: general help.  cmd!=NULL: per-command help
+ * (synthesises "<cmd> ?" into stored_commands[] for the REPL to handle). */
+static void cli_usage(const char *cmd)
+    {
+    if(cmd == NULL)
+        {
+        printf("\nUsage:  clann <command> <treefile> [options]\n\n");
+        printf("Commands:\n");
+        printf("  hs / hsearch   Heuristic supertree search\n");
+        printf("  alltrees       Exhaustive supertree search (small datasets)\n");
+        printf("  usertrees      Score / test user-supplied topologies\n");
+        printf("  consensus      Consensus tree from source trees\n");
+        printf("  nj             Neighbour-joining supertree\n\n");
+        printf("Global options (applied before the command):\n");
+        printf("  criterion=<c>   dfit (default), ml, rf, sfit, qfit, avcon\n");
+        printf("  nthreads=<n>    threads for parallel search (default 1)\n");
+        printf("  mlbeta=<f>      beta for ML criterion (default 1.0)\n");
+        printf("  mlscale=<s>     lnl (default), paper, lust\n");
+        printf("  seed=<n>        random seed\n\n");
+        printf("Run 'clann <command> --help' for command-specific options.\n");
+        printf("Run 'clann' with no arguments to start the interactive session.\n\n");
+        }
+    else
+        {
+        /* Let the existing REPL help system handle per-command help */
+        snprintf(stored_commands[parts], 10000, "%s ?", cmd);
+        parts++;
+        }
+    }
+
+/* Populate stored_commands[] with synthesised CLANN commands derived
+ * from argv[start..argc-1].
+ *
+ * Returns  TRUE  : CLI mode; caller should set command_line / doexecute_command
+ *          -1    : general --help printed; caller should clean_exit(0)
+ *          -2    : per-command help queued; run REPL without loading a tree
+ *
+ * out_treefiles[0] = source-trees file (for exe / execute_command)
+ * out_treefiles[1] = candidate-topologies file (usertrees only)
+ */
+static int cli_dispatch(int argc, char *argv[], int start,
+                        char out_treefiles[2][1000])
+    {
+    static const char *global_keys[] = {
+        "criterion", "nthreads", "mlbeta", "mlscale", "seed", NULL
+    };
+
+    const char *cmdname = argv[start];
+    char main_cmd[10000];
+    int file_count = 0, k, g, is_usertrees;
+
+    is_usertrees = (strcmp(cmdname, "usertrees") == 0);
+
+    /* Scan for --help / -h */
+    for(k = start; k < argc; k++)
+        {
+        const char *a = argv[k];
+        while(*a == '-') a++;
+        if(strcmp(a, "help") == 0 || strcmp(a, "h") == 0)
+            {
+            /* Per-command help: queue "<cmd> ?" for the REPL to print */
+            snprintf(stored_commands[parts], 10000, "%s ?", cmdname);
+            parts++;
+            return -2;  /* run REPL, no tree needed */
+            }
+        }
+
+    snprintf(main_cmd, sizeof(main_cmd), "%s", cmdname);
+
+    for(k = start + 1; k < argc; k++)
+        {
+        char stripped[10000];
+        char key[512], val[512];
+        char *p, *eq;
+
+        strncpy(stripped, argv[k], sizeof(stripped) - 1);
+        stripped[sizeof(stripped) - 1] = '\0';
+
+        /* Strip leading -- or - */
+        p = stripped;
+        if(p[0] == '-' && p[1] == '-')      p += 2;
+        else if(p[0] == '-' && p[1] != '\0') p += 1;
+
+        /* Split on first '=' */
+        eq = strchr(p, '=');
+        if(eq)
+            {
+            int klen = (int)(eq - p);
+            strncpy(key, p, klen); key[klen] = '\0';
+            strncpy(val, eq + 1, sizeof(val) - 1); val[sizeof(val) - 1] = '\0';
+            }
+        else
+            {
+            strncpy(key, p, sizeof(key) - 1); key[sizeof(key) - 1] = '\0';
+            val[0] = '\0';
+            }
+
+        /* No '=' → file argument */
+        if(val[0] == '\0')
+            {
+            if(file_count == 0)
+                strncpy(out_treefiles[0], key, 999);
+            else if(file_count == 1 && is_usertrees)
+                {
+                /* usertrees needs the candidates file as its first argument */
+                snprintf(main_cmd, sizeof(main_cmd), "%s %s", cmdname, key);
+                }
+            file_count++;
+            continue;
+            }
+
+        /* Is it a global set option? */
+        int is_global = FALSE;
+        for(g = 0; global_keys[g]; g++)
+            if(strcasecmp(key, global_keys[g]) == 0) { is_global = TRUE; break; }
+
+        if(is_global)
+            {
+            snprintf(stored_commands[parts], 10000, "set %s %s", key, val);
+            parts++;
+            }
+        else
+            {
+            /* Command-specific: append to main_cmd */
+            snprintf(main_cmd + strlen(main_cmd),
+                     sizeof(main_cmd) - strlen(main_cmd),
+                     " %s %s", key, val);
+            }
+        }
+
+    /* Enqueue the main command */
+    snprintf(stored_commands[parts], 10000, "%s", main_cmd);
+    parts++;
+    return TRUE;
+    }
+
+/* ===== end CLI helpers =============================================== */
+
+
 int main(int argc, char *argv[])
     {
 	
@@ -436,6 +601,13 @@ int main(int argc, char *argv[])
         }
 
 
+	/* Pre-getopt: handle --help before BSD getopt tries to parse double-dash */
+	if(argc >= 2 && strcmp(argv[1], "--help") == 0)
+		{
+		cli_usage(NULL);
+		clean_exit(0);
+		}
+
 	if(argc > 1)
 		{
 		while ((c = getopt(argc, argv, "nlhc:")) != -1)
@@ -513,6 +685,39 @@ int main(int argc, char *argv[])
 			{
 			doexecute_command = TRUE;
 			strcpy(exefilename, argv[i]);
+			}
+
+		/* ---- CLI direct-command mode ------------------------------------ *
+		 * If the first non-flag argument is a known command name, synthesise *
+		 * the stored_commands queue and run non-interactively.              *
+		 * ------------------------------------------------------------------ */
+		if(optind < argc && is_cli_command(argv[optind]))
+			{
+			char cli_treefiles[2][1000];
+			int cli_r;
+			cli_treefiles[0][0] = '\0';
+			cli_treefiles[1][0] = '\0';
+			/* Reset any state set by the earlier non-flag argv loop */
+			doexecute_command = FALSE;
+			exefilename[0] = '\0';
+			cli_r = cli_dispatch(argc, argv, optind, cli_treefiles);
+			if(cli_r == -1) clean_exit(0);   /* general --help printed */
+			if(cli_r == -2)
+				{
+				/* Per-command help: run REPL with "cmd ?" queued, no tree */
+				command_line = TRUE;
+				}
+			if(cli_r == TRUE)
+				{
+				command_line = TRUE;
+				if(cli_treefiles[0][0] != '\0')
+					{
+					doexecute_command = TRUE;
+					strcpy(exefilename, cli_treefiles[0]);
+					}
+				}
+			/* prevent the earlier non-flag loop from double-loading */
+			optind = argc;
 			}
 		}
 	if(command_line == TRUE)
