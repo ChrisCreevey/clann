@@ -130,6 +130,8 @@ float compare_trees(int spr);
 void  rf_precompute_fund_biparts(void);
 float compare_trees_rf(int spr);
 float compare_trees_ml(int spr);
+static float       ml_display_score(float s); /* negate for lnl-scale display */
+static const char *ml_score_label(void);       /* "lnL" or "score"            */
 struct taxon * make_taxon(void);
 void intTotree(int tree_num, char *array, int num_taxa);
 int tree_build (int c, char *treestring, struct taxon *parent, int fromfile, int fund_num, int taxaorder);
@@ -301,7 +303,7 @@ struct taxon *tree_top = NULL, *temp_top = NULL, *temp_top2 = NULL, *branchpoint
 float *scores_retained_supers = NULL, *partition_number = NULL, num_partitions = 0, total_partitions = 0, sprscore = -1, *best_topology_scores = NULL, **weighted_scores = NULL, *sourcetree_scores = NULL, *tree_weights = NULL;
 float *score_of_bootstraps = NULL, *yaptp_results = NULL, largest_length = 0, dup_weight = 1, loss_weight = 1, hgt_weight = 1, BESTSCORE = -1;
 float ml_beta = 1.0f;   /* L.U.st exponential slope parameter (default 1.0) */
-int   ml_lust_compat = FALSE; /* TRUE: multiply score by log10(e) to match L.U.st output exactly */
+int   ml_scale = 2;     /* ML score scale: 0=paper (raw sum), 1=lust (log10), 2=lnl (default) */
 time_t interval1, interval2;
 double sup=1;
 char saved_supertree[TREE_LENGTH],  *test_array, inputfilename[10000], delimiter_char = '.', logfile_name[10000], system_call[100000];
@@ -1490,7 +1492,7 @@ void print_commands(int num)
         printf2("\t===========================================================\n");
         printf2("\n\tcriterion\tdfit | sfit | qfit | mrp | avcon | rf | ml\t");
         printf2("\n\tmlbeta\t\t<float > 0>\t\t\t\t%.4f", ml_beta);
-        printf2("\n\tmlscale\t\tpaper | lust\t\t\t\t%s", ml_lust_compat ? "lust" : "paper");
+        printf2("\n\tmlscale\t\tpaper | lust | lnl\t\t\t%s", ml_scale == 1 ? "lust" : ml_scale == 2 ? "lnl" : "paper");
         if(criterion == 0) printf2("dfit");
         if(criterion == 1) printf2("mrp");
         if(criterion == 2) printf2("sfit");
@@ -4621,7 +4623,7 @@ void alltrees_search(int user)
                 if(userfile != NULL) fprintf(userfile, "%s;\t[%f]\n", best_tree, scores_retained_supers[i] );
 
                 tree_coordinates(best_tree, FALSE, TRUE, FALSE, -1);
-                printf2("\nSupertree %d of %d score = %f\n", i+1, j, scores_retained_supers[i] );
+                printf2("\nSupertree %d of %d %s = %f\n", i+1, j, ml_score_label(), ml_display_score(scores_retained_supers[i]) );
                 i++;
                 }
 
@@ -6691,7 +6693,7 @@ void usertrees_search(void)
 				
 				if(outfile != NULL) fprintf(outfile, "%s\t[%f]\n", retained_supers[i], scores_retained_supers[i] );
 				tree_coordinates(retained_supers[i], FALSE, TRUE, FALSE, -1);
-				printf2("\nSupertree %d of %d score = %f\n", i+1, j, scores_retained_supers[i] );
+				printf2("\nSupertree %d of %d %s = %f\n", i+1, j, ml_score_label(), ml_display_score(scores_retained_supers[i]) );
 				i++;
 				}
 
@@ -7136,6 +7138,18 @@ static uint64_t tree_topo_hash(struct taxon *root)
     }
 
 
+/* --- ML display helpers --------------------------------------------------
+ * ml_display_score: for lnl scale, negate the internal minimisation score
+ *   to give the conventional lnL (negative = better, as in IQ-TREE/RAxML).
+ * ml_score_label:   returns the column header "lnL" or "score".
+ */
+static float ml_display_score(float s)
+    { return (criterion == 7 && ml_scale == 2) ? -s : s; }
+
+static const char *ml_score_label(void)
+    { return (criterion == 7 && ml_scale == 2) ? "lnL" : "score"; }
+
+
 /* --- Robinson-Foulds bipartition hash-set infrastructure -----------------
  *
  * collect_biparts_newick: parse an integer-indexed Newick string and fill
@@ -7364,7 +7378,7 @@ float compare_trees_ml(int spr)
             float d = (float)(super_cnt + gene_cnt - 2 * shared);
             /* Negated log-likelihood: -ln L = beta * d  (paper formula, default).
              * With ml_lust_compat, multiply by log10(e) to match L.U.st output exactly. */
-            float ml_score = (float)(ml_beta * d * (ml_lust_compat ? LOG10E : 1.0f)) * tree_weights[i];
+            float ml_score = (float)(ml_beta * d * (ml_scale == 1 ? LOG10E : 1.0f)) * tree_weights[i];
             sourcetree_scores[i] = ml_score;
             total += ml_score;
             }
@@ -7910,18 +7924,23 @@ void heuristic_search(int user, int print, int sample, int nreps)
 			}
 		if(strcmp(parsed_command[i], "mlscale") == 0)
 			{
-			if(strcmp(parsed_command[i+1], "lust") == 0 || strcmp(parsed_command[i+1], "LUSt") == 0)
+			if(strcmp(parsed_command[i+1], "lnl") == 0 || strcmp(parsed_command[i+1], "lnL") == 0)
 				{
-				ml_lust_compat = TRUE;
+				ml_scale = 2;
+				printf2("ML scoring: lnL display (reported as lnL = -beta*d)\n");
+				}
+			else if(strcmp(parsed_command[i+1], "lust") == 0 || strcmp(parsed_command[i+1], "LUSt") == 0)
+				{
+				ml_scale = 1;
 				printf2("ML scoring: L.U.st-compatible scaling (beta * d * log10(e))\n");
 				}
 			else if(strcmp(parsed_command[i+1], "paper") == 0)
 				{
-				ml_lust_compat = FALSE;
-				printf2("ML scoring: paper formula (beta * d, -ln L)\n");
+				ml_scale = 0;
+				printf2("ML scoring: paper formula (beta * d, minimised directly)\n");
 				}
 			else
-				printf2("Error: mlscale must be 'paper' or 'lust'\n");
+				printf2("Error: mlscale must be 'paper', 'lust', or 'lnl'\n");
 			}
 
 
@@ -7977,7 +7996,7 @@ void heuristic_search(int user, int print, int sample, int nreps)
                     break;
                 case 7:
                     printf2("Maximum likelihood supertree (beta=%.2f, scale=%s)\n",
-                            ml_beta, ml_lust_compat ? "lust" : "paper");
+                            ml_beta, ml_scale == 1 ? "lust" : ml_scale == 2 ? "lnl" : "paper");
                     break;
                 default:
                     printf2("Maximum quartet fit (QFIT)\n");
@@ -8696,7 +8715,7 @@ void heuristic_search(int user, int print, int sample, int nreps)
                         {
                         if(outfile != NULL) fprintf(outfile, "%s\t[%f]\n", retained_supers[i], scores_retained_supers[i] );
                         tree_coordinates(retained_supers[i], FALSE, TRUE, FALSE, -1);
-                        printf2("\nSupertree %d of %d score = %f\n", i+1, j, scores_retained_supers[i] );
+                        printf2("\nSupertree %d of %d %s = %f\n", i+1, j, ml_score_label(), ml_display_score(scores_retained_supers[i]) );
 						
 
 
@@ -11761,14 +11780,14 @@ int regraft(struct taxon * position, struct taxon * newbie, struct taxon * last,
                                         int    hs_em = (int)(hs_el / 60);
                                         int    hs_es = (int)hs_el % 60;
                                         if(sprscore < 0.0f)
-                                            printf2("  [%2d:%02d]  tried=%6d  score=(searching...)\n",
-                                                    hs_em, hs_es, tried_regrafts);
+                                            printf2("  [%2d:%02d]  tried=%6d  %s=(searching...)\n",
+                                                    hs_em, hs_es, tried_regrafts, ml_score_label());
                                         else
                                             {
                                             int hs_imp = (last_status_score < 0.0f || sprscore < last_status_score);
-                                            printf2("  [%2d:%02d]  tried=%6d  score=%s%.6f\n",
+                                            printf2("  [%2d:%02d]  tried=%6d  %s=%s%.6f\n",
                                                     hs_em, hs_es, tried_regrafts,
-                                                    hs_imp ? "* " : "  ", sprscore);
+                                                    ml_score_label(), hs_imp ? "* " : "  ", ml_display_score(sprscore));
                                             if(hs_imp) last_status_score = sprscore;
                                             }
                                         fflush(stdout);
@@ -11796,7 +11815,7 @@ int regraft(struct taxon * position, struct taxon * newbie, struct taxon * last,
                                                               par_progress_best < par_last_print_score);
                                                 printf2("  [%2d:%02d]  best so far = %s%.6f\n",
                                                         hs_em, hs_es,
-                                                        hs_imp ? "* " : "  ", par_progress_best);
+                                                        hs_imp ? "* " : "  ", ml_display_score(par_progress_best));
                                                 par_last_print_score = par_progress_best;
                                                 }
                                             fflush(stdout);
