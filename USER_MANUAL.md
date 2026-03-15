@@ -51,7 +51,55 @@ Clann constructs supertrees from collections of gene trees and provides tools to
 
 ## 2. Installation and Startup
 
-### Command-line syntax
+### Direct command-line usage (recommended for pipelines)
+
+Clann can be called directly from the shell with a command, an input file, and options:
+
+```
+clann <command> <treefile> [key=value ...]
+```
+
+**Examples:**
+```bash
+clann hs trees.ph
+clann hs trees.ph criterion=ml nreps=5 nthreads=4
+clann hs trees.ph --criterion=ml --nreps=5       # GNU-style flags also work
+clann alltrees trees.ph criterion=rf
+clann usertrees source.ph candidates.ph criterion=ml tests=yes nboot=1000
+clann consensus trees.ph
+clann hs --help                                   # per-command help
+clann --help                                      # general help
+```
+
+**Available commands:**
+
+| Command | Description |
+|---------|-------------|
+| `hs` / `hsearch` | Heuristic supertree search |
+| `alltrees` | Exhaustive search (small datasets) |
+| `usertrees` | Score / test user-supplied topologies |
+| `consensus` | Consensus tree from source trees |
+| `nj` | Neighbour-joining supertree |
+
+**Global options** (applied before the command):
+
+| Option | Description | Default |
+|--------|-------------|---------|
+| `criterion=<c>` | Scoring criterion: `dfit`, `ml`, `rf`, `sfit`, `qfit`, `avcon` | `dfit` |
+| `nthreads=<n>` | Threads for parallel search | `1` |
+| `mlbeta=<f>` | β parameter for ML criterion | `1.0` |
+| `mlscale=<s>` | ML score display: `lnl`, `paper`, `lust` | `lnl` |
+| `seed=<n>` | Random seed | (random) |
+
+Command-specific options (e.g. `nreps`, `swap`, `tests`, `nboot`) are passed directly to the command — the same options available in interactive mode.
+
+For `usertrees`, the first file is the source trees and the second file is the candidate topologies.
+
+---
+
+### Legacy command-line syntax
+
+The original flag-based syntax is still fully supported:
 
 ```
 clann [-lnh] [-c commands_file] [tree_file]
@@ -67,16 +115,16 @@ clann [-lnh] [-c commands_file] [tree_file]
 
 ### Interactive mode
 
-Without `-n`, Clann presents a `clann>` prompt. Type commands interactively. Append `?` to any command to see its options:
+Without any arguments, Clann presents a `clann>` prompt. Type commands interactively. Append `?` to any command to see its options:
 
 ```
 clann> hs ?
 clann> reconstruct ?
 ```
 
-### Batch mode
+### Batch / script mode
 
-Create a plain-text commands file (one command per line, or separated by `;`) and run:
+For complex workflows involving multiple commands, use a commands file:
 
 ```
 clann -n -c commands.txt trees.ph
@@ -937,11 +985,16 @@ By default, only a small number of gene-tree and species-tree rootings are sampl
 reconstruct speciestree=memory numspeciesrootings=all numgenerootings=all
 ```
 
-**Q: How do I run Clann non-interactively on a cluster?**
-Use batch mode with a commands file:
+**Q: How do I run Clann non-interactively on a cluster or in a pipeline?**
+The simplest approach is the direct CLI:
+```bash
+clann hs trees.ph criterion=ml nthreads=8 > clann_output.txt 2>&1
 ```
+For complex multi-step workflows, use a commands file:
+```bash
 clann -n -c commands.txt trees.ph > clann_output.txt 2>&1
 ```
+Both approaches exit automatically when done and return a shell exit code.
 
 **Q: What does "Investigating phylogenetic information through supertree analyses" actually mean?**
 See the primary Clann publications (Creevey & McInerney 2005; Creevey et al. 2004) cited in the README.

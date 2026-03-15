@@ -46,14 +46,74 @@ A complete reference for every command and its options is provided in **[USER_MA
 
 # Usage
 
-Usage:
-```"clann -lnh [-c commands file] [tree file]"```
+## Direct command-line (recommended)
 
-	Where [tree file] is an optional Nexus or Phylip formatted file of phylogenetic trees
-	-l turn on logging of screen output to file "clann.log"
-	-n turns off interactive mode - requires commands to be provided in a nexus 'clann block' or with '-c'
-	-c <file name> specifies a file with commands to be executed (each separated by ';')
-	-h prints this message
+Clann can be called directly from the shell — no interactive session required:
+
+```bash
+clann hs trees.ph
+clann hs trees.ph criterion=ml nreps=5 nthreads=4
+clann hs trees.ph --criterion=ml --nreps=5          # GNU-style flags also work
+clann alltrees trees.ph criterion=rf
+clann usertrees source.ph candidates.ph criterion=ml tests=yes nboot=1000
+clann consensus trees.ph
+clann --help                 # general help
+clann hs --help              # per-command help
+```
+
+**Available commands:** `hs` (heuristic search), `alltrees` (exhaustive), `usertrees` (score/test candidate topologies), `consensus`, `nj` (neighbour-joining).
+
+**Global options** (prefix with `--` or use native `key=value`):
+
+| Option | Values | Default |
+|--------|--------|---------|
+| `criterion` | `dfit`, `ml`, `rf`, `sfit`, `qfit`, `avcon` | `dfit` |
+| `nthreads` | integer | `1` |
+| `mlbeta` | float | `1.0` |
+| `mlscale` | `lnl`, `paper`, `lust` | `lnl` |
+| `seed` | integer | (random) |
+
+Command-specific options (`nreps`, `swap`, `savetrees`, `tests`, `nboot`, etc.) are identical to their interactive equivalents — see `clann <command> --help` or the [USER_MANUAL.md](USER_MANUAL.md).
+
+This interface is designed for use in shell scripts, Snakemake rules, Nextflow processes, and cluster job submission. Clann exits automatically and returns a standard shell exit code.
+
+---
+
+## Interactive mode
+
+Typing `clann` with no arguments starts the interactive REPL:
+
+```
+clann> exe trees.ph
+clann> set criterion=ml
+clann> hs nreps=10
+clann> quit
+```
+
+Append `?` to any command to see its options: `hs ?`, `usertrees ?`, etc.
+
+---
+
+## Batch / script mode (legacy)
+
+For complex multi-step workflows, use a commands file:
+
+```bash
+clann -n -c commands.txt trees.ph
+```
+
+Or embed commands in a Nexus clann-block inside the tree file:
+
+```
+#NEXUS
+begin clann;
+  exe trees.ph;
+  set criterion=ml;
+  hs nreps=10;
+end;
+```
+
+Full flag reference: `clann -h`
 
 
 ## Working with Single-Copy and Multicopy Gene Families
@@ -136,7 +196,7 @@ See `reconstruct ?` for full options including supplying an external species tre
 			  (multicopy trees auto-excluded when delimiter mode is active)
 	alltrees	- Exhaustively search all possible supertrees
 			  (multicopy trees auto-excluded when delimiter mode is active)
-	usertrees	- Assess user-defined supertrees (from separate file), to find the best scoring
+	usertrees	- Assess user-defined supertrees (from separate file); optionally run ML topology tests (tests=yes)
 	consensus	- Calculate a consensus tree of all trees containing all taxa
 
 **Source tree selection and modification:**
@@ -161,6 +221,7 @@ See `reconstruct ?` for full options including supplying an external species tre
 
 
 
-Type a command followed by '?' in interactive mode to get information on the options available i.e.: `exe ?`
+In interactive mode, type a command followed by `?` to see its options: `hs ?`, `usertrees ?`, etc.
+From the shell, use `clann <command> --help` for the same information.
 
 Full descriptions of all commands and options are available in **[USER_MANUAL.md](USER_MANUAL.md)**.
