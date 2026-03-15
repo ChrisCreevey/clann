@@ -300,6 +300,10 @@ VisitedSet *visited_set   = NULL; /* threadprivate: per-replicate visited topolo
 time_t  rep_start_time    = 0;    /* threadprivate: wall-clock time when current do_search() began */
 int     hs_do_print       = 0;    /* threadprivate: mirrors the 'print' param of do_search() */
 float   last_status_score = -1.0f;/* threadprivate: sprscore at last periodic status line (for improvement marker) */
+/* Shared (non-threadprivate): parallel-mode global progress state, written under omp critical */
+float  par_progress_best   = -1.0f; /* best score seen so far across ALL parallel threads */
+float  par_last_print_score= -1.0f; /* par_progress_best at last status line (thread-0 only) */
+time_t par_search_start    = 0;     /* wall-clock time when the parallel region began */
 
 /****** OpenMP thread-private state: one independent copy per thread in parallel regions ******/
 #ifdef _OPENMP
@@ -8004,6 +8008,9 @@ void heuristic_search(int user, int print, int sample, int nreps)
                         par_scores[k] = -1;
                         }
 
+                    par_progress_best    = -1.0f;
+                    par_last_print_score = -1.0f;
+                    par_search_start     = time(NULL);
                     #pragma omp parallel num_threads(nthreads) default(shared) \
                             private(prl_i)
                         {
@@ -8016,14 +8023,6 @@ void heuristic_search(int user, int print, int sample, int nreps)
                             {
                             if(user_break) continue;
                             thr_swaps += do_search(starths[prl_i], TRUE, FALSE, numswaps, outfile, numspectries, numgenetries);
-                            if(print)
-                                #pragma omp critical (hs_progress)
-                                    {
-                                    printf2("  Rep %2d/%2d: tried=%6d  best=%.6f\n",
-                                            prl_i+1, nreps, tried_regrafts,
-                                            sprscore >= 0.0f ? sprscore : BESTSCORE);
-                                    fflush(stdout);
-                                    }
                             }
 
                         #pragma omp critical (hs_merge)
@@ -8119,6 +8118,9 @@ void heuristic_search(int user, int print, int sample, int nreps)
 							par_scores[k] = -1;
 							}
 
+						par_progress_best    = -1.0f;
+						par_last_print_score = -1.0f;
+						par_search_start     = time(NULL);
 						#pragma omp parallel num_threads(nthreads) default(shared) \
 						        private(prl_i)
 							{
@@ -8134,14 +8136,6 @@ void heuristic_search(int user, int print, int sample, int nreps)
 								strcpy(thr_tree, start_trees[prl_i]);
 								returntree(thr_tree);
 								thr_swaps += do_search(thr_tree, TRUE, FALSE, numswaps, outfile, numspectries, numgenetries);
-								if(print)
-									#pragma omp critical (hs_progress)
-										{
-										printf2("  Rep %2d/%2d: tried=%6d  best=%.6f\n",
-										        prl_i+1, nreps, tried_regrafts,
-										        sprscore >= 0.0f ? sprscore : BESTSCORE);
-										fflush(stdout);
-										}
 								}
 
 							#pragma omp critical (hs_merge)
@@ -11404,6 +11398,7 @@ int regraft(struct taxon * position, struct taxon * newbie, struct taxon * last,
                                     {
                                     if(hs_do_print)
                                         {
+                                        /* Sequential: per-replicate status line */
                                         double hs_el = difftime(interval2, rep_start_time);
                                         int    hs_em = (int)(hs_el / 60);
                                         int    hs_es = (int)hs_el % 60;
@@ -11420,6 +11415,36 @@ int regraft(struct taxon * position, struct taxon * newbie, struct taxon * last,
                                             }
                                         fflush(stdout);
                                         }
+#ifdef _OPENMP
+                                    else if(omp_get_num_threads() > 1)
+                                        {
+                                        /* Parallel: update shared best; thread 0 prints the global summary */
+                                        if(sprscore >= 0.0f)
+                                            #pragma omp critical (par_progress)
+                                                {
+                                                if(par_progress_best < 0.0f || sprscore < par_progress_best)
+                                                    par_progress_best = sprscore;
+                                                }
+                                        if(omp_get_thread_num() == 0)
+                                            {
+                                            double hs_el = difftime(interval2, par_search_start);
+                                            int    hs_em = (int)(hs_el / 60), hs_es = (int)hs_el % 60;
+                                            if(par_progress_best < 0.0f)
+                                                printf2("  [%2d:%02d]  best so far = (searching...)\n",
+                                                        hs_em, hs_es);
+                                            else
+                                                {
+                                                int hs_imp = (par_last_print_score < 0.0f ||
+                                                              par_progress_best < par_last_print_score);
+                                                printf2("  [%2d:%02d]  best so far = %s%.6f\n",
+                                                        hs_em, hs_es,
+                                                        hs_imp ? "* " : "  ", par_progress_best);
+                                                par_last_print_score = par_progress_best;
+                                                }
+                                            fflush(stdout);
+                                            }
+                                        }
+#endif
                                     interval1 = time(NULL);
                                     }
                         
