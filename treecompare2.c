@@ -26,6 +26,10 @@
 #include <readline/history.h>
 #endif
 
+#ifdef _OPENMP
+#include <omp.h>
+#endif
+
 
 /****** Define  ********/
 
@@ -98,6 +102,11 @@ int unroottree(char * tree);
 void alltrees_search(int user);
 static int * apply_singlecopy_filter(void);
 static void restore_singlecopy_filter(int *saved);
+#ifdef _OPENMP
+static void hs_alloc_thread_state(void);
+static void hs_free_thread_state(void);
+static void hs_merge_results(char ***par_retained, float **par_scores, int *par_n, float *par_best, int *par_NUMSWAPS);
+#endif
 float compare_trees(int spr);
 struct taxon * make_taxon(void);
 void intTotree(int tree_num, char *array, int num_taxa);
@@ -274,6 +283,20 @@ double sup=1;
 char saved_supertree[TREE_LENGTH],  *test_array, inputfilename[10000], delimiter_char = '.', logfile_name[10000], system_call[100000];
 int trees_in_memory = 0, *sourcetreetag = NULL, remainingtrees = 0, GC, user_break = FALSE, delimiter = TRUE, print_log = FALSE, num_gene_nodes, testarraypos = 0;
 int malloc_check =0, count_now = FALSE, another_check =0;
+unsigned int thread_seed = 0;   /* per-thread random seed for rand_r(); see threadprivate block below */
+
+/****** OpenMP thread-private state: one independent copy per thread in parallel regions ******/
+#ifdef _OPENMP
+#pragma omp threadprivate( \
+    tree_top, temp_top, temp_top2, branchpointer, \
+    super_scores, sourcetree_scores, presenceof_SPRtaxa, \
+    sprscore, tried_regrafts, \
+    retained_supers, scores_retained_supers, \
+    best_topology, best_topology_scores, number_retained_supers, \
+    BESTSCORE, NUMSWAPS, \
+    thread_seed \
+)
+#endif
 
 
 
@@ -1296,6 +1319,9 @@ void print_commands(int num)
 			printf2("\n\tstart\t\tnj | random | <filename>\tnj");
 
 			printf2("\n\tmaxswaps\t<integer number>\t\t*1,000,000\n\tsavetrees\t<filename>\t\t\tHeuristic_result.txt");
+#ifdef _OPENMP
+            printf2("\n\tnthreads\t<integer number>\t\t*1  (OpenMP threads; not available for criterion=recon)");
+#endif
             if(criterion == 0)
                 {
                 printf2("\n\tweight\t\tequal | comparisons\t\t");
@@ -6795,9 +6821,188 @@ static void restore_singlecopy_filter(int *saved)
 /* ------------------------------------------------------ */
 
 
+#ifdef _OPENMP
+/*  hs_alloc_thread_state --------------------------------------------------
+ *  Allocate (or reset) the per-thread search globals for the current thread.
+ *  Must be called from inside a #pragma omp parallel region.
+ */
+static void hs_alloc_thread_state(void)
+    {
+    int k, init_n, is_master;
+    init_n = 10;
+    is_master = (omp_get_thread_num() == 0);
+
+    if(!is_master)
+        {
+        /* Non-master threads: all threadprivate vars are undefined -- allocate fresh. */
+        retained_supers = malloc(init_n * sizeof(char *));
+        scores_retained_supers = malloc(init_n * sizeof(float));
+        best_topology = malloc(init_n * sizeof(char *));
+        best_topology_scores = malloc(init_n * sizeof(float));
+        for(k=0; k<init_n; k++)
+            {
+            retained_supers[k] = malloc(TREE_LENGTH * sizeof(char));
+            retained_supers[k][0] = '\0';
+            scores_retained_supers[k] = -1;
+            best_topology[k] = malloc(TREE_LENGTH * sizeof(char));
+            best_topology[k][0] = '\0';
+            best_topology_scores[k] = -1;
+            }
+        number_retained_supers = init_n;
+        super_scores = malloc(number_of_taxa * sizeof(int *));
+        for(k=0; k<number_of_taxa; k++)
+            super_scores[k] = malloc(number_of_taxa * sizeof(int));
+        sourcetree_scores = malloc(Total_fund_trees * sizeof(float));
+        presenceof_SPRtaxa = malloc(number_of_taxa * sizeof(int));
+        }
+    else
+        {
+        /* Master thread: valid pointers from before the parallel region -- reset content. */
+        for(k=0; k<number_retained_supers; k++)
+            {
+            retained_supers[k][0] = '\0';
+            scores_retained_supers[k] = -1;
+            if(best_topology && best_topology[k]) best_topology[k][0] = '\0';
+            if(best_topology_scores) best_topology_scores[k] = -1;
+            }
+        /* Refresh super_scores (may contain stale path-metric data). */
+        if(super_scores)
+            {
+            for(k=0; k<number_of_taxa; k++) free(super_scores[k]);
+            free(super_scores);
+            }
+        super_scores = malloc(number_of_taxa * sizeof(int *));
+        for(k=0; k<number_of_taxa; k++)
+            super_scores[k] = malloc(number_of_taxa * sizeof(int));
+        }
+
+    /* Common to all threads: */
+    for(k=0; k<Total_fund_trees; k++) sourcetree_scores[k] = -1;
+    for(k=0; k<number_of_taxa; k++) presenceof_SPRtaxa[k] = -1;
+    BESTSCORE = -1;
+    NUMSWAPS = 0;
+    sprscore = -1;
+    tried_regrafts = 0;
+    tree_top = NULL;
+    temp_top = NULL;
+    temp_top2 = NULL;
+    branchpointer = NULL;
+    thread_seed = (unsigned int)(seed + (unsigned int)omp_get_thread_num() * 1000003u);
+    }
+
+
+/*  hs_free_thread_state ---------------------------------------------------
+ *  Free per-thread search globals.  Must be called inside a parallel region.
+ *  The master thread does NOT free retained_supers / scores_retained_supers /
+ *  best_topology / sourcetree_scores / presenceof_SPRtaxa -- these are freed
+ *  by the caller after the parallel region ends.
+ */
+static void hs_free_thread_state(void)
+    {
+    int k, is_master;
+    is_master = (omp_get_thread_num() == 0);
+
+    /* Dismantle any tree left in working memory by the last do_search call. */
+    if(tree_top != NULL) { dismantle_tree(tree_top); tree_top = NULL; }
+    if(temp_top != NULL) { dismantle_tree(temp_top); temp_top = NULL; }
+
+    /* Free super_scores (freshly allocated by hs_alloc_thread_state for all threads). */
+    if(super_scores)
+        {
+        for(k=0; k<number_of_taxa; k++) free(super_scores[k]);
+        free(super_scores); super_scores = NULL;
+        }
+
+    if(!is_master)
+        {
+        /* Non-master: free everything that was allocated per-thread. */
+        if(sourcetree_scores) { free(sourcetree_scores); sourcetree_scores = NULL; }
+        if(presenceof_SPRtaxa) { free(presenceof_SPRtaxa); presenceof_SPRtaxa = NULL; }
+        for(k=0; k<number_retained_supers; k++)
+            {
+            if(retained_supers && retained_supers[k]) free(retained_supers[k]);
+            if(best_topology && best_topology[k]) free(best_topology[k]);
+            }
+        if(retained_supers) { free(retained_supers); retained_supers = NULL; }
+        if(scores_retained_supers) { free(scores_retained_supers); scores_retained_supers = NULL; }
+        if(best_topology) { free(best_topology); best_topology = NULL; }
+        if(best_topology_scores) { free(best_topology_scores); best_topology_scores = NULL; }
+        }
+    /* Master thread: retained_supers etc. are freed + replaced by caller after parallel ends. */
+    }
+
+
+/*  hs_merge_results -------------------------------------------------------
+ *  Merge the current thread's search results (threadprivate retained_supers /
+ *  scores_retained_supers / NUMSWAPS) into the shared merge buffers.
+ *  Must be called inside #pragma omp critical.
+ */
+static void hs_merge_results(char ***par_retained, float **par_scores, int *par_n,
+                              float *par_best, int *par_NUMSWAPS)
+    {
+    int mi, mj, ml, is_dup, old_n;
+    float msc;
+    char *mtr;
+
+    for(mi=0; mi<number_retained_supers; mi++)
+        {
+        if(scores_retained_supers[mi] < 0) break;
+        msc = scores_retained_supers[mi];
+        mtr = retained_supers[mi];
+
+        if(*par_best < 0 || msc < *par_best)
+            {
+            /* New global best: clear merge buffers. */
+            *par_best = msc;
+            for(mj=0; mj<*par_n; mj++)
+                {
+                (*par_retained)[mj][0] = '\0';
+                (*par_scores)[mj] = -1;
+                }
+            }
+
+        /* Add tree if it matches the current best score (use 1e-4 to handle float ULP at ~10). */
+        if(fabsf(msc - *par_best) < 1e-4f)
+            {
+            is_dup = FALSE;
+            for(mj=0; mj<*par_n; mj++)
+                {
+                if((*par_scores)[mj] < 0) break;
+                if(strcmp((*par_retained)[mj], mtr) == 0) { is_dup = TRUE; break; }
+                }
+            if(!is_dup)
+                {
+                /* Find first empty slot (score == -1). */
+                for(mj=0; mj<*par_n && (*par_scores)[mj] >= 0; mj++);
+                if(mj >= *par_n)
+                    {
+                    /* Grow merge buffers. */
+                    old_n = *par_n;
+                    *par_n += 10;
+                    *par_retained = realloc(*par_retained, *par_n * sizeof(char *));
+                    *par_scores   = realloc(*par_scores,   *par_n * sizeof(float));
+                    for(ml=old_n; ml<*par_n; ml++)
+                        {
+                        (*par_retained)[ml] = malloc(TREE_LENGTH * sizeof(char));
+                        (*par_retained)[ml][0] = '\0';
+                        (*par_scores)[ml] = -1;
+                        }
+                    }
+                (*par_retained)[mj] = realloc((*par_retained)[mj],
+                                               (strlen(mtr)+10)*sizeof(char));
+                strcpy((*par_retained)[mj], mtr);
+                (*par_scores)[mj] = *par_best;
+                }
+            }
+        }
+    *par_NUMSWAPS += NUMSWAPS;
+    }
+#endif /* _OPENMP */
+
+
 void heuristic_search(int user, int print, int sample, int nreps)
     {
-    int i=0, j=0, k=0, l=0, swaps = 0, keep = 0, nbest = 0, start = 2, error = FALSE, numswaps = 1000000, different=TRUE, do_histogram = FALSE, here = FALSE, **taxa_comp = NULL, bins = 20, found = FALSE, missing_method = 1, random_num, numspectries = 2, numgenetries = 2;
+    int i=0, j=0, k=0, l=0, swaps = 0, keep = 0, nbest = 0, start = 2, error = FALSE, numswaps = 1000000, different=TRUE, do_histogram = FALSE, here = FALSE, **taxa_comp = NULL, bins = 20, found = FALSE, missing_method = 1, random_num, numspectries = 2, numgenetries = 2, nthreads = 1;
     char *tree = NULL, c = '\0', *best_tree = NULL, *temptree = NULL, **starths = NULL, userfilename[10000], useroutfile[10000], histogramfile_name[10000];
     FILE *userfile = NULL, *outfile = NULL, *paupfile = NULL, *histogram_file = NULL;
     float distance=0, number=0, *startscores = NULL, used_weights = 0;
@@ -7126,8 +7331,18 @@ void heuristic_search(int user, int print, int sample, int nreps)
 					}
 				}
 			}
-		
-    
+		if(strcmp(parsed_command[i], "nthreads") == 0)
+			{
+			nthreads = toint(parsed_command[i+1]);
+			if(nthreads < 1)
+				{
+				printf2("Error: '%s' is an invalid value for nthreads (must be >= 1)\n", parsed_command[i+1]);
+				nthreads = 1;
+				error = TRUE;
+				}
+			}
+
+
         }
     for(i=0; i<num_commands; i++)   /* This has to be outside the normal for loop because if the assignment of hsreps (or nreps) is made after the assignment of smaple, then an error can be reported */
         {
@@ -7189,6 +7404,9 @@ void heuristic_search(int user, int print, int sample, int nreps)
                 printf2("\tMaximum Number of Steps (nsteps) = %d\n", number_of_steps);
                 printf2("\tMaximum Number of Swaps (maxswaps) = %d\n", numswaps);
                 printf2("\tNumber of repetitions of Heuristic search = %d\n", nreps);
+#ifdef _OPENMP
+                if(nthreads > 1) printf2("\tOpenMP threads = %d\n", nthreads);
+#endif
                 if(criterion != 5)
 					printf2("\tWeighting Scheme = ");
                 if(criterion==0)
@@ -7239,6 +7457,15 @@ void heuristic_search(int user, int print, int sample, int nreps)
 				
 			}
 		
+#ifdef _OPENMP
+        /* criterion=recon uses shared file I/O (distributionreconfile); cannot parallelise */
+        if(nthreads > 1 && criterion == 5)
+            {
+            printf2("Warning: nthreads>1 is not supported for criterion=recon (concurrent file I/O). Falling back to nthreads=1.\n");
+            nthreads = 1;
+            }
+        omp_set_num_threads(nthreads);
+#endif
         /* criterion=recon scores all trees (single-copy and multicopy); skip the filter */
         if(criterion != 5)
             saved_tags = apply_singlecopy_filter();
@@ -7364,6 +7591,10 @@ void heuristic_search(int user, int print, int sample, int nreps)
 			
 			
         
+
+        /* Initialise thread_seed for sequential mode (overridden per-thread inside parallel regions). */
+        thread_seed = (unsigned int)seed;
+
             if(start == 0)  /* if we are to use a random starting tree */
                 {
                 swaps = 0;
@@ -7492,12 +7723,77 @@ void heuristic_search(int user, int print, int sample, int nreps)
 				i=0;
 				 if(print) printf2("\nHeuristic search progress indicator:");
                     fflush(stdout);
-                while(i != nreps && !user_break) /* Start searching tree space */
+#ifdef _OPENMP
+                if(nthreads > 1)
                     {
-					if(print)printf2("\nRepetition %d of %d:", i+1, nreps);
-                    fflush(stdout);
-                    swaps += do_search(starths[i], TRUE, print, numswaps, outfile, numspectries, numgenetries);
-                    i++;
+                    /* ---- Parallel start==0 nreps loop ---- */
+                    int    prl_i;
+                    char **par_retained = NULL;
+                    float *par_scores   = NULL;
+                    int    par_n        = 10;
+                    float  par_best     = -1;
+                    int    par_NUMSWAPS = 0;
+
+                    par_retained = malloc(par_n * sizeof(char *));
+                    par_scores   = malloc(par_n * sizeof(float));
+                    for(k=0; k<par_n; k++)
+                        {
+                        par_retained[k] = malloc(TREE_LENGTH * sizeof(char));
+                        par_retained[k][0] = '\0';
+                        par_scores[k] = -1;
+                        }
+
+                    #pragma omp parallel num_threads(nthreads) default(shared) \
+                            private(prl_i)
+                        {
+                        int thr_swaps = 0;
+
+                        hs_alloc_thread_state();
+
+                        #pragma omp for schedule(dynamic, 1)
+                        for(prl_i=0; prl_i<nreps; prl_i++)
+                            {
+                            if(user_break) continue;
+                            thr_swaps += do_search(starths[prl_i], TRUE, FALSE, numswaps, outfile, numspectries, numgenetries);
+                            }
+
+                        #pragma omp critical (hs_merge)
+                            {
+                            hs_merge_results(&par_retained, &par_scores, &par_n, &par_best, &par_NUMSWAPS);
+                            swaps += thr_swaps;
+                            }
+
+                        hs_free_thread_state();
+                        }
+                    /* ---- end parallel region ---- */
+
+                    /* Install merged results into master globals. */
+                    for(k=0; k<number_retained_supers; k++)
+                        { if(retained_supers[k]) free(retained_supers[k]); }
+                    free(retained_supers);
+                    free(scores_retained_supers);
+                    retained_supers        = par_retained;
+                    scores_retained_supers = par_scores;
+                    number_retained_supers = par_n;
+                    BESTSCORE              = par_best;
+                    NUMSWAPS               = par_NUMSWAPS;
+
+                    /* Re-allocate super_scores for post-loop use (freed by hs_free_thread_state). */
+                    super_scores = malloc(number_of_taxa * sizeof(int *));
+                    for(k=0; k<number_of_taxa; k++)
+                        super_scores[k] = malloc(number_of_taxa * sizeof(int));
+                    }
+                else
+#endif
+                    {
+                    /* ---- Sequential while loop ---- */
+                    while(i != nreps && !user_break) /* Start searching tree space */
+                        {
+					    if(print)printf2("\nRepetition %d of %d:", i+1, nreps);
+                        fflush(stdout);
+                        swaps += do_search(starths[i], TRUE, print, numswaps, outfile, numspectries, numgenetries);
+                        i++;
+                        }
                     }
                 for(i=0; i<nreps; i++)
                     free(starths[i]);
@@ -7517,18 +7813,102 @@ void heuristic_search(int user, int print, int sample, int nreps)
 						}
 					for(i=0; i<Total_fund_trees; i++)sourcetree_scores[i] = -1;
 					 if(print) printf2("\nHeuristic search progress indicator:");
-					for(i=0; i<nreps; i++)
+#ifdef _OPENMP
+					if(nthreads > 1)
 						{
-						if(print) printf2("\nRepetition %d of %d:", i+1, nreps);
-						if(i != 0)
+						/* ---- Parallel nreps loop (start==2, NJ+perturbation mode) ---- */
+						int    prl_i;
+						char  *temptree_orig;
+						char **par_retained = NULL;
+						float *par_scores   = NULL;
+						int    par_n        = 10;
+						float  par_best     = -1;
+						int    par_NUMSWAPS = 0;
+
+						/* Snapshot the original NJ tree before the parallel region. */
+						temptree_orig = malloc(TREE_LENGTH * sizeof(char));
+						strcpy(temptree_orig, temptree);
+
+						/* Initialise shared merge buffers. */
+						par_retained = malloc(par_n * sizeof(char *));
+						par_scores   = malloc(par_n * sizeof(float));
+						for(k=0; k<par_n; k++)
 							{
-							random_num =(int)fmod(rand(), 10);
-							for(j=0; j<random_num; j++)
-								string_SPR(temptree);  /* do a random number of spr permutations to the tree */
+							par_retained[k] = malloc(TREE_LENGTH * sizeof(char));
+							par_retained[k][0] = '\0';
+							par_scores[k] = -1;
 							}
-						strcpy(tree, temptree);
-						returntree(tree);
-						swaps += do_search(tree, TRUE, print, numswaps, outfile, numspectries,numgenetries);
+
+						#pragma omp parallel num_threads(nthreads) default(shared) \
+						        private(prl_i, j, random_num)
+							{
+							char thr_tree[TREE_LENGTH];
+							char thr_temptree[TREE_LENGTH];
+							int  thr_swaps = 0;
+
+							hs_alloc_thread_state();
+
+							#pragma omp for schedule(dynamic, 1)
+							for(prl_i=0; prl_i<nreps; prl_i++)
+								{
+								if(user_break) continue;
+								strcpy(thr_temptree, temptree_orig);
+								if(prl_i != 0)
+									{
+									random_num = (int)fmod(rand_r(&thread_seed), 10);
+									for(j=0; j<random_num; j++)
+										string_SPR(thr_temptree);
+									}
+								strcpy(thr_tree, thr_temptree);
+								returntree(thr_tree);
+								thr_swaps += do_search(thr_tree, TRUE, FALSE, numswaps, outfile, numspectries, numgenetries);
+								}
+
+							#pragma omp critical (hs_merge)
+								{
+								hs_merge_results(&par_retained, &par_scores, &par_n, &par_best, &par_NUMSWAPS);
+								swaps += thr_swaps;
+								}
+
+							hs_free_thread_state();
+							}
+						/* ---- end parallel region ---- */
+
+						/* Install merged results into master globals. */
+						for(k=0; k<number_retained_supers; k++)
+							{ if(retained_supers[k]) free(retained_supers[k]); }
+						free(retained_supers);
+						free(scores_retained_supers);
+						retained_supers        = par_retained;
+						scores_retained_supers = par_scores;
+						number_retained_supers = par_n;
+						BESTSCORE              = par_best;
+						NUMSWAPS               = par_NUMSWAPS;
+
+						/* Re-allocate super_scores for post-loop use (freed by hs_free_thread_state). */
+						super_scores = malloc(number_of_taxa * sizeof(int *));
+						for(k=0; k<number_of_taxa; k++)
+							super_scores[k] = malloc(number_of_taxa * sizeof(int));
+
+						free(temptree_orig);
+						}
+					else
+#endif
+						{
+						/* ---- Sequential nreps loop ---- */
+						for(i=0; i<nreps; i++)
+							{
+							if(print) printf2("\nRepetition %d of %d:", i+1, nreps);
+							if(i != 0)
+								{
+								random_num =(int)fmod(rand(), 10);
+								for(j=0; j<random_num; j++)
+									string_SPR(temptree);  /* do a random number of spr permutations to the tree */
+								}
+							strcpy(tree, temptree);
+							returntree(tree);
+							swaps += do_search(tree, TRUE, print, numswaps, outfile, numspectries,numgenetries);
+							}
 						}
 					}
 				else/* if we are to use a tree (or trees) from a file as the starting tree */
@@ -8067,9 +8447,9 @@ int find_swaps(float * number, struct taxon * position, int number_of_swaps, int
 	while(count < i && swaps < number_of_swaps && !better_score && !user_break )
 		{
                 /* choose the pointer sibling to travel down */
-                j =(int)fmod(rand(), i);  /* the jth pointer sibling is the chosen one */
+                j =(int)fmod(rand_r(&thread_seed), i);  /* the jth pointer sibling is the chosen one */
                 while(siblings[j])
-                    j =(int)fmod(rand(), i);  /* the jth pointer sibling is the chosen one */
+                    j =(int)fmod(rand_r(&thread_seed), i);  /* the jth pointer sibling is the chosen one */
 
                 /* go to the chosen sibling pointer */
                 position = start1;
@@ -15243,7 +15623,7 @@ int string_SPR(char * string)
 				}
 			}
 		/** now randomly choose a number between 1 and the number of components */
-		 random_num = (int)fmod(rand(), components)+1;
+		 random_num = (int)fmod(rand_r(&thread_seed), components)+1;
 		 /**** find the component with that number **/
 		 i=1; components = 0;
 		while(string1[i] != ';' && !found)
@@ -15400,7 +15780,7 @@ int string_SPR(char * string)
 				}
 			}
 		/** now randomly choose a number between 1 and the number of components */
-		 random_num = (int)fmod(rand(), components)+1;
+		 random_num = (int)fmod(rand_r(&thread_seed), components)+1;
 		 /**** find the component with that number **/
 		 i=1; components = 0; found = FALSE;
 		while(string1[i] != ';' && !found)

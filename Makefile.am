@@ -2,6 +2,6 @@
 bin_PROGRAMS = clann
 clann_SOURCES = treecompare2.c
 clann_LDADD = $(LDADD) $(LIBREADLINE) -lm
-clann_CFLAGS  = -g -O0 -Wall -funroll-loops -fsanitize=address
-clann_LDFLAGS = -fsanitize=address
+clann_CFLAGS  = -g -O0 -Wall -funroll-loops $(OPENMP_CFLAGS)
+clann_LDFLAGS = $(OPENMP_LDFLAGS)
 

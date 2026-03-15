@@ -23,6 +23,8 @@ dnl continue
 
 AC_PROG_CC
 
+AC_OPENMP
+
 AC_CONFIG_FILES([Makefile])
 AC_OUTPUT
 
