@@ -157,6 +157,23 @@ After the search completes, all trees (including multicopy) are fully restored i
 
 If you disable delimiter mode (`maxnamelen=full`), no filtering occurs and all trees contribute to supertree scoring.
 
+### Automatic pruning of monophyletic clades (autoprunemono)
+
+Many multicopy trees are "almost" single-copy: they contain lineage-specific duplications that form monophyletic same-species clades. The `autoprunemono=yes` option prunes these clades at load time so that qualifying trees can contribute to the supertree search:
+
+```
+clann> exe mydata.ph autoprunemono=yes
+
+Autoprunemono: pruned monophyletic same-species clades in 47 multicopy trees.
+  Promoted to single-copy pool:   38 trees
+  Still multicopy after pruning:  9 trees (retained for reconstruct)
+  Original (unpruned) trees stored for reconstruct.
+```
+
+- **Promoted trees** (single-copy after pruning): join `hs`, `nj`, `alltrees`
+- **Still-multicopy trees** (genuine deep paralogs): remain in the multicopy pool for `reconstruct`
+- `reconstruct` always uses the **original unpruned trees** — no information is discarded
+
 ### Gene-tree reconciliation with multicopy families (reconstruct)
 
 The `reconstruct` command performs duplication/loss reconciliation of source trees against a species tree. Unlike the supertree search methods, `reconstruct` uses **all** source trees — both single-copy and multicopy — making it the appropriate tool for extracting information from multicopy gene families.

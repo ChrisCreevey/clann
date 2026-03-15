@@ -296,6 +296,8 @@ void controlc5(int signal);
 /****************** Global variable definitions ****************/
 FILE * infile = NULL, *BR_file = NULL, *commands_file=NULL, *psfile = NULL, *logfile = NULL, *distributionreconfile = NULL, *onetoonefile = NULL, *strictonetoonefile = NULL, *tempoutfile = NULL;
 char **taxa_names = NULL, *commands_filename = NULL, ***fulltaxanames = NULL, **parsed_command = NULL, **fundamentals = NULL, **stored_funds = NULL, **retained_supers = NULL, **stored_commands = NULL, *tempsuper = NULL, **best_topology = NULL, **tree_names = NULL;
+char **original_fundamentals = NULL;   /* originals preserved for reconstruct when autoprunemono is active */
+int   autoprunemono_active   = 0;      /* set to TRUE when autoprunemono=yes was used at load time */
 int  *numtaxaintrees = NULL, fullnamesnum = 0, fullnamesassignments = 1, fundamental_assignments = 0, tree_length_assignments = 1, parsed_command_assignments = 1, name_assignments = 0, *taxa_incidence = NULL, number_of_taxa = 0, Total_fund_trees = 0, *same_tree = NULL, **Cooccurrance = NULL, NUMSWAPS = 0;
 int ***fund_scores = NULL, ***stored_fund_scores = NULL, **super_scores = NULL, *number_of_comparisons = NULL, *stored_num_comparisons = NULL, **presence_of_taxa = NULL, **stored_presence_of_taxa = NULL, *presenceof_SPRtaxa = NULL;
 int seed, num_commands = 0, number_retained_supers = 10, number_of_steps = 3, largest_tree = 0, smallest_tree = 1000000, criterion = 0, parts = 0, **total_coding = NULL, *coding_from_tree = NULL, total_nodes = 0, quartet_normalising = 3, splits_weight = 2, dweight =1, *from_tree = NULL, method = 2, tried_regrafts = 0, hsprint = TRUE, max_name_length = NAME_LENGTH, got_weights = FALSE, num_excluded_trees = 0, num_excluded_taxa = 0, calculated_fund_scores = FALSE, select_longest=FALSE;
@@ -1496,6 +1498,10 @@ void print_commands(int num)
 		printf2("\n\t   use 'maxnamelen=full' to disable and use full taxon names)");
 		printf2("\n\tdelimiter_char\t<character>\t\t\t'.'");
 		printf2("\n\tsummary\t\tshort | long\t\t\t*long");
+		printf2("\n\tautoprunemono\tyes | no\t\t\t*no");
+		printf2("\n\t  (prune monophyletic same-species clades from multicopy trees at load time;");
+		printf2("\n\t   trees that become single-copy after pruning join the supertree pool;");
+		printf2("\n\t   original unpruned trees are preserved for 'reconstruct')");
         }
     if(num == 2)
         {
@@ -1968,9 +1974,176 @@ int parse_command(char *command)
 
 
         
+/* --- autoprunemono helpers --- */
+
+/* Recursively walk in-memory tree and recount presence_of_taxa[treenum][j] from surviving leaves.
+ * Checks pos->tag: pruned leaves have tag==FALSE and are skipped (same logic as print_pruned_tree).
+ * Uses pos->name which holds the taxa_names[] index set by find_taxon() at tree-build time. */
+static void recount_from_tree(struct taxon *pos, int treenum)
+	{
+	while(pos != NULL)
+		{
+		if(pos->daughter != NULL)
+			{
+			/* internal node: always recurse into daughters */
+			recount_from_tree(pos->daughter, treenum);
+			}
+		else
+			{
+			/* leaf node: only count if not pruned (tag != FALSE) */
+			if(pos->tag != FALSE && pos->name >= 0 && pos->name < number_of_taxa)
+				presence_of_taxa[treenum][pos->name]++;
+			}
+		pos = pos->next_sibling;
+		}
+	}
+
+/* After loading trees, prune monophyletic same-species clades from multicopy trees.
+ * Promoted (become single-copy) trees join the supertree pool.
+ * Originals are saved in original_fundamentals[] for reconstruct. */
+static void autoprunemono_apply(void)
+	{
+	int i, j, n_multicopy = 0, n_promoted = 0, n_still_multi = 0, n_pruned = 0;
+	int numt = 0, clannID = 0, num_nodes = 0, leaf_count = 0;
+	int *taxa_fate = NULL;
+	char temptree[TREE_LENGTH];
+	char *pruned_tree = NULL, *tmp = NULL;
+
+	/* Allocate original_fundamentals if not already done */
+	if(original_fundamentals == NULL)
+		{
+		original_fundamentals = (char **)calloc(fundamental_assignments * FUNDAMENTAL_NUM, sizeof(char *));
+		if(!original_fundamentals)
+			{
+			printf2("Error: out of memory for autoprunemono\n");
+			return;
+			}
+		}
+
+	pruned_tree = malloc(TREE_LENGTH * sizeof(char));
+	if(!pruned_tree) { printf2("Error: out of memory for autoprunemono\n"); return; }
+	tmp = malloc(TREE_LENGTH * sizeof(char));
+	if(!tmp) { free(pruned_tree); printf2("Error: out of memory for autoprunemono\n"); return; }
+
+	for(i = 0; i < Total_fund_trees; i++)
+		{
+		if(!sourcetreetag[i]) continue;
+
+		/* Check if multicopy */
+		int multicopy = FALSE;
+		for(j = 0; j < number_of_taxa; j++)
+			if(presence_of_taxa[i][j] > 1) { multicopy = TRUE; break; }
+		if(!multicopy) continue;
+		n_multicopy++;
+
+		/* Dismantle any tree already in memory */
+		if(tree_top != NULL) { dismantle_tree(tree_top); tree_top = NULL; }
+		temp_top = NULL;
+
+		/* Build tree from stored representation using full names */
+		temptree[0] = '\0';
+		strcpy(temptree, fundamentals[i]);
+		returntree_fullnames(temptree, i);
+		basic_tree_build(1, temptree, tree_top, TRUE);
+		tree_top = temp_top;
+		temp_top = NULL;
+		reset_tree(tree_top);
+
+		/* Number all taxa (sets tag2 on leaves) */
+		numt = 0; clannID = 0;
+		numt = number_tree2(tree_top, numt);
+
+		/* Mark species-specific clades */
+		taxa_fate = malloc(numt * sizeof(int));
+		if(!taxa_fate)
+			{
+			printf2("Error: out of memory for autoprunemono\n");
+			free(pruned_tree); free(tmp);
+			if(tree_top != NULL) { dismantle_tree(tree_top); tree_top = NULL; }
+			return;
+			}
+		for(j = 0; j < numt; j++) taxa_fate[j] = 0;
+		clannID = identify_species_specific_clades(tree_top, numt, taxa_fate, clannID);
+		free(taxa_fate); taxa_fate = NULL;
+
+		/* Shrink and build pruned Newick (numeric IDs = fundamentals[] format) */
+		shrink_tree(tree_top);
+		pruned_tree[0] = '\0';
+		leaf_count = print_pruned_tree(tree_top, 0, pruned_tree, FALSE, i);
+
+		/* Count commas to determine remaining taxon count */
+		num_nodes = 0;
+		for(j = 0; j < (int)strlen(pruned_tree); j++)
+			if(pruned_tree[j] == ',') num_nodes++;
+
+		/* Wrap with outer parens if multi-node (same as prune_monophylies) */
+		if(leaf_count > 1)
+			{
+			tmp[0] = '\0';
+			strcpy(tmp, "(");
+			strcat(tmp, pruned_tree);
+			strcat(tmp, ")");
+			strcpy(pruned_tree, tmp);
+			}
+		strcat(pruned_tree, ";");
+
+		if(num_nodes > 2)  /* tree has 4+ taxa: worth keeping */
+			{
+			n_pruned++;
+
+			/* Save original fundamentals[i] */
+			original_fundamentals[i] = malloc((strlen(fundamentals[i]) + 2) * sizeof(char));
+			if(!original_fundamentals[i])
+				{
+				printf2("Error: out of memory for autoprunemono\n");
+				free(pruned_tree); free(tmp);
+				if(tree_top != NULL) { dismantle_tree(tree_top); tree_top = NULL; }
+				return;
+				}
+			strcpy(original_fundamentals[i], fundamentals[i]);
+
+			/* Replace fundamentals[i] with pruned version */
+			free(fundamentals[i]);
+			fundamentals[i] = malloc((strlen(pruned_tree) + 100) * sizeof(char));
+			if(!fundamentals[i]) memory_error(220);
+			strcpy(fundamentals[i], pruned_tree);
+
+			/* Recount presence_of_taxa[i][*] from in-memory pruned tree */
+			for(j = 0; j < number_of_taxa; j++)
+				presence_of_taxa[i][j] = 0;
+			recount_from_tree(tree_top, i);
+
+			/* Check if now single-copy */
+			int still_multicopy = FALSE;
+			for(j = 0; j < number_of_taxa; j++)
+				if(presence_of_taxa[i][j] > 1) { still_multicopy = TRUE; break; }
+			if(still_multicopy)
+				n_still_multi++;
+			else
+				n_promoted++;
+			}
+
+		/* Free in-memory tree for next iteration */
+		if(tree_top != NULL) { dismantle_tree(tree_top); tree_top = NULL; }
+		temp_top = NULL;
+		}
+
+	free(pruned_tree);
+	free(tmp);
+
+	if(n_multicopy > 0)
+		{
+		printf2("\nAutoprunemono: pruned monophyletic same-species clades in %d multicopy trees.\n", n_pruned);
+		printf2("  Promoted to single-copy pool:   %d trees\n", n_promoted);
+		printf2("  Still multicopy after pruning:  %d trees (retained for reconstruct)\n", n_still_multi);
+		if(n_pruned > 0)
+			printf2("  Original (unpruned) trees stored for reconstruct.\n");
+		}
+	}
+
 void execute_command(char *commandline, int do_all)
     {
-    int i = 0, j=0, k=0, printfundscores = FALSE, error = FALSE;
+    int i = 0, j=0, k=0, printfundscores = FALSE, error = FALSE, do_autoprunemono = FALSE;
     char c = '\0', temp[NAME_LENGTH], filename[10000], *newbietree, string_num[1000];
 	float num = 0;
 
@@ -2024,7 +2197,19 @@ void execute_command(char *commandline, int do_all)
 					printf2("Error: A character must be provided as a delimiter\n");
 					}
 				}
-            }  
+            }
+        if(strcmp(parsed_command[i], "autoprunemono") == 0)
+            {
+            if(strcmp(parsed_command[i+1], "yes") == 0)
+                do_autoprunemono = TRUE;
+            else if(strcmp(parsed_command[i+1], "no") == 0)
+                do_autoprunemono = FALSE;
+            else
+                {
+                printf2("Error: value '%s' not valid for autoprunemono (use yes or no)\n", parsed_command[i+1]);
+                error = TRUE;
+                }
+            }
         }
 
     if(delimiter == TRUE) printf2("\nDelimiter mode active: species names extracted before '%c' (use maxnamelen=full to disable)\n", delimiter_char);
@@ -2078,6 +2263,21 @@ void execute_command(char *commandline, int do_all)
 			
             fundamentals = NULL;
             }
+        /* Reset autoprunemono state when new trees are loaded */
+        if(original_fundamentals != NULL)
+            {
+            for(i=0; i<fundamental_assignments*FUNDAMENTAL_NUM; i++)
+                {
+                if(original_fundamentals[i] != NULL)
+                    {
+                    free(original_fundamentals[i]);
+                    original_fundamentals[i] = NULL;
+                    }
+                }
+            free(original_fundamentals);
+            original_fundamentals = NULL;
+            }
+        autoprunemono_active = 0;
 
         
 		
@@ -2409,6 +2609,12 @@ void execute_command(char *commandline, int do_all)
 
 		calculated_fund_scores = FALSE;
 
+		/* Apply autoprunemono if requested */
+		if(do_autoprunemono && Total_fund_trees > 0)
+			{
+			autoprunemono_active = 1;
+			autoprunemono_apply();
+			}
 		
 		free(newbietree);
 
@@ -19754,6 +19960,23 @@ void reconstruct(int print_settings)  /* Carry out gene-tree reconciliation of s
 
 
 
+	/* If autoprunemono was active, swap original (unpruned) trees in for reconstruct */
+	int autoprunemono_swapped = FALSE;
+	if(autoprunemono_active && original_fundamentals != NULL)
+		{
+		for(i = 0; i < Total_fund_trees; i++)
+			{
+			if(original_fundamentals[i] != NULL)
+				{
+				char *tmp_swap = fundamentals[i];
+				fundamentals[i] = original_fundamentals[i];
+				original_fundamentals[i] = tmp_swap;
+				}
+			}
+		autoprunemono_swapped = TRUE;
+		printf2("(Using original unpruned trees for reconstruct)\n");
+		}
+
 	if(printfiles)
 		{
 		strcpy(reconfilename, inputfilename);
@@ -20114,6 +20337,20 @@ void reconstruct(int print_settings)  /* Carry out gene-tree reconciliation of s
 			}
 		free(label_results);
 		label_results = NULL;
+		}
+
+	/* Swap original trees back so other commands (hs, etc.) continue to use pruned versions */
+	if(autoprunemono_swapped)
+		{
+		for(i = 0; i < Total_fund_trees; i++)
+			{
+			if(original_fundamentals[i] != NULL)
+				{
+				char *tmp_swap = fundamentals[i];
+				fundamentals[i] = original_fundamentals[i];
+				original_fundamentals[i] = tmp_swap;
+				}
+			}
 		}
 
 	count_now=FALSE;

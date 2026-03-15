@@ -33,6 +33,7 @@ http://www.creeveylab.org
    - [rfdists](#rfdists)
    - [generatetrees](#generatetrees)
    - [yaptp](#yaptp)
+   - [Autoprunemono](#autoprunemono)
    - [prunemonophylies](#prunemonophylies)
    - [sprdists](#sprdists)
    - [log](#log)
@@ -266,12 +267,14 @@ exe <filename> [options]
 | `maxnamelen` | `<integer>`, `delimited`, `full` | `delimited` | Maximum characters per taxon name. `delimited` extracts names before the delimiter character. `full` uses complete names as-is. An integer caps name length at N characters. |
 | `delimiter_char` | `<character>` | `.` | Character used to split gene-copy names into species names. Only active when delimiter mode is on. |
 | `summary` | `short`, `long` | `long` | Controls how much detail is printed about loaded trees. |
+| `autoprunemono` | `yes`, `no` | `no` | At load time, prune monophyletic same-species clades from multicopy trees. Trees that become single-copy after pruning are promoted into the supertree search pool. Trees that remain multicopy after pruning (genuine deep paralogs) stay in the multicopy pool for `reconstruct`. Original unpruned trees are preserved for `reconstruct`. See [Autoprunemono](#autoprunemono) below. |
 
 **Examples:**
 ```
 exe trees.ph
 exe trees.ph maxnamelen=full
 exe trees.ph delimiter_char=_ summary=short
+exe mydata.ph autoprunemono=yes
 ```
 
 ---
@@ -781,9 +784,40 @@ yaptp method=markovian nreps=200 treefile=yaptp_result.ph
 
 ---
 
+### Autoprunemono
+
+The `autoprunemono=yes` option on the `exe` command provides an automated, in-memory version of `prunemonophylies`. It prunes monophyletic same-species clades at load time so that more source trees can contribute to the supertree search.
+
+**Behaviour:**
+- For each multicopy tree, monophyletic same-species clades are pruned to a single representative (chosen at random).
+- If the tree becomes single-copy after pruning, it is **promoted** to the supertree search pool (`hs`, `nj`, `alltrees`).
+- If the tree is still multicopy after pruning (genuine deep paralogs with non-monophyletic copies), it remains in the multicopy pool and is used only by `reconstruct`.
+- The **original unpruned trees are preserved** internally for `reconstruct`, which always sees the full data.
+
+**Example output:**
+```
+Autoprunemono: pruned monophyletic same-species clades in 47 multicopy trees.
+  Promoted to single-copy pool:   38 trees
+  Still multicopy after pruning:  9 trees (retained for reconstruct)
+  Original (unpruned) trees stored for reconstruct.
+```
+
+**Workflow:**
+```
+clann> exe mydata.ph autoprunemono=yes
+clann> hs nreps=10              # uses single-copy trees + promoted trees
+clann> reconstruct speciestree memory   # uses all original trees
+```
+
+> **Note:** The original unpruned trees are only preserved within the current session. If you save and reload the pruned trees (e.g. using `prunemonophylies`), `reconstruct` will see only the pruned versions.
+
+---
+
 ### prunemonophylies
 
 For each source tree, identify clades that consist entirely of gene copies from the same species (monophyletic inparalogs) and prune them down to a single representative. Useful for pre-processing multicopy gene trees before supertree analysis with methods that require single-copy input.
+
+> **Tip:** For an automated in-session version of this workflow, use `exe mydata.ph autoprunemono=yes` — it prunes at load time, promotes qualifying trees to the supertree pool, and preserves originals for `reconstruct`. See [Autoprunemono](#autoprunemono).
 
 ```
 prunemonophylies [options]
@@ -971,7 +1005,10 @@ hs nreps=10
 ```
 
 **Q: Clann says "number of single copy trees: 0".**
-All trees are multicopy. Either set `criterion=recon` to use them via DL reconciliation, or use `prunemonophylies` to reduce each multicopy tree to a single copy per species before analysis.
+All trees are multicopy. Options:
+- Use `exe mydata.ph autoprunemono=yes` to automatically prune monophyletic same-species clades at load time — trees that become single-copy after pruning are promoted into the supertree search pool.
+- Set `criterion=recon` to use all multicopy trees directly via DL reconciliation.
+- Run `prunemonophylies`, save the output, reload the pruned file, then run `hs`.
 
 **Q: `bootstrap` or `hs` with `mrp` or `avcon` fails with an error about PAUP\*.**
 These criteria require PAUP\* to be installed and accessible on your PATH. Install PAUP\* and ensure the `paup` executable is findable, or switch to a different criterion (e.g., `dfit`).
