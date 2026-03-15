@@ -1338,7 +1338,7 @@ void print_commands(int num)
 
 			printf2("\n\tmaxswaps\t<integer number>\t\t*1,000,000\n\tsavetrees\t<filename>\t\t\tHeuristic_result.txt");
 #ifdef _OPENMP
-            printf2("\n\tnthreads\t<integer number>\t\t*1  (OpenMP threads; not available for criterion=recon)");
+            printf2("\n\tnthreads\t<integer number>\t\t*%-3d (OpenMP threads; default=all CPUs; not available for criterion=recon)", omp_get_num_procs());
 #endif
             if(criterion == 0)
                 {
@@ -7264,6 +7264,10 @@ void heuristic_search(int user, int print, int sample, int nreps)
     FILE *userfile = NULL, *outfile = NULL, *paupfile = NULL, *histogram_file = NULL;
     float distance=0, number=0, *startscores = NULL, used_weights = 0;
     int *saved_tags = NULL;  /* for single-copy auto-filter */
+#ifdef _OPENMP
+    /* Default to all available logical CPUs; user can override with nthreads= */
+    nthreads = omp_get_num_procs();
+#endif
     
 	
 	for(i=0; i<number_of_taxa; i++) presenceof_SPRtaxa[i] = -1;
@@ -7662,7 +7666,7 @@ void heuristic_search(int user, int print, int sample, int nreps)
                 printf2("\tMaximum Number of Swaps (maxswaps) = %d\n", numswaps);
                 printf2("\tNumber of repetitions of Heuristic search = %d\n", nreps);
 #ifdef _OPENMP
-                if(nthreads > 1) printf2("\tOpenMP threads = %d\n", nthreads);
+                printf2("\tOpenMP threads = %d (of %d available)\n", nthreads, omp_get_num_procs());
 #endif
                 if(criterion != 5)
 					printf2("\tWeighting Scheme = ");
