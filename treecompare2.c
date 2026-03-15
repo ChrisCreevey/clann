@@ -96,6 +96,8 @@ void pathmetric(char *string, int **scores);
 void weighted_pathmetric(char *string, float **scores, int fund_num);
 int unroottree(char * tree);
 void alltrees_search(int user);
+static int * apply_singlecopy_filter(void);
+static void restore_singlecopy_filter(int *saved);
 float compare_trees(int spr);
 struct taxon * make_taxon(void);
 void intTotree(int tree_num, char *array, int num_taxa);
@@ -270,7 +272,7 @@ float *score_of_bootstraps = NULL, *yaptp_results = NULL, largest_length = 0, du
 time_t interval1, interval2;
 double sup=1;
 char saved_supertree[TREE_LENGTH],  *test_array, inputfilename[10000], delimiter_char = '.', logfile_name[10000], system_call[100000];
-int trees_in_memory = 0, *sourcetreetag = NULL, remainingtrees = 0, GC, user_break = FALSE, delimiter = FALSE, print_log = FALSE, num_gene_nodes, testarraypos = 0;
+int trees_in_memory = 0, *sourcetreetag = NULL, remainingtrees = 0, GC, user_break = FALSE, delimiter = TRUE, print_log = FALSE, num_gene_nodes, testarraypos = 0;
 int malloc_check =0, count_now = FALSE, another_check =0;
 
 
@@ -486,7 +488,7 @@ int main(int argc, char *argv[])
                 
                     if(num_commands > 1)
                         {
-                        delimiter = FALSE;
+                        delimiter = TRUE;   /* default: on; user can override with maxnamelen=full */
                         execute_command(parsed_command[1], TRUE);
 							
 						/*spr_dist(); */ 
@@ -1221,7 +1223,9 @@ void print_commands(int num)
         printf2("\nexe\t<filename>\n\n");
 		 printf2("\tOptions\t\tSettings\t\t\tCurrent\n");
         printf2("\t===========================================================\n");
-		printf2("\n\tmaxnamelen\t<integer number> | delimited\t*none");
+		printf2("\n\tmaxnamelen\t<integer> | delimited | full\t*delimited");
+		printf2("\n\t  (delimiter mode is ON by default: species names extracted before '.'");
+		printf2("\n\t   use 'maxnamelen=full' to disable and use full taxon names)");
 		printf2("\n\tdelimiter_char\t<character>\t\t\t'.'");
 		printf2("\n\tsummary\t\tshort | long\t\t\t*long");
         }
@@ -1230,6 +1234,7 @@ void print_commands(int num)
         printf2("\nalltrees [options]\n\n");
         printf2("\tOptions\t\tSettings\t\t\tCurrent\n");
         printf2("\t===========================================================\n");
+        if(delimiter) printf2("\n\t(Note: delimiter mode is ON -- multicopy gene trees will be automatically\n\texcluded from the search; use 'maxnamelen=full' to disable)\n");
         if(criterion == 0 || criterion == 2 || criterion == 3)
             {
             printf2("\n\trange\t\t<treenumber> - <treenumber>\t*all\n\tsavetrees\t<filename>\t\t\ttop_alltrees.txt\n\tcreate\t\tyes | no\t\t\t*no\n");
@@ -1279,6 +1284,7 @@ void print_commands(int num)
         printf2("\nhs (or hsearch) [options]  \n");
         printf2("\tOptions\t\tSettings\t\t\tCurrent\n");
         printf2("\t===========================================================\n");
+        if(delimiter) printf2("\n\t(Note: delimiter mode is ON -- multicopy gene trees will be automatically\n\texcluded from the search; use 'maxnamelen=full' to disable)\n");
         if(criterion == 0 || criterion == 2 || criterion == 3 || criterion==5)
             {
             printf2("\n\tsample\t\t<integer number>\t\t*10,000\n\tnreps\t\t<integer number>\t\t*10");
@@ -1521,6 +1527,7 @@ void print_commands(int num)
 		printf2("\nnj [options]\t\n\n");
 		printf2("\tOptions\t\tSettings\t\t\tCurrent\n");
         printf2("\t===========================================================\n");
+		if(delimiter) printf2("\n\t(Note: delimiter mode is ON -- multicopy gene trees will be automatically\n\texcluded from the search; use 'maxnamelen=full' to disable)\n");
 		printf2("\n\tmissing\t\t4point | ultrametric\t\t*4point\n\tsavetrees\t<file name>\t\t\t*NJtree.ph\n");
 		}
 	 if(num == 22)
@@ -1690,6 +1697,12 @@ void execute_command(char *commandline, int do_all)
 					max_name_length = NAME_LENGTH;
 					delimiter = TRUE;
 					}
+				else if(strcmp(parsed_command[i+1], "full") == 0)
+					{
+					max_name_length = NAME_LENGTH;
+					delimiter = FALSE;
+					printf2("Full taxon names in use (delimiter mode disabled).\n");
+					}
 				else
 					{
 					error = TRUE;
@@ -1715,7 +1728,7 @@ void execute_command(char *commandline, int do_all)
             }  
         }
 
-    if(delimiter == TRUE) printf2("\nDelimiter for recognising species names set to '%c'\n", delimiter_char);
+    if(delimiter == TRUE) printf2("\nDelimiter mode active: species names extracted before '%c' (use maxnamelen=full to disable)\n", delimiter_char);
 
     /********** open the input file ************/
     filename[0] = '\0';
@@ -4129,6 +4142,7 @@ void alltrees_search(int user)
     char *tree = NULL, *best_tree = NULL, outfilename[100];
     float score = 0, best_score = 0, worst = 0;
     FILE *treesfile = NULL, *userfile = NULL;
+    int *saved_tags = NULL;  /* for single-copy auto-filter */
     
     
     outfilename[0] = '\0';
@@ -4370,7 +4384,9 @@ void alltrees_search(int user)
 			{
 			printf2("An error occurred while setting a signal handler\n");
 			}
-			
+
+        saved_tags = apply_singlecopy_filter();
+
         for(i=start; i<=end; i++)
             {            
             tree[0] = '\0';
@@ -4519,9 +4535,10 @@ void alltrees_search(int user)
             /* Keep retained_supers[] in memory (like hs/nj) so 'reconstruct speciestree memory'
                can use the alltrees result. Set trees_in_memory to the count of best trees found. */
             trees_in_memory = j;
-            
-          
+
+
             }
+        restore_singlecopy_filter(saved_tags);
         free(tree);
         free(best_tree);
         if(treesfile != NULL)
@@ -6722,9 +6739,60 @@ void controlc5(int signal)
 
 	if(strcmp(c, "N") == 0 || strcmp(c, "n") == 0)
 			printf2("Continuing heuristic searches.....\n");
-	
+
 	free(c);
 	}
+
+
+/* ---------- Single-copy auto-filter helpers ----------
+   When delimiter mode is on, supertree searches (hs/nj/alltrees) should
+   only score against single-copy gene trees.  These two helpers save and
+   restore sourcetreetag[] around a search so the change is invisible to
+   all other commands (reconstruct, showtrees, etc.).                     */
+
+static int * apply_singlecopy_filter(void)
+	{
+	int i, j, multicopy, n_single = 0, n_multi = 0;
+	int *saved = NULL;
+
+	if(!delimiter) return NULL;   /* only filter when delimiter mode is on */
+
+	saved = malloc(Total_fund_trees * sizeof(int));
+	memcpy(saved, sourcetreetag, Total_fund_trees * sizeof(int));
+
+	for(i=0; i<Total_fund_trees; i++)
+		{
+		if(sourcetreetag[i])
+			{
+			multicopy = FALSE;
+			for(j=0; j<number_of_taxa; j++)
+				{
+				if(presence_of_taxa[i][j] > 1) { multicopy = TRUE; break; }
+				}
+			if(multicopy) { sourcetreetag[i] = FALSE; n_multi++; }
+			else n_single++;
+			}
+		}
+
+	if(n_multi > 0)
+		printf2("Single-copy filter: using %d single-copy trees for supertree search "
+		        "(%d multicopy trees reserved for 'reconstruct').\n", n_single, n_multi);
+	else
+		{
+		/* All active trees are already single-copy -- nothing to do */
+		free(saved);
+		return NULL;
+		}
+	return saved;
+	}
+
+static void restore_singlecopy_filter(int *saved)
+	{
+	if(saved == NULL) return;
+	memcpy(sourcetreetag, saved, Total_fund_trees * sizeof(int));
+	free(saved);
+	}
+/* ------------------------------------------------------ */
 
 
 void heuristic_search(int user, int print, int sample, int nreps)
@@ -6733,6 +6801,7 @@ void heuristic_search(int user, int print, int sample, int nreps)
     char *tree = NULL, c = '\0', *best_tree = NULL, *temptree = NULL, **starths = NULL, userfilename[10000], useroutfile[10000], histogramfile_name[10000];
     FILE *userfile = NULL, *outfile = NULL, *paupfile = NULL, *histogram_file = NULL;
     float distance=0, number=0, *startscores = NULL, used_weights = 0;
+    int *saved_tags = NULL;  /* for single-copy auto-filter */
     
 	
 	for(i=0; i<number_of_taxa; i++) presenceof_SPRtaxa[i] = -1;
@@ -7170,6 +7239,8 @@ void heuristic_search(int user, int print, int sample, int nreps)
 				
 			}
 		
+        saved_tags = apply_singlecopy_filter();
+
         for(i=0; i<Total_fund_trees; i++) sourcetree_scores[i] = -1;
         if(criterion == 1 || criterion == 4)
             {
@@ -7671,6 +7742,7 @@ void heuristic_search(int user, int print, int sample, int nreps)
         }
 	
 	
+    restore_singlecopy_filter(saved_tags);
     free(temptree);
     free(best_tree);
     }
@@ -15972,6 +16044,7 @@ void nj(void)
 	int i, j, missing_method = 1, error = FALSE;
 	char *tree = NULL, useroutfile[100], *fakefilename = NULL;
 	FILE *outfile = NULL;
+	int *saved_tags = NULL;  /* for single-copy auto-filter */
 	
 	useroutfile[0] = '\0';
 	strcpy(useroutfile, "NJ-tree.ph");
@@ -16018,7 +16091,9 @@ void nj(void)
 		if(missing_method == 0)
 			printf2("ultrametric distances\n");
 		printf2("\tresulting tree saved to file %s\n\n\n", useroutfile);
-		
+
+		saved_tags = apply_singlecopy_filter();
+
 		average_consensus(0, missing_method, fakefilename, NULL);
 		neighbor_joining(TRUE, tree, TRUE);
 		fprintf(outfile, "%s\n", tree);
@@ -16033,13 +16108,14 @@ void nj(void)
 		strcpy(retained_supers[0], tree);
 		scores_retained_supers[0] = 0;
 		trees_in_memory = 1;
+		restore_singlecopy_filter(saved_tags);
 		fclose(outfile);
 		free(tree);
 		}
-	
+
 	}
-	
-	
+
+
 void reroot_tree(struct taxon *outgroup)
 	{
 	struct taxon *newbie = NULL, *temp_treetop = NULL, *position = NULL, *temp = NULL, *start = NULL, *parent_start = NULL, *next = NULL, *parent = NULL, *pointer = NULL;
