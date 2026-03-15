@@ -113,9 +113,11 @@ Optional features on each line:
 - **Tree weight** (appended in brackets): `(Human,(Mouse,Apple));[2.5]`
 - **Tree name** (appended in brackets): `(Human,(Mouse,Apple));[RAxML_tree1]`
 
+Tree weights default to `1.0` if not supplied. Where weights are present they scale each gene tree's contribution to the total score for all criteria. For `criterion=ml` this has a direct probabilistic interpretation: the weight acts as a **per-tree β**, so a gene tree with weight 2.0 has twice the likelihood sharpness of a tree with weight 1.0 — it penalises RF disagreement more strongly. This makes tree weights a natural way to encode confidence in individual gene trees (e.g. derived from bootstrap support or sequence length).
+
 ### Nexus format
 
-Detected by `#NEXUS` or `#` as the first non-whitespace character. Trees are read from a standard `trees` block.
+Detected by `#NEXUS` or `#` as the first non-whitespace character. Trees are read from a standard `trees` block. Tree weights stored in PAUP\* `[&W value]` annotations (including fractional form `[&W 1/2]`) are read automatically.
 
 ### Taxon name conventions
 
@@ -138,7 +140,7 @@ Set with `set criterion=<value>` before running any search command.
 | `avcon` | Average Consensus (AVCON) | Average-consensus distance matrix approach. Requires PAUP\*. |
 | `recon` | Reconstruction / DL (RECON) | Minimises the total weighted duplication and loss cost of reconciling all source trees against the supertree. Uses **all** source trees including multicopy families. |
 | `rf` | Robinson-Foulds (RF) | Minimises the normalised Robinson-Foulds distance summed across all source trees. RF distance counts the number of bipartitions present in one tree but not the other, normalised to [0, 1] per gene tree. |
-| `ml` | Maximum Likelihood (ML) | Maximum-likelihood supertree criterion based on the exponential model of Steel & Rodrigo (2008). The probability of observing each gene tree given the supertree is modelled as P(G_i \| T) ∝ e^(−β·d_i), where d_i is the RF distance. The score reported is the total log-likelihood lnL = −β·Σd_i (negative, higher is better). Controlled by `mlbeta` and `mlscale`. |
+| `ml` | Maximum Likelihood (ML) | Maximum-likelihood supertree criterion based on the exponential model of Steel & Rodrigo (2008). The probability of observing each gene tree given the supertree is modelled as P(G_i \| T) ∝ e^(−β·d_i), where d_i is the RF distance. The score reported is the total log-likelihood lnL = −β·Σd_i (negative, higher is better). Controlled by `mlbeta` and `mlscale`. If per-tree weights are supplied in the input file, each weight acts as a per-tree β multiplier (see [Section 3](#3-input-file-formats)), providing a principled way to encode confidence in individual gene trees. |
 
 > **Note:** `mrp` and `avcon` require an external installation of [PAUP\*](https://paup.phylosolutions.com/).
 
@@ -238,7 +240,7 @@ set <parameter>=<value>
 |-----------|--------|-------------|
 | `criterion` | `dfit`, `sfit`, `qfit`, `mrp`, `avcon`, `recon`, `rf`, `ml` | Optimality criterion for supertree reconstruction. See [Section 4.1](#41-optimality-criteria). |
 | `seed` | `<integer>` | Random number seed for reproducibility. Default is based on system time and process ID. |
-| `mlbeta` | `<float > 0>` | Slope parameter β for the ML exponential model. Controls how steeply the likelihood decays with increasing RF distance. Default: `1.0`. Only relevant when `criterion=ml`. |
+| `mlbeta` | `<float > 0>` | Global slope parameter β for the ML exponential model (Steel & Rodrigo 2008). Controls how steeply the likelihood decays with increasing RF distance — larger β penalises disagreement more strongly and implies higher confidence in the gene trees. Default: `1.0`. If per-tree weights are supplied in the input file, the effective per-tree slope is β × w_i, so weights are a natural way to encode differential confidence across gene trees. Only relevant when `criterion=ml`. |
 | `mlscale` | `paper`, `lust`, `lnl` | Scoring convention for the ML criterion. `lnl` (default) reports lnL = −β·Σd_i, matching the sign convention of standard ML tools (negative, higher is better). `paper` reports β·Σd_i directly as in Steel & Rodrigo (2008) (positive, lower is better). `lust` applies an additional log₁₀(e) factor to match the original L.U.st Python tool of Akanni *et al.* (2014) exactly. |
 
 **Examples:**
