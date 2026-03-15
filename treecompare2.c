@@ -106,6 +106,7 @@ static void restore_singlecopy_filter(int *saved);
 static void hs_alloc_thread_state(void);
 static void hs_free_thread_state(void);
 static void hs_merge_results(char ***par_retained, float **par_scores, int *par_n, float *par_best, int *par_NUMSWAPS);
+static int  hs_same_topology(char *t1, char *t2);
 #endif
 float compare_trees(int spr);
 struct taxon * make_taxon(void);
@@ -6932,6 +6933,96 @@ static void hs_free_thread_state(void)
     }
 
 
+/*  hs_same_topology -------------------------------------------------------
+ *  Returns TRUE if the two named-taxon Newick strings t1 and t2 represent
+ *  the same unrooted topology, using the path-metric comparison (identical
+ *  logic to the inner loop of check_if_diff_tree).
+ */
+static int hs_same_topology(char *t1, char *t2)
+    {
+    int i=0, j=0, k=0, l=0, intname=-1, temp=0;
+    int **scores1=NULL, **scores2=NULL;
+    char tree1[TREE_LENGTH], tree2[TREE_LENGTH], name[1000];
+
+    scores1 = malloc(number_of_taxa * sizeof(int *));
+    if(!scores1) memory_error(62);
+    for(i=0; i<number_of_taxa; i++)
+        {
+        scores1[i] = malloc(number_of_taxa * sizeof(int));
+        if(!scores1[i]) memory_error(63);
+        }
+
+    scores2 = malloc(number_of_taxa * sizeof(int *));
+    if(!scores2) memory_error(62);
+    for(i=0; i<number_of_taxa; i++)
+        {
+        scores2[i] = malloc(number_of_taxa * sizeof(int));
+        if(!scores2[i]) memory_error(63);
+        }
+
+    /* Convert t1 taxon names to integers -> tree1 */
+    i=0; j=0;
+    while(t1[i] != ';')
+        {
+        if(t1[i]=='(' || t1[i]==')' || t1[i]==',' || t1[i]==';')
+            { tree1[j]=t1[i]; i++; j++; }
+        else
+            {
+            k=0;
+            while(t1[i]!='(' && t1[i]!=')' && t1[i]!=',' && t1[i]!=';')
+                { name[k]=t1[i]; i++; k++; }
+            name[k]=' ';
+            intname=assign_taxa_name(name, FALSE);
+            name[0]=' '; totext(intname, name);
+            k=0;
+            while(name[k]!=' ') { tree1[j]=name[k]; j++; k++; }
+            }
+        }
+    tree1[j]=';'; tree1[j+1]=' ';
+
+    /* Convert t2 taxon names to integers -> tree2 */
+    i=0; j=0;
+    while(t2[i] != ';')
+        {
+        if(t2[i]=='(' || t2[i]==')' || t2[i]==',' || t2[i]==';')
+            { tree2[j]=t2[i]; i++; j++; }
+        else
+            {
+            k=0;
+            while(t2[i]!='(' && t2[i]!=')' && t2[i]!=',' && t2[i]!=';')
+                { name[k]=t2[i]; i++; k++; }
+            name[k]=' ';
+            intname=assign_taxa_name(name, FALSE);
+            name[0]=' '; totext(intname, name);
+            k=0;
+            while(name[k]!=' ') { tree2[j]=name[k]; j++; k++; }
+            }
+        }
+    tree2[j]=';'; tree2[j+1]=' ';
+
+    /* Initialise score matrices and compute path metrics */
+    for(j=0; j<number_of_taxa; j++)
+        for(k=j; k<number_of_taxa; k++)
+            { scores1[j][k]=0; scores1[k][j]=0; scores2[j][k]=0; scores2[k][j]=0; }
+    pathmetric(tree1, scores1);
+    pathmetric(tree2, scores2);
+
+    /* Sum absolute differences */
+    temp=0;
+    for(j=0; j<number_of_taxa; j++)
+        for(k=j+1; k<number_of_taxa; k++)
+            if(scores1[j][k] != scores2[j][k])
+                temp += (scores1[j][k] > scores2[j][k])
+                        ? scores1[j][k] - scores2[j][k]
+                        : scores2[j][k] - scores1[j][k];
+
+    for(i=0; i<number_of_taxa; i++) { free(scores1[i]); free(scores2[i]); }
+    free(scores1); free(scores2);
+
+    return(temp == 0);   /* TRUE if same topology */
+    }
+
+
 /*  hs_merge_results -------------------------------------------------------
  *  Merge the current thread's search results (threadprivate retained_supers /
  *  scores_retained_supers / NUMSWAPS) into the shared merge buffers.
@@ -6968,7 +7059,7 @@ static void hs_merge_results(char ***par_retained, float **par_scores, int *par_
             for(mj=0; mj<*par_n; mj++)
                 {
                 if((*par_scores)[mj] < 0) break;
-                if(strcmp((*par_retained)[mj], mtr) == 0) { is_dup = TRUE; break; }
+                if(hs_same_topology((*par_retained)[mj], mtr)) { is_dup = TRUE; break; }
                 }
             if(!is_dup)
                 {
