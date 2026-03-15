@@ -297,6 +297,9 @@ int malloc_check =0, count_now = FALSE, another_check =0;
 unsigned int thread_seed = 0;   /* per-thread random seed for rand_r(); see threadprivate block below */
 uint64_t *taxon_hash_vals = NULL; /* shared read-only: splitmix64 weight per taxon; set at taxa load time */
 VisitedSet *visited_set   = NULL; /* threadprivate: per-replicate visited topology hash set */
+time_t  rep_start_time    = 0;    /* threadprivate: wall-clock time when current do_search() began */
+int     hs_do_print       = 0;    /* threadprivate: mirrors the 'print' param of do_search() */
+float   last_status_score = -1.0f;/* threadprivate: sprscore at last periodic status line (for improvement marker) */
 
 /****** OpenMP thread-private state: one independent copy per thread in parallel regions ******/
 #ifdef _OPENMP
@@ -308,7 +311,8 @@ VisitedSet *visited_set   = NULL; /* threadprivate: per-replicate visited topolo
     best_topology, best_topology_scores, number_retained_supers, \
     BESTSCORE, NUMSWAPS, \
     thread_seed, \
-    visited_set \
+    visited_set, \
+    rep_start_time, hs_do_print, last_status_score \
 )
 #endif
 
@@ -8008,6 +8012,14 @@ void heuristic_search(int user, int print, int sample, int nreps)
                             {
                             if(user_break) continue;
                             thr_swaps += do_search(starths[prl_i], TRUE, FALSE, numswaps, outfile, numspectries, numgenetries);
+                            if(print)
+                                #pragma omp critical (hs_progress)
+                                    {
+                                    printf2("  Rep %2d/%2d: tried=%6d  best=%.6f\n",
+                                            prl_i+1, nreps, tried_regrafts,
+                                            sprscore >= 0.0f ? sprscore : BESTSCORE);
+                                    fflush(stdout);
+                                    }
                             }
 
                         #pragma omp critical (hs_merge)
@@ -8118,6 +8130,14 @@ void heuristic_search(int user, int print, int sample, int nreps)
 								strcpy(thr_tree, start_trees[prl_i]);
 								returntree(thr_tree);
 								thr_swaps += do_search(thr_tree, TRUE, FALSE, numswaps, outfile, numspectries, numgenetries);
+								if(print)
+									#pragma omp critical (hs_progress)
+										{
+										printf2("  Rep %2d/%2d: tried=%6d  best=%.6f\n",
+										        prl_i+1, nreps, tried_regrafts,
+										        sprscore >= 0.0f ? sprscore : BESTSCORE);
+										fflush(stdout);
+										}
 								}
 
 							#pragma omp critical (hs_merge)
@@ -8575,6 +8595,10 @@ int do_search(char *tree, int user, int print, int maxswaps, FILE *outfile, int 
         temp_top = NULL;
         /* Allocate per-replicate visited-topology hash set */
         visited_set = vs_create(1u << 20);
+        /* Initialise periodic progress-line state */
+        rep_start_time    = time(NULL);
+        hs_do_print       = print;
+        last_status_score = -1.0f;
 /*		print_tree(tree_top, temporary_tree);
 		printf2("built tree = %s\n", temporary_tree);
   */      if(method == 1)
@@ -11372,10 +11396,26 @@ int regraft(struct taxon * position, struct taxon * newbie, struct taxon * last,
 
                                 for(i=0; i<Total_fund_trees; i++) tmp_fund_scores[i] = sourcetree_scores[i];
                                 interval2 = time(NULL);
-                                if(difftime(interval2, interval1) > 5) /* every 5 seconds print a dot to the screen */
+                                if(difftime(interval2, interval1) > 5)
                                     {
-                                    printf2("=");
-                                    fflush(stdout);
+                                    if(hs_do_print)
+                                        {
+                                        double hs_el = difftime(interval2, rep_start_time);
+                                        int    hs_em = (int)(hs_el / 60);
+                                        int    hs_es = (int)hs_el % 60;
+                                        if(sprscore < 0.0f)
+                                            printf2("  [%2d:%02d]  tried=%6d  score=(searching...)\n",
+                                                    hs_em, hs_es, tried_regrafts);
+                                        else
+                                            {
+                                            int hs_imp = (last_status_score < 0.0f || sprscore < last_status_score);
+                                            printf2("  [%2d:%02d]  tried=%6d  score=%s%.6f\n",
+                                                    hs_em, hs_es, tried_regrafts,
+                                                    hs_imp ? "* " : "  ", sprscore);
+                                            if(hs_imp) last_status_score = sprscore;
+                                            }
+                                        fflush(stdout);
+                                        }
                                     interval1 = time(NULL);
                                     }
                         
