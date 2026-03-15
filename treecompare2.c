@@ -7909,16 +7909,27 @@ void heuristic_search(int user, int print, int sample, int nreps)
 						{
 						/* ---- Parallel nreps loop (start==2, NJ+perturbation mode) ---- */
 						int    prl_i;
-						char  *temptree_orig;
 						char **par_retained = NULL;
 						float *par_scores   = NULL;
 						int    par_n        = 10;
 						float  par_best     = -1;
 						int    par_NUMSWAPS = 0;
 
-						/* Snapshot the original NJ tree before the parallel region. */
-						temptree_orig = malloc(TREE_LENGTH * sizeof(char));
-						strcpy(temptree_orig, temptree);
+						/* Pre-compute nreps starting trees with accumulated perturbation,
+						   matching the sequential random walk: rep 0 = NJ tree, rep i =
+						   rep i-1 + rand()%%10 SPR moves (same logic as sequential path). */
+						char **start_trees = malloc(nreps * sizeof(char *));
+						for(k=0; k<nreps; k++)
+							{
+							if(k != 0)
+								{
+								random_num = (int)fmod(rand(), 10);
+								for(j=0; j<random_num; j++)
+									string_SPR(temptree);
+								}
+							start_trees[k] = malloc(TREE_LENGTH * sizeof(char));
+							strcpy(start_trees[k], temptree);
+							}
 
 						/* Initialise shared merge buffers. */
 						par_retained = malloc(par_n * sizeof(char *));
@@ -7931,10 +7942,9 @@ void heuristic_search(int user, int print, int sample, int nreps)
 							}
 
 						#pragma omp parallel num_threads(nthreads) default(shared) \
-						        private(prl_i, j, random_num)
+						        private(prl_i)
 							{
 							char thr_tree[TREE_LENGTH];
-							char thr_temptree[TREE_LENGTH];
 							int  thr_swaps = 0;
 
 							hs_alloc_thread_state();
@@ -7943,14 +7953,7 @@ void heuristic_search(int user, int print, int sample, int nreps)
 							for(prl_i=0; prl_i<nreps; prl_i++)
 								{
 								if(user_break) continue;
-								strcpy(thr_temptree, temptree_orig);
-								if(prl_i != 0)
-									{
-									random_num = (int)fmod(rand_r(&thread_seed), 10);
-									for(j=0; j<random_num; j++)
-										string_SPR(thr_temptree);
-									}
-								strcpy(thr_tree, thr_temptree);
+								strcpy(thr_tree, start_trees[prl_i]);
 								returntree(thr_tree);
 								thr_swaps += do_search(thr_tree, TRUE, FALSE, numswaps, outfile, numspectries, numgenetries);
 								}
@@ -7981,7 +7984,8 @@ void heuristic_search(int user, int print, int sample, int nreps)
 						for(k=0; k<number_of_taxa; k++)
 							super_scores[k] = malloc(number_of_taxa * sizeof(int));
 
-						free(temptree_orig);
+						for(k=0; k<nreps; k++) free(start_trees[k]);
+						free(start_trees);
 						}
 					else
 #endif
