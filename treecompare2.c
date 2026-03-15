@@ -8356,7 +8356,7 @@ void heuristic_search(int user, int print, int sample, int nreps)
 					}
                 }
                 if(print)printf2("\n");
-                if(print)printf2("Number of topologies tried: %d\n",swaps);
+                if(print)printf2("Number of unique topologies scored: %d\n",swaps);
                 
                 
                 /**** Print out the best trees found *******/
