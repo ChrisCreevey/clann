@@ -1298,7 +1298,7 @@ void print_commands(int num)
         printf2("\tOptions\t\tSettings\t\t\tCurrent\n");
         printf2("\t===========================================================\n");
         if(delimiter) printf2("\n\t(Note: delimiter mode is ON -- multicopy gene trees will be automatically\n\texcluded from the search; use 'maxnamelen=full' to disable)\n");
-        if(criterion == 0 || criterion == 2 || criterion == 3)
+        if(criterion == 0 || criterion == 2 || criterion == 3 || criterion == 6 || criterion == 7)
             {
             printf2("\n\trange\t\t<treenumber> - <treenumber>\t*all\n\tsavetrees\t<filename>\t\t\ttop_alltrees.txt\n\tcreate\t\tyes | no\t\t\t*no\n");
             if(criterion == 0)
@@ -1397,6 +1397,14 @@ void print_commands(int num)
 			{
 			printf2("\n\tduplications\t<value>\t\t\t\t*1.0\n\tlosses\t\t<value>\t\t\t\t*1.0");
 			printf2("\n\tnumspeciesrootings\t<value> | all\t\t*2\n\tnumgenerootings\t\t<value> | all\t\t*2\n");
+			}
+		if(criterion == 7)
+			{
+			printf2("\n\tmlbeta\t\t<float > 0>\t\t\t%.4f", ml_beta);
+			printf2("\n\tmlscale\t\tpaper | lust | lnl\t\t%s", ml_scale==1?"lust":ml_scale==2?"lnl":"paper");
+			printf2("\n\t  paper = minimise beta*RF directly (score is raw RF sum)");
+			printf2("\n\t  lust  = L.U.st log10 scaling (beta*d*log10(e))");
+			printf2("\n\t  lnl   = report as lnL = -beta*RF  [default; matches ML tool conventions]\n");
 			}
         }
     if(num == 5)
@@ -1501,6 +1509,14 @@ void print_commands(int num)
         if(criterion == 6) printf2("rf");
         if(criterion == 7) printf2("ml");
         printf2("\n");
+        printf2("\n\t  dfit  = Distance Fit (path-length distances; default)");
+        printf2("\n\t  sfit  = Splits Fit (bipartition compatibility)");
+        printf2("\n\t  qfit  = Quartet Fit (quartet topology compatibility)");
+        printf2("\n\t  mrp   = Matrix Representation Parsimony (requires PAUP*)");
+        printf2("\n\t  avcon = Average Consensus distances (requires PAUP*)");
+        printf2("\n\t  recon = Duplication/Loss Reconciliation");
+        printf2("\n\t  rf    = Robinson-Foulds distance (normalised, sum across gene trees)");
+        printf2("\n\t  ml    = Maximum Likelihood supertree (L.U.st; exponential RF model)\n");
         printf2("\n\tseed\t\t<integer number>\t\t\t%d", seed);
 /*        printf2("\n\n\t\t\tdfit = best Distance Fit\n\t\t\tsfit = maximum Splits Fit\n\t\t\tqfit = maximum Quartet Fit\n\t\t\tmrp = Matrix representation using parsimony\n");
   */      }

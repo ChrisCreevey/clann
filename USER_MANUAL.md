@@ -137,8 +137,12 @@ Set with `set criterion=<value>` before running any search command.
 | `mrp` | Matrix Representation Parsimony (MRP) | Parsimony analysis of a matrix encoding of source-tree splits. Requires PAUP\*. |
 | `avcon` | Average Consensus (AVCON) | Average-consensus distance matrix approach. Requires PAUP\*. |
 | `recon` | Reconstruction / DL (RECON) | Minimises the total weighted duplication and loss cost of reconciling all source trees against the supertree. Uses **all** source trees including multicopy families. |
+| `rf` | Robinson-Foulds (RF) | Minimises the normalised Robinson-Foulds distance summed across all source trees. RF distance counts the number of bipartitions present in one tree but not the other, normalised to [0, 1] per gene tree. |
+| `ml` | Maximum Likelihood (ML) | Maximum-likelihood supertree criterion based on the L.U.st exponential model (Akanni *et al.* 2013). The probability of observing each gene tree given the supertree is modelled as P(G_i \| T) ∝ e^(−β·d_i), where d_i is the RF distance. The score reported is the total log-likelihood lnL = −β·Σd_i (negative, higher is better). Controlled by `mlbeta` and `mlscale`. |
 
 > **Note:** `mrp` and `avcon` require an external installation of [PAUP\*](https://paup.phylosolutions.com/).
+
+> **Note:** `rf` and `ml` are newer criteria that are still under active testing. Use `dfit` for production analyses.
 
 ---
 
@@ -232,13 +236,18 @@ set <parameter>=<value>
 
 | Parameter | Values | Description |
 |-----------|--------|-------------|
-| `criterion` | `dfit`, `sfit`, `qfit`, `mrp`, `avcon`, `recon` | Optimality criterion for supertree reconstruction. See [Section 4.1](#41-optimality-criteria). |
+| `criterion` | `dfit`, `sfit`, `qfit`, `mrp`, `avcon`, `recon`, `rf`, `ml` | Optimality criterion for supertree reconstruction. See [Section 4.1](#41-optimality-criteria). |
 | `seed` | `<integer>` | Random number seed for reproducibility. Default is based on system time and process ID. |
+| `mlbeta` | `<float > 0>` | Slope parameter β for the ML exponential model. Controls how steeply the likelihood decays with increasing RF distance. Default: `1.0`. Only relevant when `criterion=ml`. |
+| `mlscale` | `paper`, `lust`, `lnl` | Scoring convention for the ML criterion. `lnl` (default) reports lnL = −β·Σd_i, matching the sign convention of standard ML tools (negative, higher is better). `paper` reports β·Σd_i directly (positive, lower is better). `lust` applies an additional log₁₀(e) factor to match the original L.U.st Python tool output exactly. |
 
 **Examples:**
 ```
 set criterion=dfit
-set criterion=recon
+set criterion=rf
+set criterion=ml
+set mlbeta=2.0
+set mlscale=lnl
 set seed=12345
 ```
 
@@ -246,13 +255,13 @@ set seed=12345
 
 ### hs / hsearch
 
-Heuristic search for the best-scoring supertree. The available options depend on the current criterion.
+Heuristic search for the best-scoring supertree using SPR (subtree pruning and regrafting) branch swapping. The available options depend on the current criterion. When compiled with OpenMP, multiple independent replicates run in parallel.
 
 ```
 hs [options]
 ```
 
-#### Options for dfit, sfit, qfit, recon (criteria 0, 2, 3, 5)
+#### Options for dfit, sfit, qfit, rf, ml (criteria 0, 2, 3, 6, 7)
 
 | Option | Values | Default | Description |
 |--------|--------|---------|-------------|
@@ -263,7 +272,8 @@ hs [options]
 | `start` | `nj`, `random`, `<filename>` | `nj` | Starting tree. `nj` uses a neighbour-joining tree; `random` uses the best tree from random sampling; a filename loads a user-provided starting tree. |
 | `maxswaps` | `<integer>` | 1,000,000 | Maximum number of branch swaps per replicate. |
 | `savetrees` | `<filename>` | `Heuristic_result.txt` | Output file for the best supertree(s) found. |
-| `missing` | `4point`, `ultrametric` | `4point` | Method for estimating pairwise distances for taxa not co-occurring in a source tree (used for the NJ starting tree). |
+| `nthreads` | `<integer>` | all CPUs | Number of OpenMP threads. Each thread runs an independent search replicate in parallel. Not available for `criterion=recon`. |
+| `maxskips` | `<integer>` | 1,000 | Stop a replicate after this many consecutive already-visited SPR moves. Set to `0` to disable. Prevents long runs that have converged. |
 
 **Weight options (criterion-specific):**
 
@@ -280,6 +290,13 @@ hs [options]
 | `drawhistogram` | `yes`, `no` | `no` | Generate a histogram of scores across the random sample. |
 | `nbins` | `<integer>` | 20 | Number of bins for the histogram. |
 | `histogramfile` | `<filename>` | `Heuristic_histogram.txt` | Output file for histogram data. |
+
+#### Options for ml criterion (criterion 7) only
+
+| Option | Values | Default | Description |
+|--------|--------|---------|-------------|
+| `mlbeta` | `<float > 0>` | 1.0 | Slope parameter β for the exponential likelihood model P(G_i\|T) ∝ e^(−β·d_i). Larger values make the likelihood sharper and penalise RF distance more strongly. Can also be set via `set mlbeta=<value>`. |
+| `mlscale` | `paper`, `lust`, `lnl` | `lnl` | Scoring convention. `lnl` reports lnL = −β·Σd_i (negative, standard ML convention). `paper` and `lust` report positive minimisation scores. See `set mlscale` for details. Can also be set via `set mlscale=<value>`. |
 
 #### Options for recon criterion (criterion 5) only
 
@@ -306,6 +323,11 @@ hs [options]
 hs
 hs nreps=20 sample=50000 swap=spr
 hs nreps=5 savetrees=my_supertree.ph
+set criterion=rf
+hs nreps=10
+set criterion=ml
+set mlbeta=1.0
+hs nreps=10 nthreads=8
 set criterion=recon
 hs nreps=10 duplications=1.0 losses=0.5 numspeciesrootings=5
 ```
@@ -337,7 +359,7 @@ nj missing=ultrametric savetrees=my_nj.ph
 
 ### alltrees
 
-Exhaustively evaluate every possible supertree topology within a specified range. Practical only for small numbers of taxa (≤ ~8). Multicopy gene trees are excluded from scoring when delimiter mode is active.
+Exhaustively evaluate every possible supertree topology within a specified range. Practical only for small numbers of taxa (≤ ~8). Multicopy gene trees are excluded from scoring when delimiter mode is active. Supported for criteria: `dfit`, `sfit`, `qfit`, `rf`, and `ml`.
 
 ```
 alltrees [options]
@@ -353,10 +375,16 @@ alltrees [options]
 
 **Weight options** are the same as for `hs` (criterion-dependent, see above).
 
+> `alltrees` with `criterion=rf` or `criterion=ml` is the recommended way to verify that `hs` has found the global optimum on small datasets, since it scores every possible topology exactly.
+
 **Examples:**
 ```
 alltrees
 alltrees savetrees=best_topology.ph
+set criterion=rf
+alltrees
+set criterion=ml
+alltrees
 ```
 
 ---
