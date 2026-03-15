@@ -227,6 +227,7 @@ LTLIBOBJS = @LTLIBOBJS@
 MAKEINFO = @MAKEINFO@
 MKDIR_P = @MKDIR_P@
 OBJEXT = @OBJEXT@
+OPENMP_CFLAGS = @OPENMP_CFLAGS@
 PACKAGE = @PACKAGE@
 PACKAGE_BUGREPORT = @PACKAGE_BUGREPORT@
 PACKAGE_NAME = @PACKAGE_NAME@
@@ -286,8 +287,8 @@ top_builddir = @top_builddir@
 top_srcdir = @top_srcdir@
 clann_SOURCES = treecompare2.c
 clann_LDADD = $(LDADD) $(LIBREADLINE) -lm
-clann_CFLAGS = -g -O0 -Wall -funroll-loops -fsanitize=address
-clann_LDFLAGS = -fsanitize=address
+clann_CFLAGS = -g -O0 -Wall -funroll-loops $(OPENMP_CFLAGS)
+clann_LDFLAGS = $(OPENMP_LDFLAGS)
 all: config.h
 	$(MAKE) $(AM_MAKEFLAGS) all-am
 
