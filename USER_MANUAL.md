@@ -138,7 +138,7 @@ Set with `set criterion=<value>` before running any search command.
 | `avcon` | Average Consensus (AVCON) | Average-consensus distance matrix approach. Requires PAUP\*. |
 | `recon` | Reconstruction / DL (RECON) | Minimises the total weighted duplication and loss cost of reconciling all source trees against the supertree. Uses **all** source trees including multicopy families. |
 | `rf` | Robinson-Foulds (RF) | Minimises the normalised Robinson-Foulds distance summed across all source trees. RF distance counts the number of bipartitions present in one tree but not the other, normalised to [0, 1] per gene tree. |
-| `ml` | Maximum Likelihood (ML) | Maximum-likelihood supertree criterion based on the L.U.st exponential model (Akanni *et al.* 2013). The probability of observing each gene tree given the supertree is modelled as P(G_i \| T) ∝ e^(−β·d_i), where d_i is the RF distance. The score reported is the total log-likelihood lnL = −β·Σd_i (negative, higher is better). Controlled by `mlbeta` and `mlscale`. |
+| `ml` | Maximum Likelihood (ML) | Maximum-likelihood supertree criterion based on the exponential model of Steel & Rodrigo (2008). The probability of observing each gene tree given the supertree is modelled as P(G_i \| T) ∝ e^(−β·d_i), where d_i is the RF distance. The score reported is the total log-likelihood lnL = −β·Σd_i (negative, higher is better). Controlled by `mlbeta` and `mlscale`. |
 
 > **Note:** `mrp` and `avcon` require an external installation of [PAUP\*](https://paup.phylosolutions.com/).
 
@@ -239,7 +239,7 @@ set <parameter>=<value>
 | `criterion` | `dfit`, `sfit`, `qfit`, `mrp`, `avcon`, `recon`, `rf`, `ml` | Optimality criterion for supertree reconstruction. See [Section 4.1](#41-optimality-criteria). |
 | `seed` | `<integer>` | Random number seed for reproducibility. Default is based on system time and process ID. |
 | `mlbeta` | `<float > 0>` | Slope parameter β for the ML exponential model. Controls how steeply the likelihood decays with increasing RF distance. Default: `1.0`. Only relevant when `criterion=ml`. |
-| `mlscale` | `paper`, `lust`, `lnl` | Scoring convention for the ML criterion. `lnl` (default) reports lnL = −β·Σd_i, matching the sign convention of standard ML tools (negative, higher is better). `paper` reports β·Σd_i directly (positive, lower is better). `lust` applies an additional log₁₀(e) factor to match the original L.U.st Python tool output exactly. |
+| `mlscale` | `paper`, `lust`, `lnl` | Scoring convention for the ML criterion. `lnl` (default) reports lnL = −β·Σd_i, matching the sign convention of standard ML tools (negative, higher is better). `paper` reports β·Σd_i directly as in Steel & Rodrigo (2008) (positive, lower is better). `lust` applies an additional log₁₀(e) factor to match the original L.U.st Python tool of Akanni *et al.* (2014) exactly. |
 
 **Examples:**
 ```
@@ -296,7 +296,7 @@ hs [options]
 | Option | Values | Default | Description |
 |--------|--------|---------|-------------|
 | `mlbeta` | `<float > 0>` | 1.0 | Slope parameter β for the exponential likelihood model P(G_i\|T) ∝ e^(−β·d_i). Larger values make the likelihood sharper and penalise RF distance more strongly. Can also be set via `set mlbeta=<value>`. |
-| `mlscale` | `paper`, `lust`, `lnl` | `lnl` | Scoring convention. `lnl` reports lnL = −β·Σd_i (negative, standard ML convention). `paper` and `lust` report positive minimisation scores. See `set mlscale` for details. Can also be set via `set mlscale=<value>`. |
+| `mlscale` | `paper`, `lust`, `lnl` | `lnl` | Scoring convention. `lnl` reports lnL = −β·Σd_i (negative, standard ML convention). `paper` reports the Steel & Rodrigo (2008) positive score directly. `lust` uses Akanni *et al.* (2014) log₁₀ scaling. See `set mlscale` for details. |
 
 #### Options for recon criterion (criterion 5) only
 

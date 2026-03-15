@@ -1402,8 +1402,8 @@ void print_commands(int num)
 			{
 			printf2("\n\tmlbeta\t\t<float > 0>\t\t\t%.4f", ml_beta);
 			printf2("\n\tmlscale\t\tpaper | lust | lnl\t\t%s", ml_scale==1?"lust":ml_scale==2?"lnl":"paper");
-			printf2("\n\t  paper = minimise beta*RF directly (score is raw RF sum)");
-			printf2("\n\t  lust  = L.U.st log10 scaling (beta*d*log10(e))");
+			printf2("\n\t  paper = Steel & Rodrigo (2008) formula: minimise beta*RF directly");
+			printf2("\n\t  lust  = L.U.st (Akanni et al. 2014) log10 scaling (beta*d*log10(e))");
 			printf2("\n\t  lnl   = report as lnL = -beta*RF  [default; matches ML tool conventions]\n");
 			}
         }
@@ -1500,7 +1500,7 @@ void print_commands(int num)
         printf2("\t===========================================================\n");
         printf2("\n\tcriterion\tdfit | sfit | qfit | mrp | avcon | rf | ml\t");
         printf2("\n\tmlbeta\t\t<float > 0>\t\t\t\t%.4f", ml_beta);
-        printf2("\n\tmlscale\t\tpaper | lust | lnl\t\t\t%s", ml_scale == 1 ? "lust" : ml_scale == 2 ? "lnl" : "paper");
+        printf2("\n\tmlscale\t\tpaper | lust | lnl\t\t\t%s", ml_scale == 1 ? "lust (Akanni et al. 2014)" : ml_scale == 2 ? "lnl" : "Steel & Rodrigo 2008");
         if(criterion == 0) printf2("dfit");
         if(criterion == 1) printf2("mrp");
         if(criterion == 2) printf2("sfit");
@@ -1516,7 +1516,7 @@ void print_commands(int num)
         printf2("\n\t  avcon = Average Consensus distances (requires PAUP*)");
         printf2("\n\t  recon = Duplication/Loss Reconciliation");
         printf2("\n\t  rf    = Robinson-Foulds distance (normalised, sum across gene trees)");
-        printf2("\n\t  ml    = Maximum Likelihood supertree (L.U.st; exponential RF model)\n");
+        printf2("\n\t  ml    = Maximum Likelihood supertree (Steel & Rodrigo 2008; exponential RF model)\n");
         printf2("\n\tseed\t\t<integer number>\t\t\t%d", seed);
 /*        printf2("\n\n\t\t\tdfit = best Distance Fit\n\t\t\tsfit = maximum Splits Fit\n\t\t\tqfit = maximum Quartet Fit\n\t\t\tmrp = Matrix representation using parsimony\n");
   */      }
@@ -7334,10 +7334,11 @@ float compare_trees_rf(int spr)
     return total;
     }
 
-/* --- ML (L.U.st) scoring function ----------------------------------------
+/* --- ML scoring function (Steel & Rodrigo 2008) --------------------------
  * compare_trees_ml: identical to compare_trees_rf() but uses raw (unnormalised)
- * RF distance and applies the L.U.st exponential log-likelihood transform.
- * Score stored = beta * d * log10(e)  (negated log-likelihood, >=0, minimised).
+ * RF distance in the exponential likelihood model P(G_i|T) ∝ e^(-beta*d_i).
+ * Steel M & Rodrigo A (2008) Maximum likelihood supertrees. Syst Biol 57:243-250.
+ * mlscale=lust applies log10(e) factor for compatibility with Akanni et al. 2014.
  * Reuses fund_bipart_sets precomputed by rf_precompute_fund_biparts().
  */
 float compare_trees_ml(int spr)
@@ -7392,8 +7393,8 @@ float compare_trees_ml(int spr)
                                                      fund_bipart_sets[i].hashes, gene_cnt);
             /* Raw RF distance — no normalisation */
             float d = (float)(super_cnt + gene_cnt - 2 * shared);
-            /* Negated log-likelihood: -ln L = beta * d  (paper formula, default).
-             * With ml_lust_compat, multiply by log10(e) to match L.U.st output exactly. */
+            /* Negated log-likelihood: -ln L = beta * d  (Steel & Rodrigo 2008 formula).
+             * mlscale=lust multiplies by log10(e) to match Akanni et al. 2014 (L.U.st). */
             float ml_score = (float)(ml_beta * d * (ml_scale == 1 ? LOG10E : 1.0f)) * tree_weights[i];
             sourcetree_scores[i] = ml_score;
             total += ml_score;
@@ -7948,12 +7949,12 @@ void heuristic_search(int user, int print, int sample, int nreps)
 			else if(strcmp(parsed_command[i+1], "lust") == 0 || strcmp(parsed_command[i+1], "LUSt") == 0)
 				{
 				ml_scale = 1;
-				printf2("ML scoring: L.U.st-compatible scaling (beta * d * log10(e))\n");
+				printf2("ML scoring: L.U.st-compatible scaling / Akanni et al. 2014 (beta * d * log10(e))\n");
 				}
 			else if(strcmp(parsed_command[i+1], "paper") == 0)
 				{
 				ml_scale = 0;
-				printf2("ML scoring: paper formula (beta * d, minimised directly)\n");
+				printf2("ML scoring: Steel & Rodrigo (2008) formula (beta * d, minimised directly)\n");
 				}
 			else
 				printf2("Error: mlscale must be 'paper', 'lust', or 'lnl'\n");
@@ -8012,7 +8013,7 @@ void heuristic_search(int user, int print, int sample, int nreps)
                     break;
                 case 7:
                     printf2("Maximum likelihood supertree (beta=%.2f, scale=%s)\n",
-                            ml_beta, ml_scale == 1 ? "lust" : ml_scale == 2 ? "lnl" : "paper");
+                            ml_beta, ml_scale == 1 ? "lust (Akanni et al. 2014)" : ml_scale == 2 ? "lnl" : "Steel & Rodrigo 2008");
                     break;
                 default:
                     printf2("Maximum quartet fit (QFIT)\n");
@@ -10766,7 +10767,7 @@ int MRP_matrix(char **trees, int num_trees, int consensus)
 								else if(strcmp(parsed_command[i+1], "ml") == 0 || strcmp(parsed_command[i+1], "ML") == 0
 									     || strcmp(parsed_command[i+1], "lust") == 0)
 									{
-									if(criterion != 7) printf2("Scoring criterion set to ML supertree likelihood (L.U.st)\n");
+									if(criterion != 7) printf2("Scoring criterion set to ML supertree likelihood (Steel & Rodrigo 2008)\n");
 									criterion = 7;
 									}
 								else
