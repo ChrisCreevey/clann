@@ -6437,7 +6437,7 @@ void bootstrap_search(void)
         if(criterion == 0 || criterion == 2 || criterion == 3)     /* QFIT / DFIT / RF criteria */
             {
             /******* Parallel bootstrap over replicates *******/
-            hsprint = TRUE;
+            hsprint = FALSE;  /* suppress per-replicate HS settings banner during bootstrap */
 #ifdef _OPENMP
             if(nthreads > 1)
                 printf2("Bootstrap: %d replicates using %d threads\n", Nreps, nthreads);
@@ -6638,6 +6638,8 @@ void bootstrap_search(void)
                 free(thr_scores);
                 free(thr_taxa_present);
                 } /* end parallel region */
+
+            hsprint = TRUE;  /* restore after bootstrap */
 
             /* Restore original threadprivate pointers (boot copies already freed) */
             fundamentals          = boot_save_fundamentals;
