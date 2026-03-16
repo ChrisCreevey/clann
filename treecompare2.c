@@ -3678,10 +3678,15 @@ void clean_exit(int error)
 	if(presenceof_SPRtaxa) free(presenceof_SPRtaxa);
 	
 	if(sourcetreetag != NULL) free(sourcetreetag);
-    if(error)
-		exit(1);
-    else
-		exit(0);
+    /* Flush all stdio buffers before _exit so no output is lost.
+     * We use _exit() rather than exit() to bypass libgomp's atexit cleanup
+     * handler, which calls pthread_join on idle worker threads parked in
+     * Mach semaphore_wait() (an uninterruptible kernel wait on macOS).
+     * If the wake signal races past the thread, the join blocks indefinitely,
+     * leaving the process in the UE (uninterruptible+exiting) state.
+     * _exit() lets the OS tear down all threads atomically on process exit. */
+    fflush(NULL);
+    _exit(error ? 1 : 0);
 
 	if(logfile!= NULL)
 		fclose(logfile);
