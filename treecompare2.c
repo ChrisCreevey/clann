@@ -364,6 +364,8 @@ int    hs_maxskips         = 1000;  /* shared: stop replicate when skip_streak r
  *   clann hs --help
  *
  * Options with '=' are parsed as key=value pairs.
+ * Named file flags: --source=<f>/--trees=<f> set the gene-tree file;
+ *   --topologies=<f>/--candidates=<f> set the usertrees candidates file.
  * Global options (criterion, nthreads, mlbeta, mlscale, seed) become
  * "set X Y" commands; all others are appended to the command string.
  * Leading '--' is stripped so GNU-style --criterion=ml also works.
@@ -387,19 +389,27 @@ static void cli_usage(const char *cmd)
     {
     if(cmd == NULL)
         {
-        printf("\nUsage:  clann <command> <treefile> [options]\n\n");
+        printf("\nUsage:\n");
+        printf("  clann <command> <treefile> [options]\n");
+        printf("  clann usertrees --source=<gene-trees> --topologies=<candidates> [options]\n\n");
         printf("Commands:\n");
         printf("  hs / hsearch   Heuristic supertree search\n");
         printf("  alltrees       Exhaustive supertree search (small datasets)\n");
-        printf("  usertrees      Score / test user-supplied topologies\n");
+        printf("  usertrees      Score / test user-supplied topologies (requires two files)\n");
         printf("  consensus      Consensus tree from source trees\n");
         printf("  nj             Neighbour-joining supertree\n\n");
+        printf("File options (all commands):\n");
+        printf("  --source=<f> / --trees=<f>        Source gene-tree file (positional arg also accepted)\n");
+        printf("  --topologies=<f> / --candidates=<f>  Candidate-topology file (usertrees only)\n\n");
         printf("Global options (applied before the command):\n");
         printf("  criterion=<c>   dfit (default), ml, rf, sfit, qfit, avcon\n");
-        printf("  nthreads=<n>    threads for parallel search (default 1)\n");
+        printf("  nthreads=<n>    threads for parallel search (default: all CPUs)\n");
         printf("  mlbeta=<f>      beta for ML criterion (default 1.0)\n");
         printf("  mlscale=<s>     lnl (default), paper, lust\n");
         printf("  seed=<n>        random seed\n\n");
+        printf("Examples:\n");
+        printf("  clann hs gene_trees.ph criterion=ml nthreads=4\n");
+        printf("  clann usertrees --source=gene_trees.ph --topologies=candidates.ph criterion=ml tests=yes\n\n");
         printf("Run 'clann <command> --help' for command-specific options.\n");
         printf("Run 'clann' with no arguments to start the interactive session.\n\n");
         }
@@ -491,6 +501,14 @@ static int cli_dispatch(int argc, char *argv[], int start,
             file_count++;
             continue;
             }
+
+        /* Named file flags: --source=<f> / --trees=<f> → source-trees file
+         *                   --topologies=<f> / --candidates=<f> → usertrees candidates */
+        if(strcasecmp(key, "source") == 0 || strcasecmp(key, "trees") == 0)
+            { strncpy(out_treefiles[0], val, 999); continue; }
+        if(is_usertrees &&
+           (strcasecmp(key, "topologies") == 0 || strcasecmp(key, "candidates") == 0))
+            { snprintf(main_cmd, sizeof(main_cmd), "%s %s", cmdname, val); continue; }
 
         /* Is it a global set option? */
         int is_global = FALSE;
@@ -1545,7 +1563,10 @@ void print_commands(int num)
         }
     if(num == 3)
         {
-        printf2("\nusertrees <filename> [options]\n\n");
+        printf2("\nusertrees <candidates-file> [options]\n");
+        printf2("  (source gene trees must be loaded first with 'exe <file>')\n");
+        printf2("  CLI form: clann usertrees --source=<gene-trees> --topologies=<candidates> [options]\n");
+        printf2("        or: clann usertrees <gene-trees> <candidates> [options]\n\n");
         printf2("\tOptions\t\tSettings\t\t\tCurrent\n");
         printf2("\t===========================================================\n");
         printf2("\n\toutfile\t\t<filename>\t\t\tUsertrees_result.txt");

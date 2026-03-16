@@ -168,6 +168,14 @@ The `examples/tutorial_candidates.ph` file contains four candidate topologies:
 | T4 | Completely different placement of rodents and Orangutan |
 
 ```bash
+clann usertrees \
+    --source=examples/tutorial_single.ph \
+    --topologies=examples/tutorial_candidates.ph \
+    criterion=ml tests=yes nboot=1000
+```
+
+The positional form also works and is equivalent:
+```bash
 clann usertrees examples/tutorial_single.ph examples/tutorial_candidates.ph \
     criterion=ml tests=yes nboot=1000
 ```
@@ -204,7 +212,9 @@ A detailed per-gene-tree breakdown is written to `mltest_results.txt`. Use
 `testsfile=` to redirect it:
 
 ```bash
-clann usertrees examples/tutorial_single.ph examples/tutorial_candidates.ph \
+clann usertrees \
+    --source=examples/tutorial_single.ph \
+    --topologies=examples/tutorial_candidates.ph \
     criterion=ml tests=yes nboot=5000 testsfile=my_results.txt
 ```
 
@@ -330,7 +340,9 @@ rule topology_tests:
         tests = "results/{dataset}/mltest_results.txt"
     shell:
         """
-        clann usertrees {input.trees} {input.candidates} \
+        clann usertrees \
+            --source={input.trees} \
+            --topologies={input.candidates} \
             criterion=ml tests=yes nboot=1000 \
             testsfile={output.tests}
         """
