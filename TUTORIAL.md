@@ -16,7 +16,7 @@ directory. You will need a compiled Clann binary on your PATH before starting.
 
 | File | Contents |
 |------|----------|
-| `examples/tutorial_single.ph` | 12 single-copy gene trees, 8–9 taxa (primates + rodents + carnivores) |
+| `examples/tutorial_single.ph` | 28 single-copy gene trees, 4–9 taxa (primates + rodents + carnivores) |
 | `examples/tutorial_multicopy.ph` | 8 trees: 3 single-copy, 3 with prunable same-species clades, 2 with deep paralogs |
 | `examples/tutorial_candidates.ph` | 4 candidate topologies for topology testing |
 
@@ -38,7 +38,7 @@ Run a basic heuristic search using the default DFIT criterion:
 clann hs examples/tutorial_single.ph
 ```
 
-Clann will load the 12 gene trees, run 5 replicate searches (default `nreps=5`),
+Clann will load the 28 gene trees, run 5 replicate searches (default `nreps=5`),
 and print a result like:
 
 ```
