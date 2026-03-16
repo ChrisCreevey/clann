@@ -76,6 +76,15 @@ use per-thread seeds derived from the master seed and will differ between
 thread counts, but the best score found should be the same or better than the
 serial run given enough replicates.
 
+**Parallel bootstrap**
+
+The `boot` command also supports `nthreads`: independent bootstrap replicates
+run in parallel, each doing a single-threaded heuristic search internally.
+
+```bash
+clann boot examples/tutorial_single.ph nreps=100 nthreads=8
+```
+
 **When does parallelism help?**
 Parallelism scales linearly up to `nreps` threads. For small datasets like this
 tutorial, I/O and tree-building dominate and the speedup is modest. On large

@@ -349,8 +349,18 @@ int    hs_maxskips         = 1000;  /* shared: stop replicate when skip_streak r
     thread_seed, \
     visited_set, \
     rep_start_time, hs_do_print, last_status_score, \
-    skip_streak \
+    skip_streak, \
+    fundamentals, presence_of_taxa, fund_scores, number_of_comparisons \
 )
+#endif
+
+/* Snapshots of the master thread's input-data pointers, set just before each
+ * heuristic_search parallel region so that worker threads can share them. */
+#ifdef _OPENMP
+static char **g_hs_fundamentals_snap    = NULL;
+static int  **g_hs_presence_snap        = NULL;
+static int ***g_hs_fund_scores_snap     = NULL;
+static int   *g_hs_num_comp_snap        = NULL;
 #endif
 
 
@@ -372,7 +382,7 @@ int    hs_maxskips         = 1000;  /* shared: stop replicate when skip_streak r
  * ===================================================================== */
 
 static const char *cli_known_commands[] = {
-    "hs", "hsearch", "alltrees", "usertrees", "consensus", "nj", NULL
+    "hs", "hsearch", "alltrees", "usertrees", "consensus", "nj", "boot", "bootstrap", NULL
 };
 
 static int is_cli_command(const char *s)
@@ -435,7 +445,7 @@ static int cli_dispatch(int argc, char *argv[], int start,
                         char out_treefiles[2][1000])
     {
     static const char *global_keys[] = {
-        "criterion", "nthreads", "mlbeta", "mlscale", "seed", NULL
+        "criterion", "mlbeta", "mlscale", "seed", NULL
     };
 
     const char *cmdname = argv[start];
@@ -6027,19 +6037,175 @@ void dismantle_tree(struct taxon * position)
 	}		
 
 
+#ifdef _OPENMP
+/*  boot_alloc_thread_state -----------------------------------------------
+ *  Allocate per-thread copies of the fundamental input-data arrays and
+ *  initialise search state for a bootstrap parallel region.
+ *  Must be called from inside the bootstrap #pragma omp parallel region.
+ */
+static void boot_alloc_thread_state(int ntrees, int ntaxa)
+    {
+    int i, j, is_master;
+    is_master = (omp_get_thread_num() == 0);
+
+    /* Allocate thread-private copies of all four input-data arrays.
+     * The master thread's copies replace its pre-parallel pointers;
+     * worker threads get fresh independent allocations. */
+    fundamentals          = malloc(ntrees * sizeof(char *));
+    presence_of_taxa      = malloc(ntrees * sizeof(int *));
+    fund_scores           = malloc(ntrees * sizeof(int **));
+    number_of_comparisons = malloc(ntrees * sizeof(int));
+    if(!fundamentals || !presence_of_taxa || !fund_scores || !number_of_comparisons)
+        memory_error(200);
+    for(i = 0; i < ntrees; i++)
+        {
+        fundamentals[i]     = malloc(TREE_LENGTH * sizeof(char));
+        fundamentals[i][0]  = '\0';
+        presence_of_taxa[i] = malloc(ntaxa * sizeof(int));
+        fund_scores[i]      = malloc(ntaxa * sizeof(int *));
+        if(!fundamentals[i] || !presence_of_taxa[i] || !fund_scores[i]) memory_error(201);
+        for(j = 0; j < ntaxa; j++)
+            {
+            fund_scores[i][j] = malloc(ntaxa * sizeof(int));
+            if(!fund_scores[i][j]) memory_error(202);
+            }
+        }
+
+    /* Allocate / reset search-result state (mirrors hs_alloc_thread_state). */
+    if(!is_master)
+        {
+        int k, init_n = 10;
+        retained_supers        = malloc(init_n * sizeof(char *));
+        scores_retained_supers = malloc(init_n * sizeof(float));
+        best_topology          = malloc(init_n * sizeof(char *));
+        best_topology_scores   = malloc(init_n * sizeof(float));
+        for(k = 0; k < init_n; k++)
+            {
+            retained_supers[k]        = malloc(TREE_LENGTH * sizeof(char));
+            retained_supers[k][0]     = '\0';
+            scores_retained_supers[k] = -1;
+            best_topology[k]          = malloc(TREE_LENGTH * sizeof(char));
+            best_topology[k][0]       = '\0';
+            best_topology_scores[k]   = -1;
+            }
+        number_retained_supers = init_n;
+        super_scores           = malloc(ntaxa * sizeof(int *));
+        for(k = 0; k < ntaxa; k++)
+            super_scores[k] = malloc(ntaxa * sizeof(int));
+        sourcetree_scores  = malloc(ntrees * sizeof(float));
+        presenceof_SPRtaxa = malloc(ntaxa  * sizeof(int));
+        }
+    else
+        {
+        /* Master: search-state pointers are valid; just reset content. */
+        int k;
+        for(k = 0; k < number_retained_supers; k++)
+            {
+            retained_supers[k][0]     = '\0';
+            scores_retained_supers[k] = -1;
+            if(best_topology && best_topology[k]) best_topology[k][0] = '\0';
+            if(best_topology_scores) best_topology_scores[k] = -1;
+            }
+        if(super_scores)
+            {
+            for(k = 0; k < ntaxa; k++) free(super_scores[k]);
+            free(super_scores);
+            }
+        super_scores = malloc(ntaxa * sizeof(int *));
+        for(k = 0; k < ntaxa; k++)
+            super_scores[k] = malloc(ntaxa * sizeof(int));
+        }
+
+    /* Common init for all threads */
+    {
+    int k;
+    for(k = 0; k < ntrees; k++) sourcetree_scores[k]  = -1;
+    for(k = 0; k < ntaxa;  k++) presenceof_SPRtaxa[k] = -1;
+    }
+    BESTSCORE    = -1;
+    NUMSWAPS     = 0;
+    sprscore     = -1;
+    tried_regrafts = 0;
+    tree_top     = NULL;
+    temp_top     = NULL;
+    temp_top2    = NULL;
+    branchpointer = NULL;
+    thread_seed  = (unsigned int)(seed + (unsigned int)omp_get_thread_num() * 1000003u);
+    }
+
+
+/*  boot_free_thread_state ------------------------------------------------
+ *  Free per-thread fundamental data and search state allocated by
+ *  boot_alloc_thread_state.  Must be called inside the parallel region.
+ */
+static void boot_free_thread_state(int ntrees, int ntaxa)
+    {
+    int i, j, is_master;
+    is_master = (omp_get_thread_num() == 0);
+    /* Free search-result state (mirrors hs_free_thread_state). */
+    if(tree_top  != NULL) { dismantle_tree(tree_top);  tree_top  = NULL; }
+    if(temp_top  != NULL) { dismantle_tree(temp_top);  temp_top  = NULL; }
+    if(super_scores)
+        {
+        for(i = 0; i < ntaxa; i++) free(super_scores[i]);
+        free(super_scores); super_scores = NULL;
+        }
+    if(!is_master)
+        {
+        if(sourcetree_scores)  { free(sourcetree_scores);  sourcetree_scores  = NULL; }
+        if(presenceof_SPRtaxa) { free(presenceof_SPRtaxa); presenceof_SPRtaxa = NULL; }
+        for(i = 0; i < number_retained_supers; i++)
+            {
+            if(retained_supers && retained_supers[i]) free(retained_supers[i]);
+            if(best_topology   && best_topology[i])   free(best_topology[i]);
+            }
+        if(retained_supers)        { free(retained_supers);        retained_supers        = NULL; }
+        if(scores_retained_supers) { free(scores_retained_supers); scores_retained_supers = NULL; }
+        if(best_topology)          { free(best_topology);          best_topology          = NULL; }
+        if(best_topology_scores)   { free(best_topology_scores);   best_topology_scores   = NULL; }
+        }
+
+    /* Free the thread-private fundamental data arrays.
+     * NON-MASTER threads: free everything.
+     * MASTER thread: leave the arrays intact — the restore block in
+     * bootstrap_search (after the parallel region) reuses them via
+     * realloc/strcpy to restore the original gene trees. */
+    if(!is_master)
+        {
+        for(i = 0; i < ntrees; i++)
+            {
+            if(fundamentals[i])     free(fundamentals[i]);
+            if(presence_of_taxa[i]) free(presence_of_taxa[i]);
+            for(j = 0; j < ntaxa; j++)
+                if(fund_scores[i][j]) free(fund_scores[i][j]);
+            free(fund_scores[i]);
+            }
+        free(fundamentals);          fundamentals          = NULL;
+        free(presence_of_taxa);      presence_of_taxa      = NULL;
+        free(fund_scores);           fund_scores           = NULL;
+        free(number_of_comparisons); number_of_comparisons = NULL;
+        }
+    }
+#endif /* _OPENMP */
+
+
 void bootstrap_search(void)
     {
     int i=0, j=0, k=0, l=0, random_num = 0, error = FALSE, *taxa_present = NULL, missing_method = 1;
     int Nreps = 100, search = 1, allpresent = TRUE, num_results = 0;
+    int nthreads = 1;
     char filename[1000], best_tree[1000], **bootstrap_results = NULL, consensusfilename[1000];
     FILE *bootfile = NULL, *temp = NULL, *consensusfile = NULL;
 	float percentage = .5;
+#ifdef _OPENMP
+    nthreads = omp_get_num_procs();
+#endif
 
 	consensusfilename[0] = '\0';
     filename[0] = '\0';
     strcpy(filename, "bootstrap.txt");
 	strcpy(consensusfilename, "consensus.ph");
-    
+
     for(i=0; i<num_commands; i++)
         {
         if(strcmp(parsed_command[i], "nreps") == 0)
@@ -6137,6 +6303,17 @@ void bootstrap_search(void)
                 strcpy(filename, "bootstrap.txt");
                 }
             }
+#ifdef _OPENMP
+        if(strcmp(parsed_command[i], "nthreads") == 0)
+            {
+            nthreads = toint(parsed_command[i+1]);
+            if(nthreads < 1)
+                {
+                printf2("Error: '%s' is an invalid value for nthreads\n", parsed_command[i+1]);
+                nthreads = 1;
+                }
+            }
+#endif
         }
 
 
@@ -6234,164 +6411,230 @@ void bootstrap_search(void)
 
 		
         
-        if(criterion == 0 || criterion == 2 || criterion == 3)     /* if the criterion used id MSS or MRC **/
+        if(criterion == 0 || criterion == 2 || criterion == 3)     /* QFIT / DFIT / RF criteria */
             {
-            /*****************************************/
+            /******* Parallel bootstrap over replicates *******/
             hsprint = TRUE;
-            printf2("Bootstrap progress indicator: "); 
-            for(i=0; i<Nreps; i++)  /* for all reps of the bootstrap algorithm */
-                {
-				if(!user_break)
-					{
-					if(i > 0) hsprint = FALSE;
-					/*** initialise everything **/
-					for(j=0; j<Total_fund_trees; j++)
-						{
-						strcpy(fundamentals[j], "");
-						for(k=0; k<number_of_taxa; k++)
-							{
-							presence_of_taxa[j][k] = FALSE;
-							for(l=0; l<number_of_taxa; l++)
-								{
-								fund_scores[j][k][l] = 0;
-								}
-							}
-						}
-					
-					
-					/***** Create the bootstrap replicate of fundamental trees  **********/
-					for(j=0; j<Total_fund_trees; j++)
-						{
-						random_num = (int)fmod(rand(), Total_fund_trees);
-						fundamentals[j] = realloc(fundamentals[j], (strlen(stored_funds[random_num])+100)*sizeof(char));
-						fundamentals[j][0] = '\0';
-						strcpy(fundamentals[j],  stored_funds[random_num]);
-						number_of_comparisons[j] = stored_num_comparisons[random_num];
-						
-						for(k=0; k<number_of_taxa; k++)
-							{
-							presence_of_taxa[j][k] = stored_presence_of_taxa[random_num][k];
-							for(l=0; l<number_of_taxa; l++)
-								{
-								fund_scores[j][k][l] = stored_fund_scores[random_num][k][l];
-								}
-							}
-								
-						}
-						
-					/****** Test whether or not every taxa is represented in this replicate ******/
-					
-					allpresent = TRUE;
-					for(j=0; j<number_of_taxa; j++)
-						taxa_present[j] = FALSE;
-					for(j=0; j<Total_fund_trees; j++)
-						{
-						for(k=0; k<number_of_taxa; k++)
-							{
-							if(presence_of_taxa[j][k] > 0)
-								taxa_present[k] = TRUE;
-							}
-						}
-					
-					for(j=0; j<number_of_taxa; j++)
-						{
-						if(taxa_present[j] == FALSE)
-							{
-							printf2("\n\trepetition %d:\tTaxon %s is not present\n", i+1, taxa_names[j]);
-							allpresent=FALSE;
-							}
-						}
-					
+#ifdef _OPENMP
+            if(nthreads > 1)
+                printf2("Bootstrap: %d replicates using %d threads\n", Nreps, nthreads);
+            else
+#endif
+                printf2("Bootstrap progress indicator:\n");
 
-					
-					
-					/***** End Test *****/
-					if(allpresent)
-						{
-						/* Now find the best tree for this bootstrapped set of fundamental trees */
-						printf2("\n\trepetition %d:", i+1);
-						fflush(stdout);
-						if(search == 0)
-							{
-							alltrees_search(FALSE);
-							}
-						else
-							{
-							heuristic_search(FALSE, FALSE, 10000, 10);
-							}
-						
-						best_tree[0] = '\0';
-						k=0; l=0;
-						while(scores_retained_supers[l] != -1)
-							{
-							l++;
-							}
-						bootstrap_results = realloc(bootstrap_results, (l+num_results)*sizeof(char*));
-						score_of_bootstraps = realloc(score_of_bootstraps, (l+num_results)*sizeof(float));
-						for(j=num_results; j<l+num_results; j++) 
-								{
-								bootstrap_results[j] = malloc(TREE_LENGTH*sizeof(char));
-								bootstrap_results[j][0] = '\0';
-								}
-						while(scores_retained_supers[k] != -1)
-							{
-							if(search ==0)
-								{
-								if(tree_top != NULL)
-									{
-									dismantle_tree(tree_top);
-									tree_top = NULL;
-									}
-								temp_top = NULL;
-								tree_build(1, retained_supers[k], tree_top, FALSE, -1, 0);
-								tree_top = temp_top;
-								temp_top = NULL;
-							
-								strcpy(best_tree, "");
-								print_named_tree(tree_top, best_tree);
-							   /* printf2("\n%s[%f];\t[%f]\n", best_tree, best_tree,(float)((float)1/(float)l), scores_retained_supers[k]);  */
-								fprintf(bootfile, "%s [%f];\t[score = %f]\n", best_tree,(float)((float)1/(float)l), scores_retained_supers[k]);
-								}
-							else
-								{
-							   /* printf2("\n%s\t[%f]\n", retained_supers[k], scores_retained_supers[k]); */
-								j=0;
-								strcpy(best_tree, "");
-								while(retained_supers[k][j] != ';')
-									{
-									best_tree[j] = retained_supers[k][j];
-									j++;
-									}
-								best_tree[j] = '\0';
-								/*printf("\n%s[%f];\t[%f]\n", best_tree, (float)((float)1/(float)l), scores_retained_supers[k]); */
-								fprintf(bootfile, "%s [%f];\t[score = %f]\n", best_tree, (float)((float)1/(float)l), scores_retained_supers[k]);
-								}
-							
-							strcpy(bootstrap_results[num_results+k], retained_supers[k]);
-							score_of_bootstraps[num_results+k] = (float)((float)1/(float)l);
-							
-							fflush(bootfile);
-				
-							k++;
-							}
-						num_results +=l;
-						for(k=0; k<number_retained_supers; k++)
-							{
-							strcpy(retained_supers[k], "");
-							scores_retained_supers[k] = -1;
-							}
-					   }
-					else
-						{
-						i=Nreps;
-						printf2("\n\nError: This data may not be suitable for bootstrapping due to the low\noccurrences of some taxa in the source trees. Please check the\noccurance summary to identify problematic taxa\n");
-						}
-					}
-				}
+            /* Shared accumulators — protected by boot_merge critical section */
+            {
+            int    boot_reps_done = 0;
+            char **boot_results_acc = malloc(1*sizeof(char*));
+            float *boot_scores_acc  = malloc(1*sizeof(float));
+            boot_results_acc[0] = malloc(TREE_LENGTH*sizeof(char));
+            boot_results_acc[0][0] = '\0';
+            int    boot_alloc_n = 1;
+
+            /* Save original threadprivate pointers before the parallel region.
+             * boot_alloc_thread_state() will overwrite the master thread's
+             * threadprivate copies; boot_free_thread_state() will free the
+             * per-bootstrap allocations but leaves dangling pointers.  We
+             * restore the originals immediately after the parallel region so
+             * that the restore-original-data block and clean_exit() see valid
+             * pointers to the data loaded by exe. */
+            char **boot_save_fundamentals    = fundamentals;
+            int  **boot_save_presence        = presence_of_taxa;
+            int ***boot_save_fund_scores     = fund_scores;
+            int   *boot_save_num_comparisons = number_of_comparisons;
+
+#ifdef _OPENMP
+            #pragma omp parallel num_threads(nthreads) default(shared) \
+                    private(i,j,k,l,random_num,allpresent)
+#endif
+                {
+                /* Per-thread local result list */
+                int    thr_n     = 0;
+                int    thr_alloc = 1;
+                char **thr_results = malloc(1*sizeof(char*));
+                float *thr_scores  = malloc(1*sizeof(float));
+                thr_results[0] = malloc(TREE_LENGTH*sizeof(char));
+                thr_results[0][0] = '\0';
+                int *thr_taxa_present = malloc(number_of_taxa*sizeof(int));
+
+#ifdef _OPENMP
+                boot_alloc_thread_state(Total_fund_trees, number_of_taxa);
+                #pragma omp for schedule(dynamic,1)
+#endif
+                for(i=0; i<Nreps; i++)
+                    {
+                    if(user_break) continue;
+
+                    /* ---- Resample fundamentals into thread-private copies ---- */
+                    for(j=0; j<Total_fund_trees; j++)
+                        {
+#ifdef _OPENMP
+                        random_num = (int)fmod((double)rand_r(&thread_seed), (double)Total_fund_trees);
+#else
+                        random_num = (int)fmod((double)rand(), (double)Total_fund_trees);
+#endif
+                        fundamentals[j] = realloc(fundamentals[j],
+                                           (strlen(stored_funds[random_num])+100)*sizeof(char));
+                        fundamentals[j][0] = '\0';
+                        strcpy(fundamentals[j], stored_funds[random_num]);
+                        number_of_comparisons[j] = stored_num_comparisons[random_num];
+                        for(k=0; k<number_of_taxa; k++)
+                            {
+                            presence_of_taxa[j][k] = stored_presence_of_taxa[random_num][k];
+                            for(l=0; l<number_of_taxa; l++)
+                                fund_scores[j][k][l] = stored_fund_scores[random_num][k][l];
+                            }
+                        }
+
+                    /* ---- Check all taxa present ---- */
+                    allpresent = TRUE;
+                    for(j=0; j<number_of_taxa; j++) thr_taxa_present[j] = FALSE;
+                    for(j=0; j<Total_fund_trees; j++)
+                        for(k=0; k<number_of_taxa; k++)
+                            if(presence_of_taxa[j][k] > 0) thr_taxa_present[k] = TRUE;
+                    for(j=0; j<number_of_taxa; j++)
+                        if(thr_taxa_present[j] == FALSE) { allpresent = FALSE; break; }
+
+                    if(!allpresent)
+                        {
+#ifdef _OPENMP
+                        #pragma omp critical (boot_merge)
+#endif
+                            printf2("\n\trepetition %d: taxon missing — skipped\n", i+1);
+                        continue;
+                        }
+
+                    /* ---- Run the search ---- */
+                    if(search == 0)
+                        alltrees_search(FALSE);
+                    else
+                        heuristic_search(FALSE, FALSE, 10000, 10);
+
+                    /* ---- Collect results from (threadprivate) retained_supers ---- */
+                    {
+                    int rep_l = 0;
+                    char *local_best = NULL;  /* heap-allocated to avoid stack overflow in parallel region */
+                    while(scores_retained_supers[rep_l] != -1) rep_l++;
+                    if(rep_l == 0) goto next_replicate;
+                    local_best = malloc(TREE_LENGTH * sizeof(char));
+                    if(!local_best) memory_error(203);
+                    local_best[0] = '\0';
+
+                    /* Grow thread-local accumulators */
+                    thr_results = realloc(thr_results, (thr_n+rep_l)*sizeof(char*));
+                    thr_scores  = realloc(thr_scores,  (thr_n+rep_l)*sizeof(float));
+                    for(j=thr_alloc; j<thr_n+rep_l; j++)
+                        {
+                        thr_results[j] = malloc(TREE_LENGTH*sizeof(char));
+                        thr_results[j][0] = '\0';
+                        }
+                    if(thr_n+rep_l > thr_alloc) thr_alloc = thr_n+rep_l;
+
+                    for(k=0; k<rep_l; k++)
+                        {
+                        /* Build printable tree string */
+                        if(search == 0)
+                            {
+                            if(tree_top != NULL) { dismantle_tree(tree_top); tree_top = NULL; }
+                            temp_top = NULL;
+                            tree_build(1, retained_supers[k], tree_top, FALSE, -1, 0);
+                            tree_top = temp_top; temp_top = NULL;
+                            local_best[0] = '\0';
+                            print_named_tree(tree_top, local_best);
+                            }
+                        else
+                            {
+                            int jj=0;
+                            local_best[0] = '\0';
+                            while(retained_supers[k][jj] != ';')
+                                { local_best[jj] = retained_supers[k][jj]; jj++; }
+                            local_best[jj] = '\0';
+                            }
+                        strcpy(thr_results[thr_n+k], retained_supers[k]);
+                        thr_scores[thr_n+k] = (float)((float)1/(float)rep_l);
+#ifdef _OPENMP
+                        #pragma omp critical (boot_merge)
+#endif
+                            {
+                            fprintf(bootfile, "%s [%f];\t[score = %f]\n",
+                                    local_best, (float)((float)1/(float)rep_l),
+                                    scores_retained_supers[k]);
+                            fflush(bootfile);
+                            boot_reps_done++;
+                            if(boot_reps_done % 10 == 0 || boot_reps_done == Nreps)
+                                printf2("\r\t%d / %d replicates done", boot_reps_done, Nreps);
+                            fflush(stdout);
+                            }
+                        }
+                    free(local_best);
+                    thr_n += rep_l;
+
+                    /* Reset search results for next replicate */
+                    for(k=0; k<number_retained_supers; k++)
+                        {
+                        retained_supers[k][0] = '\0';
+                        scores_retained_supers[k] = -1;
+                        }
+                    } /* end collect */
+                    next_replicate: ;
+                    } /* end loop body (i) */
+
+#ifdef _OPENMP
+                #pragma omp critical (boot_merge)
+#endif
+                    {
+                    /* Merge thread-local results into shared accumulator.
+                     * Guard against realloc(ptr,0) which frees the buffer on macOS. */
+                    if(thr_n > 0)
+                        {
+                        boot_results_acc = realloc(boot_results_acc,
+                                                   (num_results+thr_n)*sizeof(char*));
+                        boot_scores_acc  = realloc(boot_scores_acc,
+                                                   (num_results+thr_n)*sizeof(float));
+                        for(j=boot_alloc_n; j<num_results+thr_n; j++)
+                            {
+                            boot_results_acc[j] = malloc(TREE_LENGTH*sizeof(char));
+                            boot_results_acc[j][0] = '\0';
+                            }
+                        if(num_results+thr_n > boot_alloc_n)
+                            boot_alloc_n = num_results+thr_n;
+                        for(j=0; j<thr_n; j++)
+                            {
+                            strcpy(boot_results_acc[num_results+j], thr_results[j]);
+                            boot_scores_acc[num_results+j] = thr_scores[j];
+                            }
+                        num_results += thr_n;
+                        }
+                    }
+
+#ifdef _OPENMP
+                boot_free_thread_state(Total_fund_trees, number_of_taxa);
+#endif
+                for(j=0; j<thr_alloc; j++) free(thr_results[j]);
+                free(thr_results);
+                free(thr_scores);
+                free(thr_taxa_present);
+                } /* end parallel region */
+
+            /* Restore original threadprivate pointers (boot copies already freed) */
+            fundamentals          = boot_save_fundamentals;
+            presence_of_taxa      = boot_save_presence;
+            fund_scores           = boot_save_fund_scores;
+            number_of_comparisons = boot_save_num_comparisons;
+
+            /* Install merged results into the globals consensus() expects */
+            if(bootstrap_results)
+                {
+                for(j=0; j<1; j++) free(bootstrap_results[j]);
+                free(bootstrap_results);
+                free(score_of_bootstraps);
+                }
+            bootstrap_results   = boot_results_acc;
+            score_of_bootstraps = boot_scores_acc;
+
             printf2("\n");
             fclose(bootfile);
-			
-            
+            } /* end accumulators block */
             } /** end criterion 0 & 2 & 3 **/
     if(criterion == 1 || criterion == 4)
             {
@@ -6534,15 +6777,13 @@ void bootstrap_search(void)
 			{
 			/***** Do a consensus of the results ******/
 			consensusfile = fopen(consensusfilename, "w");
-			consensus(num_results, bootstrap_results, Nreps, percentage, consensusfile, NULL); 
+			consensus(num_results, bootstrap_results, Nreps, percentage, consensusfile, NULL);
 			fclose(consensusfile);
 			}
-			
+
 		/* copy back the arrays to their original places */
-		
 		for(i=0; i<Total_fund_trees; i++)
 			{
-			
 			fundamentals[i] = realloc(fundamentals[i], (strlen(stored_funds[i])+100)*sizeof(char));
 			fundamentals[i][0] = '\0';
 			strcpy(fundamentals[i], stored_funds[i]);
@@ -6556,10 +6797,9 @@ void bootstrap_search(void)
 					}
 				}
 			}
-			
+
         /* free all the memory allocated */
         hsprint = TRUE;
-        
         for(i=0; i<Total_fund_trees; i++)
             {
             free(stored_funds[i]);
@@ -7654,6 +7894,13 @@ static void hs_alloc_thread_state(void)
             super_scores[k] = malloc(number_of_taxa * sizeof(int));
         sourcetree_scores = malloc(Total_fund_trees * sizeof(float));
         presenceof_SPRtaxa = malloc(number_of_taxa * sizeof(int));
+        /* Point to master's read-only input data for hs parallel regions.
+         * (For bootstrap parallel regions these pointers are set by
+         *  boot_alloc_thread_state instead, overriding these assignments.) */
+        fundamentals          = g_hs_fundamentals_snap;
+        presence_of_taxa      = g_hs_presence_snap;
+        fund_scores           = g_hs_fund_scores_snap;
+        number_of_comparisons = g_hs_num_comp_snap;
         }
     else
         {
@@ -8296,9 +8543,13 @@ void heuristic_search(int user, int print, int sample, int nreps)
 #ifdef _OPENMP
     /* Default to all available logical CPUs; user can override with nthreads= */
     nthreads = omp_get_num_procs();
+    /* If called from inside a bootstrap parallel region, run single-threaded
+     * to avoid nested parallelism (bootstrap threads already provide the
+     * outer-level parallelism). */
+    if(omp_in_parallel()) nthreads = 1;
 #endif
-    
-	
+
+
 	for(i=0; i<number_of_taxa; i++) presenceof_SPRtaxa[i] = -1;
 	
     best_tree = malloc(TREE_LENGTH*sizeof(char));
@@ -8689,10 +8940,15 @@ void heuristic_search(int user, int print, int sample, int nreps)
                 if(!user)printf2(" hsreps (%d)\n", nreps);
                 error = TRUE;
                 }
-            }      
+            }
         }
 
-	
+#ifdef _OPENMP
+    /* Re-apply nested-parallelism guard: if called from inside a bootstrap
+     * parallel region the user-specified nthreads= is ignored and we fall
+     * back to single-threaded to prevent g_hs_*_snap races. */
+    if(omp_in_parallel()) nthreads = 1;
+#endif
 
     if(!error)
         {
@@ -9095,6 +9351,11 @@ void heuristic_search(int user, int print, int sample, int nreps)
                     par_progress_best    = -1.0f;
                     par_last_print_score = -1.0f;
                     par_search_start     = time(NULL);
+                    /* Snapshot master's input-data pointers for worker threads */
+                    g_hs_fundamentals_snap = fundamentals;
+                    g_hs_presence_snap     = presence_of_taxa;
+                    g_hs_fund_scores_snap  = fund_scores;
+                    g_hs_num_comp_snap     = number_of_comparisons;
                     #pragma omp parallel num_threads(nthreads) default(shared) \
                             private(prl_i)
                         {
@@ -9207,6 +9468,11 @@ void heuristic_search(int user, int print, int sample, int nreps)
 						par_progress_best    = -1.0f;
 						par_last_print_score = -1.0f;
 						par_search_start     = time(NULL);
+                    /* Snapshot master's input-data pointers for worker threads */
+                    g_hs_fundamentals_snap = fundamentals;
+                    g_hs_presence_snap     = presence_of_taxa;
+                    g_hs_fund_scores_snap  = fund_scores;
+                    g_hs_num_comp_snap     = number_of_comparisons;
 						#pragma omp parallel num_threads(nthreads) default(shared) \
 						        private(prl_i)
 							{
