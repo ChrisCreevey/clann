@@ -2051,8 +2051,10 @@ static void autoprunemono_apply(void)
 	int i, j, n_multicopy = 0, n_promoted = 0, n_still_multi = 0, n_pruned = 0;
 	int numt = 0, clannID = 0, num_nodes = 0, leaf_count = 0;
 	int *taxa_fate = NULL;
-	char temptree[TREE_LENGTH];
+	char *temptree = malloc(TREE_LENGTH * sizeof(char));
 	char *pruned_tree = NULL, *tmp = NULL;
+
+	if(!temptree) { printf2("Error: out of memory for autoprunemono\n"); return; }
 
 	/* Allocate original_fundamentals if not already done */
 	if(original_fundamentals == NULL)
@@ -2061,14 +2063,15 @@ static void autoprunemono_apply(void)
 		if(!original_fundamentals)
 			{
 			printf2("Error: out of memory for autoprunemono\n");
+			free(temptree);
 			return;
 			}
 		}
 
 	pruned_tree = malloc(TREE_LENGTH * sizeof(char));
-	if(!pruned_tree) { printf2("Error: out of memory for autoprunemono\n"); return; }
+	if(!pruned_tree) { free(temptree); printf2("Error: out of memory for autoprunemono\n"); return; }
 	tmp = malloc(TREE_LENGTH * sizeof(char));
-	if(!tmp) { free(pruned_tree); printf2("Error: out of memory for autoprunemono\n"); return; }
+	if(!tmp) { free(temptree); free(pruned_tree); printf2("Error: out of memory for autoprunemono\n"); return; }
 
 	for(i = 0; i < Total_fund_trees; i++)
 		{
@@ -2103,7 +2106,7 @@ static void autoprunemono_apply(void)
 		if(!taxa_fate)
 			{
 			printf2("Error: out of memory for autoprunemono\n");
-			free(pruned_tree); free(tmp);
+			free(temptree); free(pruned_tree); free(tmp);
 			if(tree_top != NULL) { dismantle_tree(tree_top); tree_top = NULL; }
 			return;
 			}
@@ -2141,7 +2144,7 @@ static void autoprunemono_apply(void)
 			if(!original_fundamentals[i])
 				{
 				printf2("Error: out of memory for autoprunemono\n");
-				free(pruned_tree); free(tmp);
+				free(temptree); free(pruned_tree); free(tmp);
 				if(tree_top != NULL) { dismantle_tree(tree_top); tree_top = NULL; }
 				return;
 				}
@@ -2173,6 +2176,7 @@ static void autoprunemono_apply(void)
 		temp_top = NULL;
 		}
 
+	free(temptree);
 	free(pruned_tree);
 	free(tmp);
 
@@ -2190,6 +2194,7 @@ void execute_command(char *commandline, int do_all)
     {
     int i = 0, j=0, k=0, printfundscores = FALSE, error = FALSE, do_autoprunemono = FALSE;
     char c = '\0', temp[NAME_LENGTH], filename[10000], *newbietree, string_num[1000];
+    int newbietree_alloc = 0;  /* tracks allocated size of newbietree for overflow detection */
 	float num = 0;
 
     for(i=0; i<num_commands; i++)
@@ -2287,7 +2292,8 @@ void execute_command(char *commandline, int do_all)
 		num_excluded_taxa = 0;
 		trees_in_memory = 0;
             /************************ Assign the dynamic arrays *************************/
-        newbietree = malloc(TREE_LENGTH*sizeof(char));
+        newbietree_alloc = TREE_LENGTH;
+        newbietree = malloc(newbietree_alloc*sizeof(char));
 		if(newbietree == NULL) memory_error(110);
 		newbietree[0] = '\0';
 		if(weighted_scores != NULL)
@@ -2544,6 +2550,13 @@ void execute_command(char *commandline, int do_all)
                         {
 						if(c != ' ' && c != '\n' && c != '\r')
 							{
+							/* Grow buffer if approaching the limit (handles trees longer than TREE_LENGTH) */
+							if(i >= newbietree_alloc - 3)
+								{
+								newbietree_alloc *= 2;
+								newbietree = realloc(newbietree, newbietree_alloc * sizeof(char));
+								if(newbietree == NULL) memory_error(111);
+								}
 							newbietree[i] = c;
 							i++;
 							}
@@ -4172,8 +4185,8 @@ int unroottree(char * tree)
     int i=0, j=0, k=0, l=0, m=0, basecount = 0, parentheses=0, did_unrooting=FALSE;
     int foundopen = FALSE, foundclose = FALSE;
 	float del_nodelen = 0;
-	char length[100], restof[TREE_LENGTH];
-	
+	char length[100], *restof = malloc(TREE_LENGTH * sizeof(char));
+
 	restof[0] = '\0';
 	length[0] = '\0';
 	/* scan through the tree counting the number of taxa/nodes at the base (for it to be unrooted there should be at least three) */
@@ -4346,10 +4359,11 @@ int unroottree(char * tree)
         tree[i+1] = '\0';
         
         }
+    free(restof);
     return(did_unrooting);
     }
 
-    
+
 int texttoint(char c)
     {
     switch(c)
@@ -4489,8 +4503,11 @@ int treeToInt(char *tree)
 void intTotree(int tree_num, char *array, int num_taxa)
     {
     int  i = 0, j=0, k=0, l=0, exit = 0, bracket_count = 0;
-    char tmparray[TREE_LENGTH], *string= NULL;
+    char *tmparray = malloc(TREE_LENGTH * sizeof(char));
+    char *string= NULL;
 	double supers = 1, max = 1, min = 0, oldmin = 0, *path = NULL;
+
+	if(!tmparray) { printf2("Error: out of memory in intTotree\n"); return; }
 	
 	for(i=4; i<=num_taxa; i++) supers*=((2*i)-5);
 
@@ -4654,10 +4671,11 @@ void intTotree(int tree_num, char *array, int num_taxa)
     
     
     
+    free(tmparray);
     free(path);
     free(string);
     }
-    
+
 int toint(char *number)
     {
     int charactercount = 0, charactercount1 =0, result = 0, j=0;
@@ -6199,7 +6217,7 @@ void bootstrap_search(void)
     int i=0, j=0, k=0, l=0, random_num = 0, error = FALSE, *taxa_present = NULL, missing_method = 1;
     int Nreps = 100, search = 1, allpresent = TRUE, num_results = 0;
     int nthreads = 1;
-    char filename[1000], best_tree[1000], **bootstrap_results = NULL, consensusfilename[1000];
+    char filename[1000], **bootstrap_results = NULL, consensusfilename[1000];
     FILE *bootfile = NULL, *temp = NULL, *consensusfile = NULL;
 	float percentage = .5;
 #ifdef _OPENMP
@@ -7219,7 +7237,8 @@ void usertrees_search(void)
     float **all_gene_scores = NULL;
     float  *all_total_scores = NULL;
     strcpy(testsfile_name, "mltest_results.txt");
-    char *user_super = NULL, c = '\0', best_tree[TREE_LENGTH], *temp = NULL;
+    char *user_super = NULL, c = '\0', *best_tree = malloc(TREE_LENGTH * sizeof(char)), *temp = NULL;
+    if(!best_tree) { printf2("Error: out of memory in usertrees_search\n"); return; }
     float score = 0, best_score = 0;
     
     if((userfile = fopen(parsed_command[1], "r")) == NULL)
@@ -7682,8 +7701,9 @@ void usertrees_search(void)
             fclose(psfile);
 			}
 	if(sourcescoresfile != NULL) fclose(sourcescoresfile);
+	free(best_tree);
     }
-        
+
 void controlc1(int signal)
 	{
 	char *c = NULL;
@@ -8389,7 +8409,11 @@ static int hs_same_topology(char *t1, char *t2)
     {
     int i=0, j=0, k=0, l=0, intname=-1, temp=0;
     int **scores1=NULL, **scores2=NULL;
-    char tree1[TREE_LENGTH], tree2[TREE_LENGTH], name[1000];
+    char *tree1 = malloc(TREE_LENGTH * sizeof(char));
+    char *tree2 = malloc(TREE_LENGTH * sizeof(char));
+    char name[1000];
+
+    if(!tree1 || !tree2) { free(tree1); free(tree2); memory_error(62); }
 
     scores1 = malloc(number_of_taxa * sizeof(int *));
     if(!scores1) memory_error(62);
@@ -8465,6 +8489,7 @@ static int hs_same_topology(char *t1, char *t2)
 
     for(i=0; i<number_of_taxa; i++) { free(scores1[i]); free(scores2[i]); }
     free(scores1); free(scores2);
+    free(tree1); free(tree2);
 
     return(temp == 0);   /* TRUE if same topology */
     }
@@ -9481,7 +9506,7 @@ void heuristic_search(int user, int print, int sample, int nreps)
 						#pragma omp parallel num_threads(nthreads) default(shared) \
 						        private(prl_i)
 							{
-							char thr_tree[TREE_LENGTH];
+							char *thr_tree = malloc(TREE_LENGTH * sizeof(char));
 							int  thr_swaps = 0;
 
 							hs_alloc_thread_state();
@@ -9502,6 +9527,7 @@ void heuristic_search(int user, int print, int sample, int nreps)
 								}
 
 							hs_free_thread_state();
+							free(thr_tree);
 							}
 						/* ---- end parallel region ---- */
 
@@ -9935,9 +9961,8 @@ int average_consensus(int nrep, int missing_method, char * useroutfile, FILE *pa
 int do_search(char *tree, int user, int print, int maxswaps, FILE *outfile, int numspectries, int numgenetries)
     {
     int swaps = 0, i=0, better_score = TRUE;
-	char temporary_tree[TREE_LENGTH];
-	
-	
+	char *temporary_tree = malloc(TREE_LENGTH * sizeof(char));
+
 	temporary_tree[0] = '\0';
     while(unroottree(tree));  /* fully unroot — one call may not suffice for bifurcating root */
         /****** We now need to build the Supertree in memory *******/
@@ -9999,6 +10024,7 @@ int do_search(char *tree, int user, int print, int maxswaps, FILE *outfile, int 
     /* Free per-replicate visited-topology hash set */
     vs_free(visited_set);
     visited_set = NULL;
+    free(temporary_tree);
     return(swaps);
     }
 
@@ -10431,9 +10457,11 @@ void yaptp_search(void)
     {
     int i=0, j=0, k=0, l=0, random_num = 0, error = FALSE, yaptp_method = 1;
     int Nreps = 100, search = 1;
-    char filename[1000], best_tree[TREE_LENGTH];
+    char filename[1000];
+    char *best_tree = malloc(TREE_LENGTH * sizeof(char));
     FILE *yaptpfile = NULL;
 
+    if(!best_tree) { printf2("Error: out of memory in yaptp_search\n"); return; }
     filename[0] = '\0';
     strcpy(filename, "yaptp.txt");
     if(criterion == 5) yaptp_method = 2;    
@@ -10731,6 +10759,7 @@ void yaptp_search(void)
             free(stored_fund_scores);
             }
         }
+    free(best_tree);
     hsprint=TRUE;
     }
 
@@ -10738,7 +10767,8 @@ void yaptp_search(void)
 void randomise_tree(char *tree)
     {
     int i=0, j=0, k=0, l=0, x=0, y=0, treecount = 0, random=0, supers = 0, actual_num = 0;
-    char **array = NULL, temptree[TREE_LENGTH], *newtree = NULL, *tmp;
+    char **array = NULL, *temptree = malloc(TREE_LENGTH * sizeof(char)), *newtree = NULL, *tmp;
+    if(!temptree) { printf2("Error: out of memory in randomise_tree\n"); return; }
     /** allocate the array **/
     array = malloc(number_of_taxa*sizeof(char *));
     if(!array) memory_error(56);
@@ -10847,14 +10877,15 @@ void randomise_tree(char *tree)
     array = NULL;
     free(newtree);
     newtree = NULL;
+    free(temptree);
     free(tmp);
     }
 
 void randomise_taxa(char *tree)
     {
     int i=0, j=0, k=0, l=0, x=0, y=0, treecount = 0, random=0, tottax;
-    char **array = NULL, temptree[TREE_LENGTH];
-    
+    char **array = NULL, *temptree = malloc(TREE_LENGTH * sizeof(char));
+    if(!temptree) { printf2("Error: out of memory in randomise_taxa\n"); return; }
 
     /* Start by counting the number of taxa in the tree (there may be more then the variable "number_of_taxa" because of the recon criterion */
 
@@ -10965,6 +10996,7 @@ void randomise_taxa(char *tree)
         }
     free(array);
     array = NULL;
+    free(temptree);
     }
 
 
@@ -11061,8 +11093,12 @@ int check_if_diff_tree(char *tree)
     {
     int i=0, j=0, k=0, l=0, intname = -1, different = TRUE;
     int **scores1 = NULL, **scores2 = NULL, temp = 0;
-    char tree1[TREE_LENGTH], tree2[TREE_LENGTH], *name = NULL;
-    
+    char *tree1 = malloc(TREE_LENGTH * sizeof(char));
+    char *tree2 = malloc(TREE_LENGTH * sizeof(char));
+    char *name = NULL;
+
+    if(!tree1 || !tree2) { free(tree1); free(tree2); memory_error(62); }
+
     scores1 = malloc(number_of_taxa*sizeof(int *));
     if(!scores1) memory_error(62);
     for(i=0; i<number_of_taxa; i++)
@@ -11078,7 +11114,7 @@ int check_if_diff_tree(char *tree)
         scores2[i] = malloc(number_of_taxa*sizeof(int));
         if(!scores2[i]) memory_error(63);
         }
-    
+
     name = malloc(1000*sizeof(int));
     if(!name) memory_error(61);
     /** since both the trees being checked will be created using a heuristic search, they will contain the actual taxa names, it is necessary to get their taxan number Equivalent */
@@ -11201,19 +11237,24 @@ int check_if_diff_tree(char *tree)
         free(scores1[i]);
         free(scores2[i]);
         }
+    free(scores1);
     free(scores2);
     free(name);
+    free(tree1); free(tree2);
     return(different);
     }
-     
-    
+
+
 /* Next is the code needed for the Baum/ragan coding scheme */
 int coding(int nrep, int search, int ptpreps)
     {
     int i=0, j=0, k=0, nreps=10,  parenthesis = 0, count =0, *tracking = NULL, total = 0, **BR_coding = NULL, nodecount = 0, position = 0, split_count = 0, calculate_inhouse = FALSE;
-    char number[100], string[TREE_LENGTH], filename[1000], **temptrees = NULL;
+    char number[100];
+    char *string = malloc(TREE_LENGTH * sizeof(char));
+    char filename[1000], **temptrees = NULL;
     int x=0, one_in_this = FALSE, zero_in_this = FALSE, swap=3, addseq=4, error=FALSE, *num_fund_taxa = NULL, njbuild = FALSE, weighted = FALSE;
 
+    if(!string) { printf2("Error: out of memory in coding\n"); return FALSE; }
     filename[0] = '\0';
     for(i=0; i<num_commands; i++)
         {       
@@ -11456,15 +11497,18 @@ int coding(int nrep, int search, int ptpreps)
         }
 	fflush(BR_file);
 	/*if(calculate_inhouse == FALSE) error = 3; */
+	free(string);
     return(error);
     }
 
 int MRP_matrix(char **trees, int num_trees, int consensus)
 	{
 	int i=0, j=0, k=0, count =0, x=0, *tracking = NULL, total = 0, **BR_coding = NULL, nodecount = 0, position = 0, split_count = 0;
-    char number[100], string[TREE_LENGTH];
+    char number[100];
+    char *string = malloc(TREE_LENGTH * sizeof(char));
 	int *num_fund_taxa = NULL, one_in_this = FALSE, zero_in_this = FALSE;
-	
+
+	if(!string) { printf2("Error: out of memory in MRP_matrix\n"); return 0; }
 	num_fund_taxa = malloc(num_trees*sizeof(int));
 	if(!num_fund_taxa) memory_error(68);
 	for(i=0; i<num_trees; i++) num_fund_taxa[i] = 0;
@@ -11689,15 +11733,14 @@ int MRP_matrix(char **trees, int num_trees, int consensus)
 		BR_coding = NULL;
 		free(tracking);
 		tracking = NULL;
-		
-		}
-	return(position);	
-	}
-		
 
-                    
-        
- void set_parameters(void)
+		}
+	free(string);
+	return(position);
+	}
+
+
+void set_parameters(void)
     {
     int i=0, j=0, isdigit=TRUE, this=FALSE;
     for(i=0; i<num_commands; i++)
@@ -13438,7 +13481,8 @@ void generatetrees(void)
 	{
 	int i, j, k, ntrees = 100, error = FALSE, gen_method = 1, random = TRUE, n = 20, data = 1, tree_rand_method = 1, super = 1, print_all_scores = FALSE, saveideal = FALSE;
 	float *results = NULL;
-	char *temptree = NULL, *rand_tree = NULL, filename[100], *pruned_tree = NULL, tmp[TREE_LENGTH], superfilename[1000], c;
+	char *temptree = NULL, *rand_tree = NULL, filename[100], *pruned_tree = NULL, *tmp = malloc(TREE_LENGTH * sizeof(char)), superfilename[1000], c;
+	if(!tmp) { printf2("Error: out of memory in generatetrees\n"); return; }
 	double min = -1, max = -1, a = 0.0, b = 1.0;
 	FILE *outfile = NULL, *superfile = NULL, *allscores = NULL, *idealfile = NULL;
 	
@@ -13941,10 +13985,11 @@ void generatetrees(void)
 		fclose(outfile);
 		if(print_all_scores) fclose(allscores);
 		}
+	free(tmp);
 	}
-	
-	
-	
+
+
+
 
 void draw_histogram(FILE *outfile, int bins, float *results, int num_results)
 	{
@@ -14268,7 +14313,8 @@ void consensus(int num_trees, char **trees, int num_reps, float percentage, FILE
     {
     int i, j, k, q, r, same1 = FALSE, same2 = FALSE, same3 = FALSE, same4 = FALSE,same5 = FALSE,same6 = FALSE,same7 = FALSE,same8 = FALSE, l, **sets, *in, *tmpcoding = NULL, end = FALSE, found = -1;
 	/* The first thing needed is to create a Baum-Ragan coding scheme holding all the information from the bootstrapped trees */
-	char **string, *tmp = NULL, name[100], rest[TREE_LENGTH], value[100];
+	char **string, *tmp = NULL, name[100], *rest = malloc(TREE_LENGTH * sizeof(char)), value[100];
+	if(!rest) { printf2("Error: out of memory in consensus\n"); return; }
 	int count, first = -1, support = 0, **shorthand = NULL, subdivisions = ((int)(number_of_taxa/16))+1;
 	float tmpnumber = 0;
 	
@@ -14818,6 +14864,7 @@ void consensus(int num_trees, char **trees, int num_reps, float percentage, FILE
 		fprintf(outfile, "%s\n", tmp);
 		free(in);
 		}
+	free(rest);
 	free(tmp);
     }
 
@@ -14826,7 +14873,10 @@ void consensus(int num_trees, char **trees, int num_reps, float percentage, FILE
 void showtrees(int savet)
 	{
 	int worst = -2, best = -2,savetrees = FALSE, found = TRUE, taxachosen = 0, counter = 0, mode[5] = {TRUE, FALSE, FALSE, FALSE, FALSE}, start = 0, end = Total_fund_trees, error = FALSE, i=0, j=0, k=0, l=0, num=0, equalto = -1, greaterthan =0, lessthan = 1000000000, taxa_count = 0;
-	char *temptree, string_num[10], namecontains[NAME_LENGTH], **containstaxa = NULL, savedfile[100], temptree1[TREE_LENGTH], tmp[TREE_LENGTH];
+	char *temptree, string_num[10], namecontains[NAME_LENGTH], **containstaxa = NULL, savedfile[100];
+	char *temptree1 = malloc(TREE_LENGTH * sizeof(char));
+	char *tmp = malloc(TREE_LENGTH * sizeof(char));
+	if(!temptree1 || !tmp) { free(temptree1); free(tmp); printf2("Error: out of memory in showtrees\n"); return; }
 	FILE *showfile = NULL;
 	float bestscore =10000000, worstscore = 0, **tempscores = NULL;
 	int *tempsourcetreetag = NULL, display = TRUE, best_total = -1, total = 0, display_fullnames = FALSE, taxaorder=0;
@@ -15228,6 +15278,8 @@ void showtrees(int savet)
 		}
 	if(savetrees) fclose(showfile);
 	free(temptree);
+	free(temptree1);
+	free(tmp);
 	for(i=0; i<Total_fund_trees; i++)
 		free(tempscores[i]);
 	for(i=0; i<number_of_taxa; i++)
@@ -15276,7 +15328,9 @@ void qs(float **items, int left, int right)
 void exclude(int do_all)
 	{
 	int worst = -2, best = -2,savetrees = FALSE, found = TRUE, taxachosen = 0, counter = 0, mode[10] = {FALSE, FALSE, FALSE, FALSE, FALSE, FALSE, FALSE, FALSE, FALSE, FALSE}, start = 0, end = Total_fund_trees, error = FALSE, i=0, j=0, k=0, l=0, num=0, equalto = -1, greaterthan =1000000000, lessthan = 0, taxa_count = 0;
-	char *temptree, string_num[10], namecontains[100], **containstaxa = NULL, savedfile[100], *command = NULL, tmp[TREE_LENGTH];
+	char *temptree, string_num[10], namecontains[100], **containstaxa = NULL, savedfile[100], *command = NULL;
+	char *tmp = malloc(TREE_LENGTH * sizeof(char));
+	if(!tmp) { printf2("Error: out of memory in exclude\n"); return; }
 	FILE *showfile = NULL, *tempfile = NULL;
 	float bestscore =10000000, worstscore = 0, **tempscores = NULL;
 	int *tempsourcetreetag = NULL, countedout =0, *temp_incidence = NULL, taxaorder=0;
@@ -15744,6 +15798,7 @@ void exclude(int do_all)
 		}
 	
 	free(temptree);
+	free(tmp);
 	for(i=0; i<Total_fund_trees; i++)
 		free(tempscores[i]);
 	for(i=0; i<number_of_taxa; i++)
@@ -15752,16 +15807,18 @@ void exclude(int do_all)
 	free(containstaxa);
 	free(tempsourcetreetag);
 	free(temp_incidence);
-	
+
 	free(command);
-	
+
 	}
 
 void returntree(char *temptree) /* returns the tree with the names of the taxa included */
 	{
-	char string_num[10], string[TREE_LENGTH];
+	char string_num[10];
+	char *string = malloc(TREE_LENGTH * sizeof(char));
 	int i=0, j=0, k=0, l=0, num;
-	
+
+	if(!string) { printf2("Error: out of memory in returntree\n"); return; }
 	string[0] = '\0';
 	strcpy(string, temptree);
 	strcpy(temptree, "");
@@ -15814,15 +15871,17 @@ void returntree(char *temptree) /* returns the tree with the names of the taxa i
 		}
 	temptree[k] = ';';
 	temptree[k+1] = '\0';
+	free(string);
 
-	
 	}
 
 void returntree_fullnames(char *temptree, int treenum) /* returns the tree with the names of the taxa included */
 	{
-	char string_num[10], string[TREE_LENGTH];
+	char string_num[10];
+	char *string = malloc(TREE_LENGTH * sizeof(char));
 	int i=0, j=0, k=0, l=0, num, taxaorder=0;
-	
+
+	if(!string) { printf2("Error: out of memory in returntree_fullnames\n"); return; }
 	string[0] = '\0';
 	strcpy(string, temptree);
 	strcpy(temptree, "");
@@ -15878,9 +15937,8 @@ void returntree_fullnames(char *temptree, int treenum) /* returns the tree with 
 		}
 	temptree[k] = ';';
 	temptree[k+1] = '\0';
+	free(string);
 
-
-	
 	}
 
 
@@ -16201,11 +16259,14 @@ void include(int do_all)
 void sourcetree_dists(void)
 	{
 	int i=0, j=0, k=0, l=0, m=0, y=0, ***trees_coding = NULL, **included = NULL, *tracking = NULL, count = 0, x, total, *tree1 = NULL, *tree2 = NULL, *t1tag = NULL, *t2tag = NULL, *t1score = NULL, *t2score = NULL, same, same1, same2, same3;
-	char number[100], string[TREE_LENGTH], RFfilename[100];
+	char number[100];
+	char *string = malloc(TREE_LENGTH * sizeof(char));
+	char RFfilename[100];
 	int p1 = 0, p2 = 0, counter = 0, remaining_taxa = 0, num_falsed = 0, error = FALSE, r = 0, **shared_taxa = NULL, output_format = 0, missing_method = 2, here = TRUE, found = TRUE;
 	float **results = NULL;
 	FILE *RFfile = NULL;
 
+	if(!string) { printf2("Error: out of memory in sourcetree_dists\n"); return; }
 	RFfilename[0] = '\0';
 	strcpy(RFfilename, "robinson-foulds.txt");
 	 for(i=0; i<num_commands; i++)
@@ -16687,11 +16748,13 @@ void sourcetree_dists(void)
 		free(t1score);
 		free(t2score);
 		}
+	free(string);
 	}
 
 void exclude_taxa(int do_all)
 	{
-	char *temptree, *pruned_tree = NULL, tmp[TREE_LENGTH], *command = NULL, tmpfilename[10000], previnputfilename[10000];
+	char *temptree, *pruned_tree = NULL, *tmp = malloc(TREE_LENGTH * sizeof(char)), *command = NULL, tmpfilename[10000], previnputfilename[10000];
+	if(!tmp) { printf2("Error: out of memory in exclude_taxa\n"); return; }
 	int i=0, j=0, q=0, error = FALSE, taxachosen = 0, found = FALSE, *tobeexcluded = NULL, k=0, l=0, done = FALSE, num_left = 0, min_taxa = 4;
 	FILE *tempfile = NULL;
 	
@@ -16847,7 +16910,8 @@ void exclude_taxa(int do_all)
 	free(tobeexcluded);
 	free(pruned_tree);
 	free(temptree);
-	
+	free(tmp);
+
 	if(!error)
 		{
 		fclose(tempfile);
@@ -16858,9 +16922,9 @@ void exclude_taxa(int do_all)
 		strcpy(inputfilename, previnputfilename);
 		remove(tmpfilename);
 		}
-	
+
 	}
-	
+
 	/* Prune tree: This is a recursive function that is called for every node position of the supertree
 	it then checks to see if any of the siblings on this node are not contained in the fundamental tree, these siblings are then turned off.
 	This only turns off taxa, pointer siblings will have to be turned off using a separate program */
@@ -16896,7 +16960,12 @@ void spr_dist(void)
 	{
 	float real_score = 0, sprscore = 0, bestreal = 0,  amountspr, previous, totalnow, bestfake = 0, *results = NULL;
 	int i=0, j=0, k=0, l=0, x=0, y=0, error = FALSE, diff, *originaldiff = NULL, numbersprs =0, nreps=100, bestnumSPR = 0, minsprs = 0, best = FALSE, now = 0, bestscore = -1, ***scores_original = NULL, **scores_changed = NULL;
-	char *pruned_tree = NULL, tmp[TREE_LENGTH], ideal[TREE_LENGTH], userinfile[1000], c, outputfile[1000], inputtree[TREE_LENGTH];
+	char *pruned_tree = NULL;
+	char *tmp = malloc(TREE_LENGTH * sizeof(char));
+	char *ideal = malloc(TREE_LENGTH * sizeof(char));
+	char userinfile[1000], c, outputfile[1000];
+	char *inputtree = malloc(TREE_LENGTH * sizeof(char));
+	if(!tmp || !ideal || !inputtree) { free(tmp); free(ideal); free(inputtree); printf2("Error: out of memory in spr_dist\n"); return; }
 	int starting_super = 0, randomisation = TRUE;
 	FILE *outfile = NULL, *infile = NULL;
 	
@@ -17305,13 +17374,21 @@ void spr_dist(void)
 		free(originaldiff);
 		}
 
+	free(tmp);
+	free(ideal);
+	free(inputtree);
 	}
 
 
 int string_SPR(char * string)
 	{
 	int i=0, j=0, k=0, l=0, components = 0, random_num = 0, done = FALSE, found = FALSE, **scores_original = NULL, **scores_changed = NULL, attempts = 0;
-	char extracted[TREE_LENGTH], *temptree = NULL, *tmp = NULL, original[TREE_LENGTH], *string1 = NULL;
+	char *extracted = malloc(TREE_LENGTH * sizeof(char));
+	char *temptree = NULL, *tmp = NULL;
+	char *original = malloc(TREE_LENGTH * sizeof(char));
+	char *string1 = NULL;
+
+	if(!extracted || !original) { free(extracted); free(original); printf2("Error: out of memory in string_SPR\n"); return 0; }
 	
 	string1=malloc(TREE_LENGTH*sizeof(char));
 	string1[0] = '\0';
@@ -17636,8 +17713,9 @@ int string_SPR(char * string)
 	free(temptree);
 	free(tmp);
 	free(string1);
-	
-	
+	free(extracted);
+	free(original);
+
 	return(attempts);
 	}
 
@@ -17648,9 +17726,22 @@ int string_SPR(char * string)
 void exhaustive_SPR(char * string)
 	{
 	int i, j, k, l, x, y, q, r=-1, labelonly = FALSE, exnum, components =0, pruned_components =0, num, *component_index = NULL, *pruned_component_index = NULL, **scores_original = NULL, **scores_changed = NULL;
-	char labeledtree[TREE_LENGTH], taxaname[100], tmp_labeledtree[TREE_LENGTH], filename[100], filename1[100], pasted_name[10000], cut_name[100], extractedpart[TREE_LENGTH], tmp_tree[TREE_LENGTH], pruned_tree[TREE_LENGTH], tmp[TREE_LENGTH];
+	char *labeledtree = malloc(TREE_LENGTH * sizeof(char));
+	char *tmp_labeledtree = malloc(TREE_LENGTH * sizeof(char));
+	char *extractedpart = malloc(TREE_LENGTH * sizeof(char));
+	char *tmp_tree = malloc(TREE_LENGTH * sizeof(char));
+	char *pruned_tree = malloc(TREE_LENGTH * sizeof(char));
+	char *tmp = malloc(TREE_LENGTH * sizeof(char));
+	char taxaname[100], filename[100], filename1[100], pasted_name[10000], cut_name[100];
 	FILE *sproutfile = NULL, *sprdescriptor = NULL, *labeledtreefile = NULL;
-	
+
+	if(!labeledtree || !tmp_labeledtree || !extractedpart || !tmp_tree || !pruned_tree || !tmp)
+		{
+		free(labeledtree); free(tmp_labeledtree); free(extractedpart);
+		free(tmp_tree); free(pruned_tree); free(tmp);
+		printf2("Error: out of memory in exhaustive_SPR\n"); return;
+		}
+
 	 for(i=0; i<num_commands; i++)
         {
         if(strcmp(parsed_command[i], "labelonly") == 0)
@@ -18013,17 +18104,25 @@ void exhaustive_SPR(char * string)
 	free(scores_changed);
 	free(pruned_component_index);
 	free(component_index);
+	free(labeledtree);
+	free(tmp_labeledtree);
+	free(extractedpart);
+	free(tmp_tree);
+	free(pruned_tree);
+	free(tmp);
 
-
-	}	
+	}
 
 void neighbor_joining(int brlens, char *tree, int names)
 	{
 	int num_nodes = number_of_taxa, *deleted = NULL, i, j, smallest_i = -1, smallest_j = -1;
 	float *transformed = NULL, smallest = 0, vi, vj, vtmp;
-	char **tree_structure = NULL, string[TREE_LENGTH], tmp[TREE_LENGTH], c;
-	
+	char **tree_structure = NULL;
+	char *string = malloc(TREE_LENGTH * sizeof(char));
+	char *tmp = malloc(TREE_LENGTH * sizeof(char));
+	char c;
 
+	if(!string || !tmp) { free(string); free(tmp); printf2("Error: out of memory in neighbor_joining\n"); return; }
 	string[0] = '\0'; tmp[0] = '\0';
 	/* Assume that the distances array is number_of_taxa * number_of_taxa in size **/
 	deleted = malloc(number_of_taxa*sizeof(int));
@@ -18164,8 +18263,10 @@ void neighbor_joining(int brlens, char *tree, int names)
 	free(tree_structure);
 	free(transformed);
 	free(deleted);
+	free(string);
+	free(tmp);
 	}
-	
+
 void nj(void)
 	{
 	int i, j, missing_method = 1, error = FALSE;
@@ -19665,7 +19766,8 @@ void mapunknowns()
 	struct taxon *position = NULL, *species_tree = NULL, *gene_tree = NULL, *best_mapping = NULL, *unknown_fund = NULL, *pos = NULL,*copy = NULL;
 	int i, j, k, l,  *presence = NULL, basescore = 1;
 	float *overall_placements = NULL, biggest = -1, total, best_total = -1;
-	char *temptree, temptree1[TREE_LENGTH];
+	char *temptree, *temptree1 = malloc(TREE_LENGTH * sizeof(char));
+	if(!temptree1) { printf2("Error: out of memory in mapunknowns\n"); return; }
 	temptree = malloc(TREE_LENGTH*sizeof(char));
 	temptree[0] = '\0';
 	temptree1[0] = '\0';
@@ -19838,6 +19940,7 @@ void mapunknowns()
 		
 	tree_top = NULL;
 	free(temptree);
+	free(temptree1);
 	free(presence);
 	free(overall_placements);
 	}
@@ -19847,14 +19950,15 @@ float get_recon_score(char *giventree, int numspectries, int numgenetries)
 	struct taxon *position = NULL, *species_tree = NULL, *gene_tree = NULL, *best_mapping = NULL, *copy = NULL, *temp_top1 = NULL, *temp_top2 = NULL, *spec_copy = NULL;
 	int i, j, k, l, m, q, r, spec_start=0, spec_end, gene_start, gene_end, num_species_internal = 0, error = FALSE, num_species_roots = 0, basescore = 1, rand1=0, rand2=0, dospecrand = 1, dogenerand=1, taxaorder=0;
 	float *overall_placements = NULL, biggest = -1, total, best_total = -1, sum_of_totals = 0, rooting_score = -1;
-	char *temptree, temptree1[TREE_LENGTH];
+	char *temptree, *temptree1 = malloc(TREE_LENGTH * sizeof(char));
+	if(!temptree1) { printf2("Error: out of memory in get_recon_score\n"); return -1; }
 
 	temptree = malloc(TREE_LENGTH*sizeof(char));
 	temptree[0] = '\0';
 	temptree1[0] = '\0';
 
 
-	
+
 		/**** BUILD THE SPECIES TREE *****/
 		strcpy(temptree,giventree);
 		returntree(temptree);
@@ -20022,6 +20126,7 @@ float get_recon_score(char *giventree, int numspectries, int numgenetries)
 		species_tree = NULL;
 		}
 	free(temptree);
+	free(temptree1);
 	return(rooting_score);
 	}
 
@@ -20238,7 +20343,11 @@ void reconstruct(int print_settings)  /* Carry out gene-tree reconciliation of s
 	struct taxon *position = NULL, *species_tree = NULL, *gene_tree = NULL, *best_mapping = NULL, *unknown_fund = NULL, *pos = NULL, *copy = NULL, *newbie = NULL;
 	int i, j, k, l, xnum=0, *presence = NULL, **label_results = NULL, num_species_internal = 0, error = FALSE, printfiles = FALSE, how_many = 0, diff_overall =0, dorecon = FALSE, basescore = 1, taxaorder=0, species_source = 0, gene_tree_start = 0;
 	float *overall_placements = NULL, biggest = -1, total, best_total = -1;
-	char *temptree, temptree1[TREE_LENGTH],temptree2[TREE_LENGTH], reconfilename[100], otherfilename[100], *tmp1 = NULL, c = '\0', speciestree_file[1000];
+	char *temptree;
+	char *temptree1 = malloc(TREE_LENGTH * sizeof(char));
+	char *temptree2 = malloc(TREE_LENGTH * sizeof(char));
+	char reconfilename[100], otherfilename[100], *tmp1 = NULL, c = '\0', speciestree_file[1000];
+	if(!temptree1 || !temptree2) { free(temptree1); free(temptree2); printf2("Error: out of memory in reconstruct\n"); return; }
 	FILE *reconstructionfile = NULL, *descendentsfile = NULL, *genebirthfile = NULL;
 	
 	temptree = malloc(TREE_LENGTH*sizeof(char));
@@ -20650,6 +20759,8 @@ void reconstruct(int print_settings)  /* Carry out gene-tree reconciliation of s
 		}
 	tree_top = NULL;
 	free(temptree);
+	free(temptree1);
+	free(temptree2);
 	free(tmp1);
 	free(presence);
 	free(overall_placements);
@@ -20754,10 +20865,12 @@ void hgt_reconstruction()
 	struct taxon *position = NULL, *species_tree = NULL, *gene_tree = NULL, *best_mapping = NULL, *best_mapping1 = NULL, *best_mapping2 = NULL, *unknown_fund = NULL, *posit = NULL,*copy = NULL, *copy1 = NULL, **parts = NULL, *test_part = NULL, *pos = NULL, *best_donor = NULL, *best_HGT = NULL, *attached = NULL;
 	int i, j, k, l,  *presence = NULL,*presence1 = NULL, *presence2 = NULL, hgt_receipient1, hgt_receipient2, **overall_presence = NULL, *overall_reconstruction = NULL, *overall_receptor = NULL, receptor, **tmp_presence1 = NULL, **tmp_presence2 = NULL, *before1 = NULL, *before2 = NULL, *after1 = NULL, *after2 = NULL, *temporary = NULL;
 	float *overall_placements = NULL, biggest = -1,  total, best_total = -1,  best_total1 = -1, best_total2 = -1, HGT1 = 0, HGT2 = 0, original = 0, best_HGT_recon = -1, best_reconstruction = -1, sum, HGT_score = -1, donor_score = -1, tmp_allow = FALSE;
-	char *temptree = NULL, temptree1[TREE_LENGTH];
-	int **species_allowed = NULL, **dependent_species_allowed = NULL, *previous = NULL, xnum =0, x, y, z, partA, partB, q, r, s, allow_HGT1 = TRUE, allow_HGT2 = TRUE, numparts = 1,  place_marker = 1, found_better = FALSE, error = FALSE, taxaorder=0; 
+	char *temptree = NULL;
+	char *temptree1 = malloc(TREE_LENGTH * sizeof(char));
+	int **species_allowed = NULL, **dependent_species_allowed = NULL, *previous = NULL, xnum =0, x, y, z, partA, partB, q, r, s, allow_HGT1 = TRUE, allow_HGT2 = TRUE, numparts = 1,  place_marker = 1, found_better = FALSE, error = FALSE, taxaorder=0;
 	int basescore = 1; /** see reconstrution command **/
-	
+
+	if(!temptree1) { printf2("Error: out of memory in recon_hgt\n"); return; }
 	temptree = malloc(TREE_LENGTH*sizeof(char));
 	temptree[0] = '\0';
 	temptree1[0] = '\0';
@@ -21700,13 +21813,14 @@ void hgt_reconstruction()
 	
 	tree_top = NULL;
 	free(temptree);
+	free(temptree1);
 	free(presence);
 	free(presence1);
 	free(presence2);
 	free(temporary);
-	
-	
-	
+
+
+
 	}
 
 
@@ -21879,8 +21993,9 @@ float return_length(char *string)
 	{
 	int i=0, j=0;
 	float length = 0;
-	char flt_length[TREE_LENGTH];
-	
+	char *flt_length = malloc(TREE_LENGTH * sizeof(char));
+	if(!flt_length) { printf2("Error: out of memory in return_length\n"); return 0; }
+
 	while(i < strlen(string) && string[i] != ':' ) i++;
 	
 	if(i < strlen(string))
@@ -21896,9 +22011,10 @@ float return_length(char *string)
 		flt_length[j] = '\0';
 		length = atof(flt_length);
 		}
+	free(flt_length);
 	return(length);
 	}
-	
+
 
 int print_keep(struct taxon *position, int keep, int count, FILE *rp_outfile)
 	{
@@ -22145,8 +22261,11 @@ void check_treeisok(struct taxon *position)
 void prune_monophylies(void)
     {
     int i=0, j=0, k=0, l=0, num_nodes=0, trees_included=0, trees_excluded=0, numt=0, *taxa_fate = NULL, clannID =0, report=FALSE, taxaorder=0;
-    char *pruned_tree = NULL, *tmp = NULL, filename2[10000], temptree[TREE_LENGTH], filename3[10000], **taxa_fate_names = NULL;
-    FILE *pm_outfile = NULL; 
+    char *pruned_tree = NULL, *tmp = NULL, filename2[10000];
+    char *temptree = malloc(TREE_LENGTH * sizeof(char));
+    char filename3[10000], **taxa_fate_names = NULL;
+    FILE *pm_outfile = NULL;
+    if(!temptree) { printf2("Error: out of memory in prune_monophylies\n"); return; }
     select_longest=FALSE;
     filename2[0]= filename3[0] = '\0';
     temptree[0] = '\0';
@@ -22291,6 +22410,7 @@ void prune_monophylies(void)
     printf2("\nPruning finished. %d pruned trees with 4 or more taxa written to the file \"%s\"\n", trees_included, filename2);
    printf2("Information on pruned and retained taxa in each tree written to the file \"%s\"\n",  filename3); 
     printf2("%d pruned trees with less than 4 taxa were excluded\n",trees_excluded );
+    free(temptree);
     free(tmp);
     free(pruned_tree);
     fclose(pm_outfile);
