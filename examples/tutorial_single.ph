@@ -1,0 +1,12 @@
+(((((Human,Chimp),Gorilla),Orangutan),Macaque),((Mouse,Rat),(Dog,Cat)));
+((((Human,Chimp),(Gorilla,Orangutan)),Macaque),((Mouse,Rat),(Dog,Cat)));
+(((((Human,Chimp),Gorilla),Orangutan),Macaque),(Mouse,(Rat,(Dog,Cat))));
+((((Human,Chimp),Gorilla),Orangutan),((Mouse,Rat),(Dog,Cat)));
+(((Human,(Chimp,Gorilla)),Orangutan),((Mouse,Rat),Dog));
+(((((Human,Chimp),Gorilla),Orangutan),Macaque),(Mouse,Rat));
+((((Human,Chimp),Gorilla),Orangutan),(Mouse,(Rat,Dog)));
+(((((Human,Chimp),Gorilla),Orangutan),Macaque),((Mouse,Rat),Dog));
+((((Human,Chimp),Gorilla),(Orangutan,Macaque)),((Mouse,Rat),(Dog,Cat)));
+((((Human,Chimp),Gorilla),Orangutan),((Dog,Cat),(Mouse,Rat)));
+(((((Human,Chimp),Gorilla),Orangutan),Macaque),((Mouse,Dog),(Rat,Cat)));
+(((((Chimp,Human),Gorilla),Orangutan),Macaque),(Mouse,Rat));

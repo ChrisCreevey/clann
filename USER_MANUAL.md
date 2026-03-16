@@ -1,8 +1,11 @@
 # Clann User Manual
 
-**Version 4.3.0**
-Copyright Chris Creevey 2003–2026
+**Version 5.0.0**
+Copyright (C) 2003–2026 Chris Creevey <chris.creevey@gmail.com>
 http://www.creeveylab.org
+
+Distributed under the GNU General Public License v2 or later.
+See COPYING.txt for full licence terms.
 
 ---
 

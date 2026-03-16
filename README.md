@@ -7,7 +7,9 @@
 	*                  lab: http://www.creeveylab.org                   *
 	*                  email: chris.creevey@gmail.com                   *
 	*                                                                   *
-	*                 Copyright Chris Creevey 2003-2026                 *
+	*           Copyright (C) Chris Creevey 2003-2026                  *
+	*     SPDX-License-Identifier: GPL-2.0-or-later                    *
+	*  Free software under GNU GPL v2 or later — see COPYING.txt       *
 	*                                                                   *
 	*          HINT: Type "help" to see all available commands          *
 	*********************************************************************
