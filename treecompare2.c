@@ -1590,6 +1590,7 @@ void print_commands(int num)
 		{
 		printf2("\n\ttests\t\tyes | no\t\t\t*no (ML topology tests; criterion=ml only)");
 		printf2("\n\tnboot\t\t<integer>\t\t\t*1000 (SH bootstrap replicates)");
+		printf2("\n\tnthreads\t<integer>\t\t\t*%-3d (parallel SH bootstrap; default=all CPUs)", omp_get_num_procs());
 		printf2("\n\ttestsfile\t<filename>\t\t\t*mltest_results.txt");
 		}
 	printf2("\n");
@@ -6811,7 +6812,8 @@ static const char *ml_sig_label(double p, float alpha)
  */
 static void run_usertrees_ml_tests(
         float **all_gene_scores, float *all_total_scores,
-        int n_all, int nboot, float alpha, const char *testsfile_name)
+        int n_all, int nboot, float alpha, const char *testsfile_name,
+        int nthreads)
     {
     int i, b, k;
 
@@ -6899,12 +6901,19 @@ static void run_usertrees_ml_tests(
                 inform_idx[n_inf2++] = k;
                 }
             int exceed = 0;
+#ifdef _OPENMP
+#pragma omp parallel for reduction(+:exceed) num_threads(nthreads) schedule(static)
+#endif
             for(b = 0; b < nboot; b++)
                 {
+                /* per-replicate seed keeps threads independent and avoids
+                 * the non-thread-safe rand(); result is statistically
+                 * equivalent to a single stream for bootstrap purposes */
+                unsigned int local_seed = (unsigned int)((b + 1) * 1000003u);
                 double boot_sum = 0.0;
                 int s;
                 for(s = 0; s < n_inf2; s++)
-                    boot_sum += c_star[inform_idx[rand() % n_inf2]];
+                    boot_sum += c_star[inform_idx[rand_r(&local_seed) % n_inf2]];
                 if(boot_sum >= delta_total) exceed++;
                 }
             sh_p = (double)exceed / nboot;
@@ -6955,6 +6964,11 @@ void usertrees_search(void)
     /* ML topology test state */
     int    run_ml_tests = FALSE, nboot_tests = 1000;
     float  alpha_tests  = 0.05f;
+#ifdef _OPENMP
+    int    nthreads_tests = omp_get_num_procs();
+#else
+    int    nthreads_tests = 1;
+#endif
     char   testsfile_name[10000];
     int    n_all = 0, n_all_alloc = 0;
     float **all_gene_scores = NULL;
@@ -7058,6 +7072,11 @@ void usertrees_search(void)
                 nboot_tests = atoi(parsed_command[i+1]);
             if(strcmp(parsed_command[i], "testsfile") == 0)
                 strcpy(testsfile_name, parsed_command[i+1]);
+            if(strcmp(parsed_command[i], "nthreads") == 0)
+                {
+                nthreads_tests = atoi(parsed_command[i+1]);
+                if(nthreads_tests < 1) nthreads_tests = 1;
+                }
 
             }
         if(outfile == NULL)
@@ -7398,7 +7417,8 @@ void usertrees_search(void)
 					printf2("NOTE: only %d tree(s) scored; topology tests require at least 2 trees.\n", n_all);
 				else
 					run_usertrees_ml_tests(all_gene_scores, all_total_scores,
-										   n_all, nboot_tests, alpha_tests, testsfile_name);
+										   n_all, nboot_tests, alpha_tests, testsfile_name,
+										   nthreads_tests);
 				}
 
 			/* Cleanup ML test arrays */
