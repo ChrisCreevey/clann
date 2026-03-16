@@ -295,10 +295,10 @@ Output files include:
 - `*.onetoone` — putative one-to-one orthologs
 - `*.recon.dist` — distribution of duplication/loss events
 
-**Note on the delimiter:** The multicopy tutorial trees use `_` (underscore) as
-the species delimiter, which is the Clann default. `Human_alpha` and `Human_beta`
+**Note on the delimiter:** The multicopy tutorial trees use `.` (dot) as
+the species delimiter, which is the Clann default. `Human.alpha` and `Human.beta`
 are treated as two copies of species `Human`. If your data uses a different
-delimiter, set it with `set delimiter=X` before loading trees.
+delimiter, set it with `set delimiter_char=X` before loading trees.
 
 ---
 
