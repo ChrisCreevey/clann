@@ -1704,7 +1704,17 @@ void print_commands(int num)
 				printf2("\n\tduplications\t<value>\t\t\t\t*1.0\n\tlosses\t\t<value>\t\t\t\t*1.0");
 				printf2("\n\tnumspeciesrootings\t<value> | all\t\t*2\n\tnumgenerootings\t\t<value> | all\t\t*2\n");
 				}
-
+			if(criterion == 7)
+				{
+				printf2("\n\tmlbeta\t\t<float > 0>\t\t\t%.4f", ml_beta);
+				printf2("\n\tmlscale\t\tpaper | lust | lnl\t\t%s", ml_scale==1?"lust":ml_scale==2?"lnl":"paper");
+				}
+#ifdef _OPENMP
+			if(criterion == 0 || criterion == 2 || criterion == 3)
+				printf2("\n\tnthreads\t<integer number>\t\t*%-3d (parallel bootstrap replicates; default=all CPUs)", omp_get_num_procs());
+			else if(criterion == 6 || criterion == 7)
+				printf2("\n\tnthreads\t(single-threaded for RF/ML; parallelism not yet implemented)");
+#endif
 			printf2("\n\tconsensus\tstrict | majrule | minor | <proportion>\t*majrule");
 			printf2("\n\tconsensusfile\t<filename>\t\t\tconsensus.ph\n");
             printf2("\n");
@@ -11886,17 +11896,39 @@ void set_parameters(void)
         		}
       		if(isdigit==FALSE)
   				{
-      			printf2("ERROR: the value you entered (%s) is not an integer\n", parsed_command[i+1] );		
+      			printf2("ERROR: the value you entered (%s) is not an integer\n", parsed_command[i+1] );
   				}
   			else
-  				{	
+  				{
   				seed=atoi(parsed_command[i+1]);
   				srand((unsigned) (seed));
   				printf2("The seed value for the random number generator has been set to %d\n", seed);
   				}
         	}
+        if(strcmp(parsed_command[i], "mlbeta") == 0)
+            {
+            ml_beta = atof(parsed_command[i+1]);
+            if(ml_beta <= 0)
+                {
+                printf2("Error: mlbeta must be > 0\n");
+                ml_beta = 1.0f;
+                }
+            else
+                printf2("ML beta parameter set to %.4f\n", ml_beta);
+            }
+        if(strcmp(parsed_command[i], "mlscale") == 0)
+            {
+            if(strcmp(parsed_command[i+1], "lnl") == 0 || strcmp(parsed_command[i+1], "LNL") == 0)
+                { ml_scale = 2; printf2("ML scale set to lnl\n"); }
+            else if(strcmp(parsed_command[i+1], "lust") == 0 || strcmp(parsed_command[i+1], "LUST") == 0)
+                { ml_scale = 1; printf2("ML scale set to lust\n"); }
+            else if(strcmp(parsed_command[i+1], "paper") == 0 || strcmp(parsed_command[i+1], "PAPER") == 0)
+                { ml_scale = 0; printf2("ML scale set to paper\n"); }
+            else
+                printf2("Error: mlscale must be 'paper', 'lust', or 'lnl'\n");
+            }
         }
-    
+
     }
  
 
