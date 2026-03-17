@@ -6435,10 +6435,16 @@ void bootstrap_search(void)
 
 		
         
-        if(criterion == 0 || criterion == 2 || criterion == 3)     /* QFIT / DFIT / RF criteria */
+        if(criterion == 0 || criterion == 2 || criterion == 3 || criterion == 6 || criterion == 7)
             {
             /******* Parallel bootstrap over replicates *******/
             hsprint = FALSE;  /* suppress per-replicate HS settings banner during bootstrap */
+
+            /* fund_bipart_sets is a shared global recomputed per-replicate for RF/ML.
+             * Concurrent writes would corrupt the data, so force single-threaded
+             * bootstrap for those criteria.  Dfit/sfit/qfit parallelism is unaffected. */
+            if(criterion == 6 || criterion == 7) nthreads = 1;
+
 #ifdef _OPENMP
             if(nthreads > 1)
                 printf2("Bootstrap: %d replicates using %d threads\n", Nreps, nthreads);
@@ -6509,6 +6515,12 @@ void bootstrap_search(void)
                                 fund_scores[j][k][l] = stored_fund_scores[random_num][k][l];
                             }
                         }
+
+                    /* ---- Refresh RF/ML bipartitions from resampled source trees ---- */
+                    /* fund_bipart_sets is precomputed from the original trees; after
+                     * resampling we must rebuild it so compare_trees_rf/ml score
+                     * against the bootstrap replicate, not the original data. */
+                    if(criterion == 6 || criterion == 7) rf_precompute_fund_biparts();
 
                     /* ---- Check all taxa present ---- */
                     allpresent = TRUE;
