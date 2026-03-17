@@ -104,7 +104,8 @@ CONFIG_CLEAN_FILES =
 CONFIG_CLEAN_VPATH_FILES =
 am__installdirs = "$(DESTDIR)$(bindir)"
 PROGRAMS = $(bin_PROGRAMS)
-am_clann_OBJECTS = clann-treecompare2.$(OBJEXT) clann-utils.$(OBJEXT)
+am_clann_OBJECTS = clann-treecompare2.$(OBJEXT) clann-utils.$(OBJEXT) \
+	clann-viz.$(OBJEXT)
 clann_OBJECTS = $(am_clann_OBJECTS)
 am__DEPENDENCIES_1 =
 clann_DEPENDENCIES = $(am__DEPENDENCIES_1)
@@ -126,7 +127,7 @@ DEFAULT_INCLUDES = -I.@am__isrc@
 depcomp = $(SHELL) $(top_srcdir)/depcomp
 am__maybe_remake_depfiles = depfiles
 am__depfiles_remade = ./$(DEPDIR)/clann-treecompare2.Po \
-	./$(DEPDIR)/clann-utils.Po
+	./$(DEPDIR)/clann-utils.Po ./$(DEPDIR)/clann-viz.Po
 am__mv = mv -f
 AM_V_lt = $(am__v_lt_@AM_V@)
 am__v_lt_ = $(am__v_lt_@AM_DEFAULT_V@)
@@ -286,7 +287,7 @@ target_alias = @target_alias@
 top_build_prefix = @top_build_prefix@
 top_builddir = @top_builddir@
 top_srcdir = @top_srcdir@
-clann_SOURCES = treecompare2.c utils.c
+clann_SOURCES = treecompare2.c utils.c viz.c
 clann_LDADD = $(LDADD) $(LIBREADLINE) -lm
 clann_CFLAGS = -g -O0 -Wall -funroll-loops $(OPENMP_CFLAGS)
 clann_LDFLAGS = $(OPENMP_LDFLAGS)
@@ -398,6 +399,7 @@ distclean-compile:
 
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/clann-treecompare2.Po@am__quote@ # am--include-marker
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/clann-utils.Po@am__quote@ # am--include-marker
+@AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/clann-viz.Po@am__quote@ # am--include-marker
 
 $(am__depfiles_remade):
 	@$(MKDIR_P) $(@D)
@@ -446,6 +448,20 @@ clann-utils.obj: utils.c
 @AMDEP_TRUE@@am__fastdepCC_FALSE@	$(AM_V_CC)source='utils.c' object='clann-utils.obj' libtool=no @AMDEPBACKSLASH@
 @AMDEP_TRUE@@am__fastdepCC_FALSE@	DEPDIR=$(DEPDIR) $(CCDEPMODE) $(depcomp) @AMDEPBACKSLASH@
 @am__fastdepCC_FALSE@	$(AM_V_CC@am__nodep@)$(CC) $(DEFS) $(DEFAULT_INCLUDES) $(INCLUDES) $(AM_CPPFLAGS) $(CPPFLAGS) $(clann_CFLAGS) $(CFLAGS) -c -o clann-utils.obj `if test -f 'utils.c'; then $(CYGPATH_W) 'utils.c'; else $(CYGPATH_W) '$(srcdir)/utils.c'; fi`
+
+clann-viz.o: viz.c
+@am__fastdepCC_TRUE@	$(AM_V_CC)$(CC) $(DEFS) $(DEFAULT_INCLUDES) $(INCLUDES) $(AM_CPPFLAGS) $(CPPFLAGS) $(clann_CFLAGS) $(CFLAGS) -MT clann-viz.o -MD -MP -MF $(DEPDIR)/clann-viz.Tpo -c -o clann-viz.o `test -f 'viz.c' || echo '$(srcdir)/'`viz.c
+@am__fastdepCC_TRUE@	$(AM_V_at)$(am__mv) $(DEPDIR)/clann-viz.Tpo $(DEPDIR)/clann-viz.Po
+@AMDEP_TRUE@@am__fastdepCC_FALSE@	$(AM_V_CC)source='viz.c' object='clann-viz.o' libtool=no @AMDEPBACKSLASH@
+@AMDEP_TRUE@@am__fastdepCC_FALSE@	DEPDIR=$(DEPDIR) $(CCDEPMODE) $(depcomp) @AMDEPBACKSLASH@
+@am__fastdepCC_FALSE@	$(AM_V_CC@am__nodep@)$(CC) $(DEFS) $(DEFAULT_INCLUDES) $(INCLUDES) $(AM_CPPFLAGS) $(CPPFLAGS) $(clann_CFLAGS) $(CFLAGS) -c -o clann-viz.o `test -f 'viz.c' || echo '$(srcdir)/'`viz.c
+
+clann-viz.obj: viz.c
+@am__fastdepCC_TRUE@	$(AM_V_CC)$(CC) $(DEFS) $(DEFAULT_INCLUDES) $(INCLUDES) $(AM_CPPFLAGS) $(CPPFLAGS) $(clann_CFLAGS) $(CFLAGS) -MT clann-viz.obj -MD -MP -MF $(DEPDIR)/clann-viz.Tpo -c -o clann-viz.obj `if test -f 'viz.c'; then $(CYGPATH_W) 'viz.c'; else $(CYGPATH_W) '$(srcdir)/viz.c'; fi`
+@am__fastdepCC_TRUE@	$(AM_V_at)$(am__mv) $(DEPDIR)/clann-viz.Tpo $(DEPDIR)/clann-viz.Po
+@AMDEP_TRUE@@am__fastdepCC_FALSE@	$(AM_V_CC)source='viz.c' object='clann-viz.obj' libtool=no @AMDEPBACKSLASH@
+@AMDEP_TRUE@@am__fastdepCC_FALSE@	DEPDIR=$(DEPDIR) $(CCDEPMODE) $(depcomp) @AMDEPBACKSLASH@
+@am__fastdepCC_FALSE@	$(AM_V_CC@am__nodep@)$(CC) $(DEFS) $(DEFAULT_INCLUDES) $(INCLUDES) $(AM_CPPFLAGS) $(CPPFLAGS) $(clann_CFLAGS) $(CFLAGS) -c -o clann-viz.obj `if test -f 'viz.c'; then $(CYGPATH_W) 'viz.c'; else $(CYGPATH_W) '$(srcdir)/viz.c'; fi`
 
 ID: $(am__tagged_files)
 	$(am__define_uniq_tagged_files); mkid -fID $$unique
@@ -722,6 +738,7 @@ distclean: distclean-am
 	-rm -f $(am__CONFIG_DISTCLEAN_FILES)
 	-rm -f ./$(DEPDIR)/clann-treecompare2.Po
 	-rm -f ./$(DEPDIR)/clann-utils.Po
+	-rm -f ./$(DEPDIR)/clann-viz.Po
 	-rm -f Makefile
 distclean-am: clean-am distclean-compile distclean-generic \
 	distclean-hdr distclean-tags
@@ -771,6 +788,7 @@ maintainer-clean: maintainer-clean-am
 	-rm -rf $(top_srcdir)/autom4te.cache
 	-rm -f ./$(DEPDIR)/clann-treecompare2.Po
 	-rm -f ./$(DEPDIR)/clann-utils.Po
+	-rm -f ./$(DEPDIR)/clann-viz.Po
 	-rm -f Makefile
 maintainer-clean-am: distclean-am maintainer-clean-generic
 
