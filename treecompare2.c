@@ -9760,8 +9760,29 @@ void heuristic_search(int user, int print, int sample, int nreps)
                 if(print)printf2("Number of unique topologies scored: %d\n",swaps);
                 
                 
+                /**** Rescore retained supertrees to fix stale-cache scores from SPR search ****/
+                /* presenceof_SPRtaxa[] is never set to TRUE/FALSE, so compare_trees(TRUE)
+                 * always uses cached scores; scores_retained_supers[] may therefore reflect
+                 * a stale score from a different tree's context. Re-evaluate each retained
+                 * tree fresh (spr=FALSE) to get the correct score before displaying. */
+                for(i = 0; i < number_retained_supers && scores_retained_supers[i] != -1; i++)
+                    {
+                    if(criterion == 0 || criterion == 6 || criterion == 7)
+                        {
+                        if(tree_top != NULL) { dismantle_tree(tree_top); tree_top = NULL; }
+                        temp_top = NULL;
+                        tree_build(1, retained_supers[i], tree_top, TRUE, -1, 0);
+                        tree_top = temp_top;
+                        temp_top = NULL;
+                        for(k = 0; k < Total_fund_trees; k++) sourcetree_scores[k] = -1;
+                        if(criterion == 0) scores_retained_supers[i] = compare_trees(FALSE);
+                        else if(criterion == 6) scores_retained_supers[i] = compare_trees_rf(FALSE);
+                        else scores_retained_supers[i] = compare_trees_ml(FALSE);
+                        }
+                    }
+
                 /**** Print out the best trees found *******/
-                
+
                 tree[0] = '\0';
                 i=0; j=0;
 				if(do_histogram && criterion == 0) histogram_file = fopen(histogramfile_name, "w");
