@@ -304,13 +304,12 @@ delimiter, set it with `set delimiter_char=X` before loading trees.
 
 ## Part 6: Exploring tree space with visitedtrees
 
-This part demonstrates the `visitedtrees=` option, which records every unique
-topology visited during the heuristic search — across all replicates and threads
-— to a tab-separated file. The resulting data can be used for post-hoc analysis
-of the score landscape in tree space, helping to distinguish local optima from
-the global optimum and understand search behaviour.
-
-### 6.1 Running the search with landscape recording
+The `visitedtrees=<filename>` option records every unique topology visited during
+the search — across all replicates and threads — to a tab-separated file with
+columns `newick`, `score`, and `visit_count`. This is intended for post-hoc
+exploration of the score landscape in tree space: identifying local optima,
+understanding how well the search converged, and visualising which regions of
+topology space attracted the most search effort.
 
 ```bash
 clann hs examples/tutorial_single.ph \
@@ -318,235 +317,17 @@ clann hs examples/tutorial_single.ph \
     visitedtrees=landscape.tsv
 ```
 
-Or in interactive mode:
-```
-exe examples/tutorial_single.ph
-hs nreps=20 nthreads=4 visitedtrees=landscape.tsv
-```
-
-At the end of the search, Clann reports something like:
-```
-Number of unique topologies scored: 537
-Visited topology landscape written to: landscape.tsv
-  Unique topologies recorded: 537
-```
-
-### 6.2 Understanding the output file
-
-The file `landscape.tsv` has three tab-separated columns:
-
+The output looks like:
 ```
 newick	score	visit_count
-((Gorilla,Orangutan),((Chimp,Human),Macaque),((Mouse,Rat),(Dog,Cat)));	21.706350	163
-(((Cat,Mouse),((Dog,Gorilla),(Human,Chimp))),Macaque,(Rat,Orangutan));	34.956352	2
+(((((Human,Chimp),Gorilla),Orangutan),Macaque),((Mouse,Rat),(Dog,Cat)));	7.297618	163
 ...
 ```
 
-- **`newick`** — named-taxon unrooted Newick string; each row is a distinct topology
-- **`score`** — criterion score on first encounter (lower = better for dfit/RF; more negative = better for ML)
-- **`visit_count`** — total times this topology was proposed, including revisits within and across replicates
-
-A quick sanity check — total visits should far exceed the number of unique topologies,
-confirming that the search revisited regions of tree space:
-
-```bash
-awk -F'\t' 'NR>1{u++; v+=$3} END{print "unique:", u, "total visits:", v}' landscape.tsv
-# unique: 537   total visits: 8421
-```
-
-The best-scoring topology (the supertree) should appear in the file with a high
-`visit_count`, indicating that the search repeatedly converged on that region:
-
-```bash
-sort -t$'\t' -k2 -n landscape.tsv | head -3
-```
-
-### 6.3 Computing pairwise SPR distances
-
-To embed the visited topologies in a metric space, compute pairwise SPR distances
-between them. The SPR distance is particularly meaningful here because it mirrors
-the search moves Clann makes. Any tree-distance tool can be used; we illustrate
-with `rspr` (Whidden & Matsen 2014, freely available):
-
-```bash
-# Extract just the Newick strings (skip header line)
-tail -n +2 landscape.tsv | cut -f1 > visited_trees.ph
-
-# Compute pairwise SPR distances
-# rspr outputs an N×N matrix
-rspr visited_trees.ph > spr_matrix.txt
-```
-
-For datasets with hundreds of topologies, `rspr` runs in seconds. For thousands
-of topologies (large taxa sets, many reps), consider using the approximate mode
-or a quartet/RF distance as a faster proxy.
-
-### 6.4 Visualising the landscape
-
-Install the required Python packages if needed:
-
-```bash
-pip install pandas numpy scikit-learn matplotlib scipy networkx
-```
-
-#### Scatter plot (recommended first step)
-
-Save as `landscape_plot.py` and run with `python3 landscape_plot.py`:
-
-```python
-import pandas as pd
-import numpy as np
-from sklearn.manifold import MDS
-import matplotlib.pyplot as plt
-
-# Load Clann landscape output
-df = pd.read_csv("landscape.tsv", sep="\t")
-
-# Load pairwise SPR distance matrix (N×N, no header)
-D = np.loadtxt("spr_matrix.txt")
-
-# Non-metric MDS: embed N topologies in 2D using SPR distances
-mds = MDS(n_components=2, metric=False, dissimilarity="precomputed",
-          random_state=42, n_init=4, max_iter=500)
-coords = mds.fit_transform(D)
-
-# Scatter plot
-fig, ax = plt.subplots(figsize=(8, 6))
-sc = ax.scatter(
-    coords[:, 0], coords[:, 1],
-    s=np.sqrt(df["visit_count"]) * 6,   # size ∝ visit frequency
-    c=df["score"],
-    cmap="viridis_r",                    # low score (better) = bright yellow
-    alpha=0.75, linewidths=0.3, edgecolors="grey"
-)
-plt.colorbar(sc, ax=ax, label="Score (lower = better for dfit)")
-ax.set_xlabel("MDS axis 1")
-ax.set_ylabel("MDS axis 2")
-ax.set_title(f"Tree-space landscape  ({len(df)} topologies, MDS on SPR distances)")
-plt.tight_layout()
-plt.savefig("landscape_scatter.png", dpi=150)
-plt.show()
-```
-
-**How to read this plot:**
-- Each point is a unique topology the search visited.
-- **Point size** reflects how many times it was visited: large points = attractors.
-- **Point colour** reflects score: bright yellow = best (lowest) score, dark purple = poor score.
-- **Clusters** of large, bright points are basins of attraction — regions the search
-  repeatedly converges on. Ideally there is one dominant basin (the global optimum).
-- **Isolated dark points** are topologies visited only a few times (dead-ends or brief
-  local optima the search escaped quickly).
-
-#### Score histogram (quick diagnostic)
-
-```python
-fig, ax = plt.subplots(figsize=(7, 4))
-ax.hist(df["score"], bins=40, weights=df["visit_count"],
-        color="steelblue", edgecolor="white", linewidth=0.5)
-ax.set_xlabel("Score (lower = better)")
-ax.set_ylabel("Total visits (visit_count weighted)")
-ax.set_title("Distribution of search effort across score values")
-plt.tight_layout()
-plt.savefig("score_histogram.png", dpi=150)
-plt.show()
-```
-
-A narrow, unimodal histogram — most visits concentrated near the best score —
-indicates the search converged well. A broad or bimodal histogram suggests the
-search is split between two competing regions; try increasing `nreps`.
-
-#### Neighbour graph
-
-Edges connect topologies that are exactly one SPR move apart. Cliques in the
-graph reveal tight neighbourhoods that the search traversed freely:
-
-```python
-import networkx as nx
-
-G = nx.Graph()
-n = len(df)
-for i in range(n):
-    G.add_node(i, score=float(df["score"].iloc[i]),
-                  visits=int(df["visit_count"].iloc[i]))
-for i in range(n):
-    for j in range(i + 1, n):
-        if D[i, j] == 1:           # directly adjacent in SPR space
-            G.add_edge(i, j)
-
-sizes  = [G.nodes[v]["visits"] ** 0.5 * 15 for v in G]
-colors = [G.nodes[v]["score"] for v in G]
-pos    = nx.spring_layout(G, seed=42, k=0.5)
-fig, ax = plt.subplots(figsize=(9, 7))
-nx.draw_networkx(G, pos, ax=ax, node_size=sizes, node_color=colors,
-                 cmap="viridis_r", with_labels=False,
-                 edge_color="lightgrey", width=0.5)
-plt.colorbar(plt.cm.ScalarMappable(cmap="viridis_r"), ax=ax, label="Score")
-ax.set_title("SPR neighbour graph of visited topologies")
-ax.axis("off")
-plt.tight_layout()
-plt.savefig("neighbour_graph.png", dpi=150)
-plt.show()
-```
-
-#### 3D score surface
-
-A surface plot adds height (score) to the MDS layout, giving an intuitive
-"fitness landscape" view:
-
-```python
-from scipy.interpolate import griddata
-from mpl_toolkits.mplot3d import Axes3D  # noqa: F401
-
-xi = np.linspace(coords[:, 0].min(), coords[:, 0].max(), 200)
-yi = np.linspace(coords[:, 1].min(), coords[:, 1].max(), 200)
-xi, yi = np.meshgrid(xi, yi)
-zi = griddata(coords, df["score"].values, (xi, yi), method="linear")
-
-fig = plt.figure(figsize=(10, 7))
-ax  = fig.add_subplot(111, projection="3d")
-surf = ax.plot_surface(xi, yi, zi, cmap="viridis_r", alpha=0.85)
-fig.colorbar(surf, ax=ax, shrink=0.5, label="Score")
-ax.set_xlabel("MDS 1"); ax.set_ylabel("MDS 2"); ax.set_zlabel("Score")
-ax.set_title("Tree-space score surface")
-plt.tight_layout()
-plt.savefig("landscape_3d.png", dpi=150)
-plt.show()
-```
-
-Valleys in the surface correspond to low-score (good) regions; peaks are
-high-score (poor) regions. Deep, narrow valleys are local optima the search
-may get trapped in.
-
-### 6.5 Identifying local optima
-
-Sort the landscape file by score and look at the top-scoring topologies:
-
-```bash
-# Best 10 topologies by score
-sort -t$'\t' -k2 -n landscape.tsv | head -11
-```
-
-To check whether the top-scoring topologies are all the same shape or genuinely
-different topologies, load them back into Clann:
-
-```bash
-# Write best topologies to a file
-sort -t$'\t' -k2 -n landscape.tsv | awk -F'\t' 'NR>1 && NR<=11{print $1}' > best10.ph
-clann rfdists best10.ph
-```
-
-If the RF distances among the top 10 are all zero, the search found a single
-well-defined optimum. Non-zero RF distances indicate that several distinct
-topologies score nearly as well — worth investigating with `usertrees tests=yes`.
-
-### 6.6 Tips for better landscape coverage
-
-| Problem | Solution |
-|---------|----------|
-| Too few unique topologies recorded | Increase `nreps`; decrease `maxskips` or set `maxskips=0` |
-| All visits concentrated at one score | Search converged — the landscape is simple; trust the result |
-| Bimodal score histogram | Two competing optima; increase `sample` to improve starting trees |
-| Very high total visit count but few unique topologies | Search is revisiting the same region — add `swap=tbr` for more exploratory moves |
+For full details on computing pairwise SPR distances between the visited
+topologies, MDS embedding, and four visualisation approaches (scatter plot,
+score histogram, neighbour graph, 3D surface), see
+[NOTES_treespace_landscape.md](NOTES_treespace_landscape.md).
 
 ---
 
