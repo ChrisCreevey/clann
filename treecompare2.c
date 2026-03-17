@@ -96,6 +96,20 @@ typedef struct {
     int       zero_present; /* special-case: was key==0 inserted? */
 } VisitedSet;
 
+/* Open-addressed hash map for visited-topology landscape recording */
+typedef struct {
+    uint64_t  hash;        /* topology hash (key; 0 = empty slot)  */
+    float     score;       /* score on first visit                  */
+    int       visit_count; /* total visits across all reps          */
+    char     *newick;      /* heap-allocated named-taxon Newick     */
+} LandscapeEntry;
+
+typedef struct {
+    LandscapeEntry *slots;
+    size_t          capacity;  /* always a power of 2 */
+    size_t          count;
+} LandscapeMap;
+
 typedef struct {
     uint64_t *hashes;   /* sorted array of canonical bipartition hashes */
     int       count;
@@ -103,6 +117,13 @@ typedef struct {
 
 BipartSet *fund_bipart_sets = NULL;  /* [Total_fund_trees], precomputed once per analysis */
 
+
+/*********** LandscapeMap forward declarations *******/
+static LandscapeMap *lm_create(size_t cap);
+static void lm_free(LandscapeMap *lm);
+static void lm_record(LandscapeMap *lm, uint64_t hash, float score, const char *newick);
+static void lm_merge(LandscapeMap *dst, LandscapeMap *src);
+static void lm_write(LandscapeMap *lm, const char *filename);
 
 /*********** Function definitions ********************/
 
@@ -328,6 +349,10 @@ unsigned int thread_seed = 0;   /* per-thread random seed for rand_r(); see thre
 uint64_t *taxon_hash_vals = NULL; /* shared read-only: splitmix64 weight per taxon; set at taxa load time */
 VisitedSet *visited_set   = NULL; /* threadprivate: per-replicate visited topology hash set */
 VisitedSet *thread_visited_acc = NULL; /* threadprivate: accumulates all unique topos across reps in one thread */
+LandscapeMap *landscape_map = NULL; /* threadprivate: per-thread visited-topology landscape accumulator */
+/* Shared landscape globals (not threadprivate) */
+static char         g_landscape_file[4096] = ""; /* filename; empty = feature disabled */
+static LandscapeMap *g_landscape_map = NULL;      /* global accumulator across all threads */
 time_t  rep_start_time    = 0;    /* threadprivate: wall-clock time when current do_search() began */
 int     hs_do_print       = 0;    /* threadprivate: mirrors the 'print' param of do_search() */
 float   last_status_score = -1.0f;/* threadprivate: sprscore at last periodic status line (for improvement marker) */
@@ -348,7 +373,7 @@ int    hs_maxskips         = 1000;  /* shared: stop replicate when skip_streak r
     best_topology, best_topology_scores, number_retained_supers, \
     BESTSCORE, NUMSWAPS, \
     thread_seed, \
-    visited_set, thread_visited_acc, \
+    visited_set, thread_visited_acc, landscape_map, \
     rep_start_time, hs_do_print, last_status_score, \
     skip_streak, \
     fundamentals, presence_of_taxa, fund_scores, number_of_comparisons \
@@ -1627,6 +1652,7 @@ void print_commands(int num)
             printf2("\n\tnthreads\t<integer number>\t\t*%-3d (OpenMP threads; default=all CPUs; not available for criterion=recon)", omp_get_num_procs());
 #endif
             printf2("\n\tmaxskips\t<integer number>\t\t*1000 (stop replicate after this many consecutive already-visited SPR moves; 0=disabled)");
+            printf2("\n\tvisitedtrees\t<filename>\t\t\t(disabled) Record all visited topologies (TSV: newick, score, visit_count)");
             if(criterion == 0)
                 {
                 printf2("\n\tweight\t\tequal | comparisons\t\t");
@@ -7975,6 +8001,10 @@ static void hs_alloc_thread_state(void)
 
     /* Common to all threads: */
     thread_visited_acc = vs_create(1024);
+    if(g_landscape_file[0])
+        landscape_map = lm_create(8192);
+    else
+        landscape_map = NULL;
     for(k=0; k<Total_fund_trees; k++) sourcetree_scores[k] = -1;
     for(k=0; k<number_of_taxa; k++) presenceof_SPRtaxa[k] = -1;
     BESTSCORE = -1;
@@ -8012,6 +8042,8 @@ static void hs_free_thread_state(void)
         }
 
     if(thread_visited_acc) { vs_free(thread_visited_acc); thread_visited_acc = NULL; }
+    /* landscape_map should have been merged and freed in hs_merge_results; safety-free if not */
+    if(landscape_map) { lm_free(landscape_map); landscape_map = NULL; }
 
     if(!is_master)
         {
@@ -8126,6 +8158,132 @@ static void vs_merge(VisitedSet *dst, VisitedSet *src)
     for(i = 0; i < src->cap; i++)
         if(src->keys[i] != 0)
             vs_insert(dst, src->keys[i]);
+    }
+
+
+/*  LandscapeMap — open-addressed hash map for tree-space landscape recording -
+ *  Records every unique topology visited during hs, with its score and the
+ *  total number of times it was encountered (across all reps and threads).
+ *  Key 0 is reserved as empty; hash==0 is remapped to 1 (one ghost possible).
+ *  Enabled only when g_landscape_file[] is non-empty.
+ */
+static LandscapeMap *lm_create(size_t cap)
+    {
+    LandscapeMap *lm = malloc(sizeof(LandscapeMap));
+    if(!lm) memory_error(210);
+    lm->slots = calloc(cap, sizeof(LandscapeEntry));
+    if(!lm->slots) memory_error(211);
+    lm->capacity = cap;
+    lm->count = 0;
+    return lm;
+    }
+
+static void lm_free(LandscapeMap *lm)
+    {
+    size_t i;
+    if(!lm) return;
+    for(i = 0; i < lm->capacity; i++)
+        if(lm->slots[i].hash != 0 && lm->slots[i].newick)
+            { free(lm->slots[i].newick); lm->slots[i].newick = NULL; }
+    free(lm->slots);
+    free(lm);
+    }
+
+/* Grow lm to double capacity and re-insert all existing entries. */
+static void lm_grow(LandscapeMap *lm)
+    {
+    size_t i, newcap = lm->capacity * 2;
+    LandscapeEntry *newslots = calloc(newcap, sizeof(LandscapeEntry));
+    if(!newslots) return; /* keep old table if OOM */
+    for(i = 0; i < lm->capacity; i++)
+        {
+        if(lm->slots[i].hash == 0) continue;
+        size_t idx = (size_t)(lm->slots[i].hash & (newcap - 1));
+        while(newslots[idx].hash != 0) idx = (idx + 1) & (newcap - 1);
+        newslots[idx] = lm->slots[i]; /* shallow copy — newick pointer transferred */
+        }
+    free(lm->slots);
+    lm->slots = newslots;
+    lm->capacity = newcap;
+    }
+
+/*  lm_record: insert on first visit (stores score and newick); increment
+ *  visit_count on revisit.  newick may be NULL on revisit.
+ *  key==0 is remapped to 1 to keep slot 0 as the sentinel.
+ */
+static void lm_record(LandscapeMap *lm, uint64_t hash, float score, const char *newick)
+    {
+    size_t idx;
+    if(!lm) return;
+    if(hash == 0) hash = 1; /* remap sentinel */
+    /* Grow if >75% full */
+    if(lm->count >= lm->capacity * 3 / 4)
+        lm_grow(lm);
+    idx = (size_t)(hash & (lm->capacity - 1));
+    while(lm->slots[idx].hash != 0)
+        {
+        if(lm->slots[idx].hash == hash)
+            { lm->slots[idx].visit_count++; return; }
+        idx = (idx + 1) & (lm->capacity - 1);
+        }
+    /* New entry */
+    lm->slots[idx].hash        = hash;
+    lm->slots[idx].score       = score;
+    lm->slots[idx].visit_count = 1;
+    lm->slots[idx].newick      = newick ? strdup(newick) : NULL;
+    lm->count++;
+    }
+
+/*  lm_merge: merge src into dst.  visit_counts are summed; dst score is kept
+ *  (same topology → same score, so first-seen is correct).
+ */
+static void lm_merge(LandscapeMap *dst, LandscapeMap *src)
+    {
+    size_t i;
+    if(!dst || !src) return;
+    for(i = 0; i < src->capacity; i++)
+        {
+        LandscapeEntry *e = &src->slots[i];
+        if(e->hash == 0) continue;
+        /* Find slot in dst */
+        size_t idx = (size_t)(e->hash & (dst->capacity - 1));
+        /* Grow dst if needed before probing */
+        if(dst->count >= dst->capacity * 3 / 4) lm_grow(dst);
+        idx = (size_t)(e->hash & (dst->capacity - 1));
+        while(dst->slots[idx].hash != 0)
+            {
+            if(dst->slots[idx].hash == e->hash)
+                { dst->slots[idx].visit_count += e->visit_count; goto next_entry; }
+            idx = (idx + 1) & (dst->capacity - 1);
+            }
+        /* New entry in dst */
+        dst->slots[idx].hash        = e->hash;
+        dst->slots[idx].score       = e->score;
+        dst->slots[idx].visit_count = e->visit_count;
+        dst->slots[idx].newick      = e->newick ? strdup(e->newick) : NULL;
+        dst->count++;
+        next_entry:;
+        }
+    }
+
+/*  lm_write: write TSV to filename.  Columns: newick, score, visit_count.  */
+static void lm_write(LandscapeMap *lm, const char *filename)
+    {
+    size_t i;
+    FILE *fp;
+    if(!lm || !filename || !filename[0]) return;
+    fp = fopen(filename, "w");
+    if(!fp) { printf2("Error: could not open landscape file '%s' for writing\n", filename); return; }
+    fprintf(fp, "newick\tscore\tvisit_count\n");
+    for(i = 0; i < lm->capacity; i++)
+        {
+        if(lm->slots[i].hash == 0) continue;
+        fprintf(fp, "%s\t%.6f\t%d\n",
+                lm->slots[i].newick ? lm->slots[i].newick : "",
+                (double)lm->slots[i].score,
+                lm->slots[i].visit_count);
+        }
+    fclose(fp);
     }
 
 
@@ -8598,6 +8756,13 @@ static void hs_merge_results(char ***par_retained, float **par_scores, int *par_
         }
     *par_NUMSWAPS += NUMSWAPS;
     if(par_visited && thread_visited_acc) vs_merge(par_visited, thread_visited_acc);
+    /* Merge this thread's landscape map into the global accumulator */
+    if(g_landscape_file[0] && landscape_map)
+        {
+        lm_merge(g_landscape_map, landscape_map);
+        lm_free(landscape_map);
+        landscape_map = NULL;
+        }
     }
 #endif /* _OPENMP */
 
@@ -8620,7 +8785,11 @@ void heuristic_search(int user, int print, int sample, int nreps)
 
 
 	for(i=0; i<number_of_taxa; i++) presenceof_SPRtaxa[i] = -1;
-	
+
+    /* Reset landscape recording state for this hs call */
+    g_landscape_file[0] = '\0';
+    if(g_landscape_map) { lm_free(g_landscape_map); g_landscape_map = NULL; }
+
     best_tree = malloc(TREE_LENGTH*sizeof(char));
     if(!best_tree) memory_error(75);
     best_tree[0] = '\0';
@@ -8993,6 +9162,11 @@ void heuristic_search(int user, int print, int sample, int nreps)
 			else
 				printf2("Error: mlscale must be 'paper', 'lust', or 'lnl'\n");
 			}
+		if(strcmp(parsed_command[i], "visitedtrees") == 0)
+			{
+			strncpy(g_landscape_file, parsed_command[i+1], sizeof(g_landscape_file) - 1);
+			g_landscape_file[sizeof(g_landscape_file) - 1] = '\0';
+			}
 
 
         }
@@ -9021,9 +9195,13 @@ void heuristic_search(int user, int print, int sample, int nreps)
 
     if(!error)
         {
-		
+
 		if(sample > sup) sample=sup;
 		if(nreps > sup) nreps=sup;
+
+        /* Initialise global landscape map if visitedtrees= was specified */
+        if(g_landscape_file[0])
+            g_landscape_map = lm_create(8192);
 		
         if(hsprint==TRUE)
             {
@@ -9780,8 +9958,18 @@ void heuristic_search(int user, int print, int sample, int nreps)
                 }
                 if(print)printf2("\n");
                 if(print)printf2("Number of unique topologies scored: %d\n",swaps);
-                
-                
+
+                /* In sequential mode landscape_map is not NULL and holds all accumulated
+                 * topology records.  Merge into g_landscape_map now (parallel mode already
+                 * merged per-thread into g_landscape_map inside hs_merge_results). */
+                if(g_landscape_file[0] && landscape_map)
+                    {
+                    lm_merge(g_landscape_map, landscape_map);
+                    lm_free(landscape_map);
+                    landscape_map = NULL;
+                    }
+
+
                 /**** Rescore retained supertrees to fix stale-cache scores from SPR search ****/
                 /* presenceof_SPRtaxa[] is never set to TRUE/FALSE, so compare_trees(TRUE)
                  * always uses cached scores; scores_retained_supers[] may therefore reflect
@@ -9801,6 +9989,16 @@ void heuristic_search(int user, int print, int sample, int nreps)
                         else if(criterion == 6) scores_retained_supers[i] = compare_trees_rf(FALSE);
                         else scores_retained_supers[i] = compare_trees_ml(FALSE);
                         }
+                    }
+
+                /**** Write visited-topology landscape file if requested ******/
+                if(g_landscape_file[0] && g_landscape_map)
+                    {
+                    lm_write(g_landscape_map, g_landscape_file);
+                    printf2("Visited topology landscape written to: %s\n", g_landscape_file);
+                    printf2("  Unique topologies recorded: %zu\n", g_landscape_map->count);
+                    lm_free(g_landscape_map);
+                    g_landscape_map = NULL;
                     }
 
                 /**** Print out the best trees found *******/
@@ -13018,6 +13216,11 @@ int regraft(struct taxon * position, struct taxon * newbie, struct taxon * last,
 									if(criterion == 7)
 										tmpscore = compare_trees_ml(TRUE);
 
+                                    /* Record this topology in the landscape map (first visit: store score+newick) */
+                                    if(g_landscape_file[0])
+                                        lm_record(landscape_map ? landscape_map : g_landscape_map,
+                                                  topo_h, tmpscore, best_tree);
+
                                     /*printf("scores_retained_supers[0] = %f\n", scores_retained_supers[0]); */
                                     if(scores_retained_supers[0] == -1 || sprscore == -1)  /* Then this is the first tree to be checked */
                                         {
@@ -13114,6 +13317,10 @@ int regraft(struct taxon * position, struct taxon * newbie, struct taxon * last,
                                     else /* topology already scored this replicate — undo graft and skip */
                                         {
                                         skip_streak++;  /* one more consecutive already-visited hit */
+                                        /* Increment visit count in landscape map for this topology */
+                                        if(g_landscape_file[0])
+                                            lm_record(landscape_map ? landscape_map : g_landscape_map,
+                                                      topo_h, 0.0f, NULL);
                                         /* put the node back */
                                         position->next_sibling = newbie->next_sibling;
                                         position->prev_sibling = newbie->prev_sibling;
