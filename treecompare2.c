@@ -16687,7 +16687,6 @@ void sourcetree_dists(void)
 		y=0;
 		for(x=0; x<Total_fund_trees; x++)
 			{
-				printf2("x=%d\ty=%d\n", x, y);
 			unroottree(fundamentals[x]);
 			if(sourcetreetag[x])
 				{
@@ -16770,10 +16769,8 @@ void sourcetree_dists(void)
 				}
 			}
 		x = y = 0;
-		printf2("here\n");
 		for(i=0; i<Total_fund_trees; i++)
 			{
-			printf2("y=%d\n", y);
 			if(sourcetreetag[i])
 				{
 				
