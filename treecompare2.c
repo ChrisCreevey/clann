@@ -129,7 +129,7 @@ static void restore_singlecopy_filter(int *saved);
 #ifdef _OPENMP
 static void hs_alloc_thread_state(void);
 static void hs_free_thread_state(void);
-static void hs_merge_results(char ***par_retained, float **par_scores, int *par_n, float *par_best, int *par_NUMSWAPS);
+static void hs_merge_results(char ***par_retained, float **par_scores, int *par_n, float *par_best, int *par_NUMSWAPS, VisitedSet *par_visited);
 static int  hs_same_topology(char *t1, char *t2);
 #endif
 /* Visited-set and topology-hash (used in single- and multi-threaded builds) */
@@ -327,6 +327,7 @@ int malloc_check =0, count_now = FALSE, another_check =0;
 unsigned int thread_seed = 0;   /* per-thread random seed for rand_r(); see threadprivate block below */
 uint64_t *taxon_hash_vals = NULL; /* shared read-only: splitmix64 weight per taxon; set at taxa load time */
 VisitedSet *visited_set   = NULL; /* threadprivate: per-replicate visited topology hash set */
+VisitedSet *thread_visited_acc = NULL; /* threadprivate: accumulates all unique topos across reps in one thread */
 time_t  rep_start_time    = 0;    /* threadprivate: wall-clock time when current do_search() began */
 int     hs_do_print       = 0;    /* threadprivate: mirrors the 'print' param of do_search() */
 float   last_status_score = -1.0f;/* threadprivate: sprscore at last periodic status line (for improvement marker) */
@@ -347,7 +348,7 @@ int    hs_maxskips         = 1000;  /* shared: stop replicate when skip_streak r
     best_topology, best_topology_scores, number_retained_supers, \
     BESTSCORE, NUMSWAPS, \
     thread_seed, \
-    visited_set, \
+    visited_set, thread_visited_acc, \
     rep_start_time, hs_do_print, last_status_score, \
     skip_streak, \
     fundamentals, presence_of_taxa, fund_scores, number_of_comparisons \
@@ -7951,6 +7952,7 @@ static void hs_alloc_thread_state(void)
         }
 
     /* Common to all threads: */
+    thread_visited_acc = vs_create(1024);
     for(k=0; k<Total_fund_trees; k++) sourcetree_scores[k] = -1;
     for(k=0; k<number_of_taxa; k++) presenceof_SPRtaxa[k] = -1;
     BESTSCORE = -1;
@@ -7986,6 +7988,8 @@ static void hs_free_thread_state(void)
         for(k=0; k<number_of_taxa; k++) free(super_scores[k]);
         free(super_scores); super_scores = NULL;
         }
+
+    if(thread_visited_acc) { vs_free(thread_visited_acc); thread_visited_acc = NULL; }
 
     if(!is_master)
         {
@@ -8090,6 +8094,16 @@ static void vs_insert(VisitedSet *vs, uint64_t key)
         }
     vs->keys[idx] = key;
     vs->count++;
+    }
+
+static void vs_merge(VisitedSet *dst, VisitedSet *src)
+    {
+    size_t i;
+    if(!dst || !src) return;
+    if(src->zero_present) vs_insert(dst, 0);
+    for(i = 0; i < src->cap; i++)
+        if(src->keys[i] != 0)
+            vs_insert(dst, src->keys[i]);
     }
 
 
@@ -8503,7 +8517,7 @@ static int hs_same_topology(char *t1, char *t2)
  *  Must be called inside #pragma omp critical.
  */
 static void hs_merge_results(char ***par_retained, float **par_scores, int *par_n,
-                              float *par_best, int *par_NUMSWAPS)
+                              float *par_best, int *par_NUMSWAPS, VisitedSet *par_visited)
     {
     int mi, mj, ml, is_dup, old_n;
     float msc;
@@ -8561,6 +8575,7 @@ static void hs_merge_results(char ***par_retained, float **par_scores, int *par_
             }
         }
     *par_NUMSWAPS += NUMSWAPS;
+    if(par_visited && thread_visited_acc) vs_merge(par_visited, thread_visited_acc);
     }
 #endif /* _OPENMP */
 
@@ -9102,6 +9117,17 @@ void heuristic_search(int user, int print, int sample, int nreps)
             saved_tags = apply_singlecopy_filter();
 
         for(i=0; i<Total_fund_trees; i++) sourcetree_scores[i] = -1;
+        /* Reset per-search state so each heuristic_search call starts fresh.
+         * In sequential mode hs_alloc_thread_state is never called, so stale
+         * values from a previous run would otherwise persist as the acceptance
+         * threshold, distorting the second run's search and reported scores. */
+        for(k=0; k<number_retained_supers; k++)
+            {
+            retained_supers[k][0]      = '\0';
+            scores_retained_supers[k]  = -1;
+            }
+        BESTSCORE = -1;
+        NUMSWAPS  = 0;
         if(criterion == 1 || criterion == 4)
             {
             if(criterion==1)  /* DO MRP */
@@ -9369,6 +9395,7 @@ void heuristic_search(int user, int print, int sample, int nreps)
                     int    par_n        = 10;
                     float  par_best     = -1;
                     int    par_NUMSWAPS = 0;
+                    VisitedSet *par_visited_set = vs_create(1024);
 
                     par_retained = malloc(par_n * sizeof(char *));
                     par_scores   = malloc(par_n * sizeof(float));
@@ -9404,7 +9431,7 @@ void heuristic_search(int user, int print, int sample, int nreps)
 
                         #pragma omp critical (hs_merge)
                             {
-                            hs_merge_results(&par_retained, &par_scores, &par_n, &par_best, &par_NUMSWAPS);
+                            hs_merge_results(&par_retained, &par_scores, &par_n, &par_best, &par_NUMSWAPS, par_visited_set);
                             swaps += thr_swaps;
                             }
 
@@ -9422,6 +9449,8 @@ void heuristic_search(int user, int print, int sample, int nreps)
                     number_retained_supers = par_n;
                     BESTSCORE              = par_best;
                     NUMSWAPS               = par_NUMSWAPS;
+                    swaps = (int)par_visited_set->count + (par_visited_set->zero_present ? 1 : 0);
+                    vs_free(par_visited_set);
 
                     /* Re-allocate super_scores for post-loop use (freed by hs_free_thread_state). */
                     super_scores = malloc(number_of_taxa * sizeof(int *));
@@ -9469,6 +9498,7 @@ void heuristic_search(int user, int print, int sample, int nreps)
 						int    par_n        = 10;
 						float  par_best     = -1;
 						int    par_NUMSWAPS = 0;
+						VisitedSet *par_visited_set = vs_create(1024);
 
 						/* Pre-compute nreps starting trees with accumulated perturbation,
 						   matching the sequential random walk: rep 0 = NJ tree, rep i =
@@ -9524,7 +9554,7 @@ void heuristic_search(int user, int print, int sample, int nreps)
 
 							#pragma omp critical (hs_merge)
 								{
-								hs_merge_results(&par_retained, &par_scores, &par_n, &par_best, &par_NUMSWAPS);
+								hs_merge_results(&par_retained, &par_scores, &par_n, &par_best, &par_NUMSWAPS, par_visited_set);
 								swaps += thr_swaps;
 								}
 
@@ -9543,6 +9573,8 @@ void heuristic_search(int user, int print, int sample, int nreps)
 						number_retained_supers = par_n;
 						BESTSCORE              = par_best;
 						NUMSWAPS               = par_NUMSWAPS;
+						swaps = (int)par_visited_set->count + (par_visited_set->zero_present ? 1 : 0);
+						vs_free(par_visited_set);
 
 						/* Re-allocate super_scores for post-loop use (freed by hs_free_thread_state). */
 						super_scores = malloc(number_of_taxa * sizeof(int *));
@@ -10023,7 +10055,9 @@ int do_search(char *tree, int user, int print, int maxswaps, FILE *outfile, int 
 
             
             }
-    /* Free per-replicate visited-topology hash set */
+    /* Accumulate this rep's unique topologies into the thread-level accumulator,
+     * then free the per-replicate set. */
+    if(thread_visited_acc && visited_set) vs_merge(thread_visited_acc, visited_set);
     vs_free(visited_set);
     visited_set = NULL;
     free(temporary_tree);
