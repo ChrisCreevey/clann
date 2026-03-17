@@ -20,100 +20,8 @@
  *  59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  */
 
-#include "config.h"
-
-#include <ctype.h>
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
-#include <stddef.h>
-#include <stdarg.h>
-#include <time.h>
-#include <math.h>
-#include <signal.h>
-#include <unistd.h> /* For Unix Systems Builds */
-/*#include <process.h> */ /*  For Windows systems Builds */
-
-#ifdef HAVE_READLINE /* from config.h */
-#include <readline/readline.h>
-#include <readline/history.h>
-#endif
-
-#ifdef _OPENMP
-#include <omp.h>
-#endif
-
-
-/****** Define  ********/
-
-#define FUNDAMENTAL_NUM 1000
-#define TREE_LENGTH 1000000
-#define TAXA_NUM 1000
-#define NAME_LENGTH 1000
-#define LOG10E 0.43429448190325182765  /* log10(e): for L.U.st ML likelihood conversion */
-
-
-
-#ifndef TRUE
-#define TRUE 1
-#endif
-#ifndef FALSE
-#define FALSE 0
-#endif
-#ifndef TEMP
-#define TEMP 2
-#endif
-
-
-
-/******** Structure definitions *************/
-
-struct taxon {
-	
-	int name;					/* This holds number which refers to the name of the taxon at this node if it doesn't point to a daughter node */
-	char *fullname;				/* This holds the original name as it was given in the tree file, this allows us to record if there was parts of the name excluded earlier */
-	float score;
-	struct taxon *daughter;   	/* This points to a daughter node, but is only set if name is null */
-	struct taxon *parent;		/* This points to the parent node, however its only set on the first sibling at each level */
-	struct taxon *prev_sibling;	/* Points to the previous sibling at this node */
-	struct taxon *next_sibling;	/* Points to the next sibling at this node */
-	int tag;					/* A tag which is included as something which might be useful at some point */
-	int tag2;					/* sometimes one of something just isn't enough ;o) */
-	float loss;					/* A tag which will tell whether this node was lost.... only used for tree-mapping procedure */
-        float xpos;   /* used to fix the position of the node for graphical representation */
-        float ypos;	
-        int spr;
-		char weight[100];  /* this will be used when we have a weight to add to the node like with a Bootstrap proportion */
-		float length;
-		int *donor; /* THis is for the HGT analysis */
-	} taxon_type;
-
-/* Open-addressed hash set for visited tree topologies */
-typedef struct {
-    uint64_t *keys;        /* 0 = empty slot */
-    size_t    cap;         /* always a power of 2 */
-    size_t    count;
-    int       zero_present; /* special-case: was key==0 inserted? */
-} VisitedSet;
-
-/* Open-addressed hash map for visited-topology landscape recording */
-typedef struct {
-    uint64_t  hash;        /* topology hash (key; 0 = empty slot)  */
-    float     score;       /* score on first visit                  */
-    int       visit_count; /* total visits across all reps          */
-    char     *newick;      /* heap-allocated named-taxon Newick     */
-} LandscapeEntry;
-
-typedef struct {
-    LandscapeEntry *slots;
-    size_t          capacity;  /* always a power of 2 */
-    size_t          count;
-} LandscapeMap;
-
-typedef struct {
-    uint64_t *hashes;   /* sorted array of canonical bipartition hashes */
-    int       count;
-} BipartSet;
+#include "clann.h"
+#include "utils.h"
 
 BipartSet *fund_bipart_sets = NULL;  /* [Total_fund_trees], precomputed once per analysis */
 
@@ -131,15 +39,12 @@ void find(struct taxon * position);
 int run_main(int argc, char *argv[]);
 void input_file_summary(int do_all);
 void clean_exit(int error);
-char *xgets(char *s);
-char inttotext(int c);
 void totext(int c, char *array);
 int assign_taxa_name(char *name, int fund);
 void execute_command(char *filename, int do_all);
 int seperate_commands(char *command);
 int parse_command(char *command);
 void print_commands(int num);
-int texttoint(char c);
 void cal_fund_scores(int printfundscores);
 void pathmetric(char *string, int **scores);
 void weighted_pathmetric(char *string, float **scores, int fund_num);
@@ -185,7 +90,6 @@ void memory_error(int error_num);
 void print_named_tree(struct taxon * position, char *tree);
 void print_fullnamed_tree(struct taxon * position, char *tree, int fundtreenum);
 void print_tree(struct taxon * position, char *tree);
-int toint(char *number);
 void reallocate_retained_supers(void);
 void usertrees_search(void);
 void heuristic_search(int user, int print, int sample, int nreps);
@@ -219,7 +123,6 @@ int yposition1(struct taxon *position, int level);
 void yposition2(struct taxon *position, int deepest);
 void print_coordinates(struct taxon *position, char **treearray, int taxa_count, int mapping);
 void tree_coordinates(char *tree, int bootstrap, int build, int mapping, int fundnum);
-float tofloat(char *number);
 void generatetrees(void);
 void draw_histogram(FILE *outfile, int bins, float *results, int num_results);
 void consensus(int num_trees, char **trees, int num_reps, float percentage, FILE *outfile, FILE *guidetreefile);
@@ -315,7 +218,6 @@ int basic_tree_build (int c, char *treestring, struct taxon *parent, int fullnam
 int sort_tree(struct taxon *position);
 int spr_new(struct taxon * master, int maxswaps, int numspectries, int numgenetries);
 void do_log(void);
-void printf2(char *format, ...);
 void print_splash(void);
 
 
@@ -3558,41 +3460,7 @@ int assign_taxa_name(char *inputname,int fund)
 	return(answer);
 	}
 
-/* A simple version of the standard gets() library function which is unsafe on some systems......... code taken from C: the complete reference
-	by Herbert Schildt
-*/
-char *xgets(char *s)
-	{
-	char ch, *p = NULL;
-	int t = 0;
-        
-        for(t=0; t<80; t++)
-            s[t] = '\0';
-	p = s;  /* gets returns a pointer to s */
-
-	for(t=0; t<80; ++t) {
-		ch = getchar();
-
-		switch(ch) {
-			case '\n':
-				s[t] = '\0'; /* terminate the string */
-				return(p);
-				break;
-			case '\r':
-				s[t] = '\0'; /* terminate the string */
-				return(p);
-				break;
-			case '\b':
-				if(t>0) t--;
-				break;
-			default:
-				s[t] = ch;
-				break;
-			}
-	}
-	s[79] = '\0';
-	return p;
-}
+/* xgets: moved to utils.c */
 
 
 
@@ -4401,42 +4269,7 @@ int unroottree(char * tree)
     }
 
 
-int texttoint(char c)
-    {
-    switch(c)
-        {
-        case '1' :
-            return(1);
-            break;
-        case '2' :
-            return(2);
-            break;
-        case '3':
-            return(3);
-            break;
-        case '4':
-            return(4);
-            break;
-        case '5':
-            return(5);
-            break;
-        case '6':
-            return(6);
-            break;
-        case '7':
-            return(7);
-            break;
-        case '8':
-            return(8);
-            break;
-        case '9':
-            return(9);
-            break;
-        default:
-            return(0);
-            break;
-        }
-    }
+/* texttoint: moved to utils.c */
 
     
     /* This function returns the number that represents the given tree */
@@ -4713,48 +4546,12 @@ void intTotree(int tree_num, char *array, int num_taxa)
     free(string);
     }
 
-int toint(char *number)
-    {
-    int charactercount = 0, charactercount1 =0, result = 0, j=0;
-    
-    while(number[charactercount] != '\0') charactercount ++;
-    for(j=charactercount; j>0; j--)
-        {
-        result += ( pow(10, (charactercount-j)) * (texttoint(number[j-1])));
-        }
-    return(result);
-    }
+/* toint: moved to utils.c */
 
 
 
 
-float tofloat(char *number)
-    {
-    int charactercount = 0,charactercount1 = 0, j=0;
-    float real = 0, fraction = 0, total = 0;
-
-
-
-    while(number[charactercount] !=  '.' && number[charactercount] != '\0') charactercount ++;
-    for(j=charactercount; j>0; j--)
-        {
-        real += ( pow(10, (charactercount-j)) * (texttoint(number[j-1])));
-        }
-    
-    
-    if(number[charactercount] == '.')
-        {
-        charactercount1 = charactercount;
-        while(number[charactercount1] != '\0') charactercount1++;
-        for(j=charactercount+1; j<charactercount1; j++)
-            {
-            fraction += ( pow(10,(charactercount-j))*(texttoint(number[j])));
-            }
-        }
-	if(real == 0 && fraction == 0) total = 0;
-	else total = real+fraction;
-    return(total);
-    }
+/* tofloat: moved to utils.c */
      
 
 
@@ -5557,7 +5354,7 @@ struct taxon * make_taxon(void)
 	
 	if(count_now)malloc_check++;
 	
-	position = malloc(sizeof(taxon_type));
+	position = malloc(sizeof(struct taxon));
 	if(!position)  memory_error(34);
 		
 	position->name = -1;
@@ -5860,44 +5657,7 @@ void totext(int c, char *array)
         }
     }
 
-char inttotext(int c)
-    {
-   
-    	
-    switch(c)
-        {
-        case 1 :
-            return('1');
-            break;
-        case 2 :
-            return('2');
-            break;
-        case 3:
-            return('3');
-            break;
-        case 4:
-            return('4');
-            break;
-        case 5:
-            return('5');
-            break;
-        case 6:
-            return('6');
-            break;
-        case 7:
-            return('7');
-            break;
-        case 8:
-            return('8');
-            break;
-        case 9:
-            return('9');
-            break;
-        default:
-            return('0');
-            break;
-        }
-    }
+/* inttotext: moved to utils.c */
 
 
 
@@ -23143,27 +22903,5 @@ void do_log(void)
 	}
 
 
-void printf2(char *format, ...)
-	{
-    va_list ap;
-    va_list ap2;
-
-    if(print_log == TRUE)
-    	{	
-	    va_start(ap, format);
-	    va_copy(ap2, ap);
-
-	    vfprintf(logfile, format, ap);
-	    va_end(ap);
-
-	    vprintf(format, ap2);
-	    va_end(ap2);
-		}
-	else
-		{
-		va_start(ap, format);
-		vprintf(format, ap);
-		va_end(ap);
-		}
-	}
+/* printf2: moved to utils.c */
 
