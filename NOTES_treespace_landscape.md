@@ -55,6 +55,7 @@ awk -F'\t' 'NR>1{u++; v+=$3} END{print "unique:", u, "total visits:", v}' landsc
 
 The best-scoring topology should appear with a high visit count, confirming that
 the search repeatedly converged on that region:
+
 ```bash
 sort -t$'\t' -k2 -n landscape.tsv | head -5
 ```
@@ -78,7 +79,7 @@ Using `rspr`:
 tail -n +2 landscape.tsv | cut -f1 > visited_trees.ph
 
 # Compute pairwise SPR distances — outputs an N×N matrix
-rspr visited_trees.ph > spr_matrix.txt
+rspr -pairwise -unrooted -no-symmetric-pairwise < visited_trees.ph > spr_matrix.txt
 ```
 
 For hundreds of topologies `rspr` runs in seconds. For thousands (large taxon

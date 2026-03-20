@@ -105,7 +105,7 @@ CONFIG_CLEAN_VPATH_FILES =
 am__installdirs = "$(DESTDIR)$(bindir)"
 PROGRAMS = $(bin_PROGRAMS)
 am_clann_OBJECTS = clann-treecompare2.$(OBJEXT) clann-utils.$(OBJEXT) \
-	clann-viz.$(OBJEXT)
+	clann-topology.$(OBJEXT) clann-viz.$(OBJEXT)
 clann_OBJECTS = $(am_clann_OBJECTS)
 am__DEPENDENCIES_1 =
 clann_DEPENDENCIES = $(am__DEPENDENCIES_1)
@@ -126,8 +126,9 @@ am__v_at_1 =
 DEFAULT_INCLUDES = -I.@am__isrc@
 depcomp = $(SHELL) $(top_srcdir)/depcomp
 am__maybe_remake_depfiles = depfiles
-am__depfiles_remade = ./$(DEPDIR)/clann-treecompare2.Po \
-	./$(DEPDIR)/clann-utils.Po ./$(DEPDIR)/clann-viz.Po
+am__depfiles_remade = ./$(DEPDIR)/clann-topology.Po \
+	./$(DEPDIR)/clann-treecompare2.Po ./$(DEPDIR)/clann-utils.Po \
+	./$(DEPDIR)/clann-viz.Po
 am__mv = mv -f
 AM_V_lt = $(am__v_lt_@AM_V@)
 am__v_lt_ = $(am__v_lt_@AM_DEFAULT_V@)
@@ -287,7 +288,7 @@ target_alias = @target_alias@
 top_build_prefix = @top_build_prefix@
 top_builddir = @top_builddir@
 top_srcdir = @top_srcdir@
-clann_SOURCES = treecompare2.c utils.c viz.c
+clann_SOURCES = treecompare2.c utils.c topology.c viz.c
 clann_LDADD = $(LDADD) $(LIBREADLINE) -lm
 clann_CFLAGS = -g -O0 -Wall -funroll-loops $(OPENMP_CFLAGS)
 clann_LDFLAGS = $(OPENMP_LDFLAGS)
@@ -397,6 +398,7 @@ mostlyclean-compile:
 distclean-compile:
 	-rm -f *.tab.c
 
+@AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/clann-topology.Po@am__quote@ # am--include-marker
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/clann-treecompare2.Po@am__quote@ # am--include-marker
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/clann-utils.Po@am__quote@ # am--include-marker
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/clann-viz.Po@am__quote@ # am--include-marker
@@ -448,6 +450,20 @@ clann-utils.obj: utils.c
 @AMDEP_TRUE@@am__fastdepCC_FALSE@	$(AM_V_CC)source='utils.c' object='clann-utils.obj' libtool=no @AMDEPBACKSLASH@
 @AMDEP_TRUE@@am__fastdepCC_FALSE@	DEPDIR=$(DEPDIR) $(CCDEPMODE) $(depcomp) @AMDEPBACKSLASH@
 @am__fastdepCC_FALSE@	$(AM_V_CC@am__nodep@)$(CC) $(DEFS) $(DEFAULT_INCLUDES) $(INCLUDES) $(AM_CPPFLAGS) $(CPPFLAGS) $(clann_CFLAGS) $(CFLAGS) -c -o clann-utils.obj `if test -f 'utils.c'; then $(CYGPATH_W) 'utils.c'; else $(CYGPATH_W) '$(srcdir)/utils.c'; fi`
+
+clann-topology.o: topology.c
+@am__fastdepCC_TRUE@	$(AM_V_CC)$(CC) $(DEFS) $(DEFAULT_INCLUDES) $(INCLUDES) $(AM_CPPFLAGS) $(CPPFLAGS) $(clann_CFLAGS) $(CFLAGS) -MT clann-topology.o -MD -MP -MF $(DEPDIR)/clann-topology.Tpo -c -o clann-topology.o `test -f 'topology.c' || echo '$(srcdir)/'`topology.c
+@am__fastdepCC_TRUE@	$(AM_V_at)$(am__mv) $(DEPDIR)/clann-topology.Tpo $(DEPDIR)/clann-topology.Po
+@AMDEP_TRUE@@am__fastdepCC_FALSE@	$(AM_V_CC)source='topology.c' object='clann-topology.o' libtool=no @AMDEPBACKSLASH@
+@AMDEP_TRUE@@am__fastdepCC_FALSE@	DEPDIR=$(DEPDIR) $(CCDEPMODE) $(depcomp) @AMDEPBACKSLASH@
+@am__fastdepCC_FALSE@	$(AM_V_CC@am__nodep@)$(CC) $(DEFS) $(DEFAULT_INCLUDES) $(INCLUDES) $(AM_CPPFLAGS) $(CPPFLAGS) $(clann_CFLAGS) $(CFLAGS) -c -o clann-topology.o `test -f 'topology.c' || echo '$(srcdir)/'`topology.c
+
+clann-topology.obj: topology.c
+@am__fastdepCC_TRUE@	$(AM_V_CC)$(CC) $(DEFS) $(DEFAULT_INCLUDES) $(INCLUDES) $(AM_CPPFLAGS) $(CPPFLAGS) $(clann_CFLAGS) $(CFLAGS) -MT clann-topology.obj -MD -MP -MF $(DEPDIR)/clann-topology.Tpo -c -o clann-topology.obj `if test -f 'topology.c'; then $(CYGPATH_W) 'topology.c'; else $(CYGPATH_W) '$(srcdir)/topology.c'; fi`
+@am__fastdepCC_TRUE@	$(AM_V_at)$(am__mv) $(DEPDIR)/clann-topology.Tpo $(DEPDIR)/clann-topology.Po
+@AMDEP_TRUE@@am__fastdepCC_FALSE@	$(AM_V_CC)source='topology.c' object='clann-topology.obj' libtool=no @AMDEPBACKSLASH@
+@AMDEP_TRUE@@am__fastdepCC_FALSE@	DEPDIR=$(DEPDIR) $(CCDEPMODE) $(depcomp) @AMDEPBACKSLASH@
+@am__fastdepCC_FALSE@	$(AM_V_CC@am__nodep@)$(CC) $(DEFS) $(DEFAULT_INCLUDES) $(INCLUDES) $(AM_CPPFLAGS) $(CPPFLAGS) $(clann_CFLAGS) $(CFLAGS) -c -o clann-topology.obj `if test -f 'topology.c'; then $(CYGPATH_W) 'topology.c'; else $(CYGPATH_W) '$(srcdir)/topology.c'; fi`
 
 clann-viz.o: viz.c
 @am__fastdepCC_TRUE@	$(AM_V_CC)$(CC) $(DEFS) $(DEFAULT_INCLUDES) $(INCLUDES) $(AM_CPPFLAGS) $(CPPFLAGS) $(clann_CFLAGS) $(CFLAGS) -MT clann-viz.o -MD -MP -MF $(DEPDIR)/clann-viz.Tpo -c -o clann-viz.o `test -f 'viz.c' || echo '$(srcdir)/'`viz.c
@@ -736,6 +752,7 @@ clean-am: clean-binPROGRAMS clean-generic mostlyclean-am
 
 distclean: distclean-am
 	-rm -f $(am__CONFIG_DISTCLEAN_FILES)
+	-rm -f ./$(DEPDIR)/clann-topology.Po
 	-rm -f ./$(DEPDIR)/clann-treecompare2.Po
 	-rm -f ./$(DEPDIR)/clann-utils.Po
 	-rm -f ./$(DEPDIR)/clann-viz.Po
@@ -786,6 +803,7 @@ installcheck-am:
 maintainer-clean: maintainer-clean-am
 	-rm -f $(am__CONFIG_DISTCLEAN_FILES)
 	-rm -rf $(top_srcdir)/autom4te.cache
+	-rm -f ./$(DEPDIR)/clann-topology.Po
 	-rm -f ./$(DEPDIR)/clann-treecompare2.Po
 	-rm -f ./$(DEPDIR)/clann-utils.Po
 	-rm -f ./$(DEPDIR)/clann-viz.Po

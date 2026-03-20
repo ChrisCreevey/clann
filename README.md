@@ -46,6 +46,8 @@ A complete reference for every command and its options is provided in **[USER_MA
 - Output file reference
 - Troubleshooting
 
+A tutorial walking through the new features in clann is provided in **[TUTORIAL.md](TUTORIAL.md)**.
+
 # Usage
 
 ## Direct command-line (recommended)

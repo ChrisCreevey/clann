@@ -24,6 +24,7 @@
 #include "utils.h"
 #include "topology.h"
 #include "viz.h"
+#include "tree_io.h"
 
 BipartSet *fund_bipart_sets = NULL;  /* [Total_fund_trees], precomputed once per analysis */
 
@@ -34,10 +35,10 @@ BipartSet *fund_bipart_sets = NULL;  /* [Total_fund_trees], precomputed once per
 
 void find(struct taxon * position);
 int run_main(int argc, char *argv[]);
-void input_file_summary(int do_all);
+/* moved to tree_io.h */ /* input_file_summary */
 void clean_exit(int error);
 void totext(int c, char *array);
-int assign_taxa_name(char *name, int fund);
+/* moved to tree_io.h */ /* assign_taxa_name */
 void execute_command(char *filename, int do_all);
 int seperate_commands(char *command);
 int parse_command(char *command);
@@ -111,20 +112,20 @@ void get_lengths(struct taxon *position);
 void generatetrees(void);
 /* draw_histogram: declared in viz.h */
 void consensus(int num_trees, char **trees, int num_reps, float percentage, FILE *outfile, FILE *guidetreefile);
-void input_fund_tree(char *intree, int fundnum);
-int nexusparser(FILE *nexusfile);
+/* moved to tree_io.h */ /* input_fund_tree */
+/* moved to tree_io.h */ /* nexusparser */
 void do_consensus(void);
-int comment(FILE *file);
-void showtrees(int savet);
-void exclude(int do_all);
-void returntree(char *temptree);
-void returntree_fullnames(char *temptree, int treenum);
-void quick(float ** items, int count);
-void qs(float **items, int left, int right);
-void include(int do_all);
-void exclude_taxa(int do_all);
+/* moved to tree_io.h */ /* comment */
+/* moved to tree_io.h */ /* showtrees */
+/* moved to tree_io.h */ /* exclude */
+/* moved to tree_io.h */ /* returntree */
+/* moved to tree_io.h */ /* returntree_fullnames */
+/* moved to tree_io.h */ /* quick (now static in tree_io.c) */
+/* moved to tree_io.h */ /* qs (now static in tree_io.c) */
+/* moved to tree_io.h */ /* include */
+/* moved to tree_io.h */ /* exclude_taxa */
 void sourcetree_dists();
-void prune_taxa_for_exclude(struct taxon * super_pos, int *tobeexcluded);
+/* moved to tree_io.h */ /* prune_taxa_for_exclude (now static in tree_io.c) */
 void spr_dist(void);
 int string_SPR(char * string); /* carries out random SPR operations on the tree */
 void neighbor_joining( int brlens, char *tree, int names);
@@ -2605,12 +2606,14 @@ void execute_command(char *commandline, int do_all)
     
 
 
+/* input_fund_tree: moved to tree_io.c */
+#if 0
 void input_fund_tree(char *intree, int fundnum)
 	{
 	int i=0,j=0, k=0, r=0, tree_length = 0, taxaposition = 0, tottaxaintree = 0;
 	char temp[NAME_LENGTH], **temp_tree_names = NULL;
 	float *temp_tree_weights = NULL;
-	
+
 	/* count the number of commas in the tree string to figure out the number of taxa in the tree */
 	i=0;
 	while(intree[i] != ';' )
@@ -2864,23 +2867,15 @@ void input_fund_tree(char *intree, int fundnum)
 		stored_presence_of_taxa = NULL;
 				}
 	}
+#endif /* input_fund_tree: moved to tree_io.c */
 
 
-int comment(FILE *file)
-	{
-	char c;
-	c = getc(file);
-	while(c != ']' && !feof(file))
-		{
-		if(c == '[') comment(file);
-		c = getc(file);
-		}
-	if(!feof(file)) return(FALSE);
-	else return(TRUE);
-	}
+/* comment: moved to tree_io.c */
 
 
 
+/* nexusparser: moved to tree_io.c */
+#if 0
 int nexusparser(FILE *nexusfile)
 	{
 	char c, begin[6] = {'b', 'e', 'g', 'i', 'n', '\0'}, translate[10] = {'t','r','a','n','s','l','a','t','e','\0'}, tree[5] = {'t','r','e','e','\0'};
@@ -3187,6 +3182,7 @@ int nexusparser(FILE *nexusfile)
 		}
 	return(error);
 	}
+#endif /* nexusparser: moved to tree_io.c */
 
 
 
@@ -3199,6 +3195,8 @@ int nexusparser(FILE *nexusfile)
 
 
 
+/* input_file_summary: moved to tree_io.c */
+#if 0
 void input_file_summary(int do_all)
     {
     int i=0, j=0, k=0, l=0, limit, previous_limit, limit_reached, singlecopy=0;
@@ -3311,9 +3309,12 @@ void input_file_summary(int do_all)
 	
 	free(size_of_trees);
     }
+#endif /* input_file_summary: moved to tree_io.c */
 
 
 
+/* assign_taxa_name: moved to tree_io.c */
+#if 0
 int assign_taxa_name(char *inputname,int fund)
 	{
 	int i =0, j=0, k=0, answer = -1, taxa_on_tree = 0;
@@ -3444,6 +3445,7 @@ int assign_taxa_name(char *inputname,int fund)
 	free(delim);
 	return(answer);
 	}
+#endif /* assign_taxa_name: moved to tree_io.c */
 
 /* xgets: moved to utils.c */
 
@@ -14160,6 +14162,8 @@ void consensus(int num_trees, char **trees, int num_reps, float percentage, FILE
 
 
 
+/* showtrees: moved to tree_io.c */
+#if 0
 void showtrees(int savet)
 	{
 	int worst = -2, best = -2,savetrees = FALSE, found = TRUE, taxachosen = 0, counter = 0, mode[5] = {TRUE, FALSE, FALSE, FALSE, FALSE}, start = 0, end = Total_fund_trees, error = FALSE, i=0, j=0, k=0, l=0, num=0, equalto = -1, greaterthan =0, lessthan = 1000000000, taxa_count = 0;
@@ -14578,14 +14582,11 @@ void showtrees(int savet)
 	free(containstaxa);
 	free(tempsourcetreetag);
 	}
+#endif /* showtrees: moved to tree_io.c */
 
-/* quick sort */
-void quick(float ** items, int count)
-	{
-	qs(items, 0, count-1);
-	}
-
-/* the quick sort */
+/* quick: moved to tree_io.c (static) */
+/* qs: moved to tree_io.c (static) */
+#if 0
 void qs(float **items, int left, int right)
 	{
 	int i, j;

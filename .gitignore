@@ -113,3 +113,9 @@ compile
 all_topo.ph
 alltrees.ph
 mltest_results.txt
+examples/top10sups_tutorial_single.ph
+examples/test_trees.ph
+examples/MDS_scatter_plot.py
+examples/spr_matrix.txt
+examples/visited_trees.ph
+examples/visited_trees_2.ph
