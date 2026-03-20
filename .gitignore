@@ -110,3 +110,13 @@ l2
 t
 otu
 compile
+examples/visited_trees_2.ph
+examples/visited_trees.ph
+examples/top10sups_tutorial_single.ph
+examples/test_trees.ph
+examples/spr_matrix.txt
+examples/MDS_scatter_plot.py
+examples/alltrees.ph
+mltest_results.txt
+alltrees.ph
+all_topo.ph
