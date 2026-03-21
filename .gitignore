@@ -6,6 +6,7 @@
 # Compiled binary and object files
 # -----------------------------------------------------------------------------
 clann
+clann_test
 *.o
 *.Po
 *.0
