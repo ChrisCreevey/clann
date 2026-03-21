@@ -439,3 +439,30 @@ compare_trees_rf   (called for every candidate supertree)
     │
     return total score   (search minimises this)
 ```
+
+# Why collisions are astronomically unlikely with real splitmix64 values
+
+The above uses tiny toy values (5, 3, 6, 9) for illustration, which is exactly where intuition would suggest that XOR collisions are common and you can easily get a split hash that equals a taxon hash. With the real scheme, the values are full **64-bit integers** chosen to spread uniformly across the entire 2⁶⁴ space.
+
+The probability of any two distinct subsets of taxa producing the same XOR hash is approximately **1 / 2⁶⁴** (roughly 1 in 18 quintillion). This follows from the fact that if two subsets S₁ and S₂ differ by at least one taxon *t*, their XOR hashes differ by h(t). For them to collide, you'd need h(t) = XOR of the remaining differing elements — which happens with probability 1/2⁶⁴ since h(t) was drawn pseudo-randomly and independently.
+
+## The specific collision risks
+
+There are several distinct ways things could go wrong:
+
+- A split hash could equal a **taxon hash** — indistinguishable from a leaf
+- Two **different splits** could hash to the same value — a false shared bipartition
+- A split hash could equal **zero** — misidentified as trivial and silently dropped
+
+All three have probability ≈ 1/2⁶⁴ per pair, and since even large trees have at most thousands of splits, the total collision probability across an entire analysis remains negligibly small.
+
+## The deeper issue: splitmix64 is a *finaliser*, not a true RNG
+
+The taxon weights aren't random — they're **deterministic** functions of the taxon index (0, 1, 2, ...). splitmix64 is used as a *mixing function* to make consecutive integers look uncorrelated in XOR arithmetic, but a determined adversary (or an unlucky dataset) could in principle construct inputs where collisions occur. This is a known limitation of XOR hashing schemes.
+
+In practice for phylogenetics, where taxon indices are just sequential integers assigned at load time, the splitmix64 finaliser does produce values that behave as if independently random for all realistic inputs. But this is an **engineering assumption**, not a theorem.
+
+## The practical bottom line
+
+The above claim that "two different subsets will *almost certainly* produce different XOR sums" is accurate but should really say: with 64-bit splitmix64-mixed weights, the probability of any collision across a typical phylogenetic analysis (thousands of trees, hundreds of taxa) is so small it can be safely ignored — but it is not zero, and with toy-sized values like in the worked example, you will see collisions regularly.
+
