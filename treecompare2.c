@@ -228,7 +228,7 @@ char **original_fundamentals = NULL;   /* originals preserved for reconstruct wh
 int   autoprunemono_active   = 0;      /* set to TRUE when autoprunemono=yes was used at load time */
 int  *numtaxaintrees = NULL, fullnamesnum = 0, fullnamesassignments = 1, fundamental_assignments = 0, tree_length_assignments = 1, parsed_command_assignments = 1, name_assignments = 0, *taxa_incidence = NULL, number_of_taxa = 0, Total_fund_trees = 0, *same_tree = NULL, **Cooccurrance = NULL, NUMSWAPS = 0;
 int ***fund_scores = NULL, ***stored_fund_scores = NULL, **super_scores = NULL, *number_of_comparisons = NULL, *stored_num_comparisons = NULL, **presence_of_taxa = NULL, **stored_presence_of_taxa = NULL, *presenceof_SPRtaxa = NULL;
-int seed, num_commands = 0, number_retained_supers = 10, number_of_steps = 3, largest_tree = 0, smallest_tree = 1000000, criterion = 0, parts = 0, **total_coding = NULL, *coding_from_tree = NULL, total_nodes = 0, quartet_normalising = 3, splits_weight = 2, dweight =1, *from_tree = NULL, method = 2, tried_regrafts = 0, hsprint = TRUE, max_name_length = NAME_LENGTH, got_weights = FALSE, num_excluded_trees = 0, num_excluded_taxa = 0, calculated_fund_scores = FALSE, select_longest=FALSE;
+int seed, num_commands = 0, number_retained_supers = 10, number_of_steps = 99999, largest_tree = 0, smallest_tree = 1000000, criterion = 0, parts = 0, **total_coding = NULL, *coding_from_tree = NULL, total_nodes = 0, quartet_normalising = 3, splits_weight = 2, dweight =1, *from_tree = NULL, method = 3, tried_regrafts = 0, hsprint = TRUE, max_name_length = NAME_LENGTH, got_weights = FALSE, num_excluded_trees = 0, num_excluded_taxa = 0, calculated_fund_scores = FALSE, select_longest=FALSE;
 struct taxon *tree_top = NULL, *temp_top = NULL, *temp_top2 = NULL, *branchpointer = NULL, *longestseq = NULL;
 float *scores_retained_supers = NULL, *partition_number = NULL, num_partitions = 0, total_partitions = 0, sprscore = -1, *best_topology_scores = NULL, **weighted_scores = NULL, *sourcetree_scores = NULL, *tree_weights = NULL;
 float *score_of_bootstraps = NULL, *yaptp_results = NULL, largest_length = 0, dup_weight = 1, loss_weight = 1, hgt_weight = 1, BESTSCORE = -1;
@@ -255,7 +255,8 @@ float  par_progress_best   = -1.0f; /* best score seen so far across ALL paralle
 float  par_last_print_score= -1.0f; /* par_progress_best at last status line (thread-0 only) */
 time_t par_search_start    = 0;     /* wall-clock time when the parallel region began */
 int    skip_streak         = 0;     /* threadprivate: consecutive already-visited skips since last new topology */
-int    hs_maxskips         = 1000;  /* shared: stop replicate when skip_streak reaches this (0=disabled) */
+int    hs_maxskips         = -1;    /* shared: stop replicate when skip_streak reaches this (0=disabled, -1=auto: N*N) */
+int    hs_maxskips_is_auto = 1;    /* 1=auto-scale to N*N at search start; 0=user has set an explicit value */
 
 /****** OpenMP thread-private state: one independent copy per thread in parallel regions ******/
 #ifdef _OPENMP
@@ -814,7 +815,7 @@ int main(int argc, char *argv[])
                                     if(number_of_taxa > 0)
                                         {
                                   
-                                        heuristic_search(TRUE, TRUE, 10000, 10);
+                                        heuristic_search(TRUE, TRUE, 10000, 25);
 										
                                         }
                                     else
@@ -1539,7 +1540,7 @@ void print_commands(int num)
         if(delimiter) printf2("\n\t(Note: delimiter mode is ON -- multicopy gene trees will be automatically\n\texcluded from the search; use 'maxnamelen=full' to disable)\n");
         if(criterion == 0 || criterion == 2 || criterion == 3 || criterion==5 || criterion==6 || criterion==7)
             {
-            printf2("\n\tsample\t\t<integer number>\t\t*10,000\n\tnreps\t\t<integer number>\t\t*10");
+            printf2("\n\tsample\t\t<integer number>\t\t*10,000\n\tnreps\t\t<integer number>\t\t*25");
             printf2("\n\tswap\t\tnni | spr | tbr\t\t\t");
             if(method == 1) printf2("nni");
             if(method == 2) printf2("spr"); 
@@ -1551,7 +1552,7 @@ void print_commands(int num)
 #ifdef _OPENMP
             printf2("\n\tnthreads\t<integer number>\t\t*%-3d (OpenMP threads; default=all CPUs; not available for criterion=recon)", omp_get_num_procs());
 #endif
-            printf2("\n\tmaxskips\t<integer number>\t\t*1000 (stop replicate after this many consecutive already-visited SPR moves; 0=disabled)");
+            printf2("\n\tmaxskips\t<integer number>\t\t*auto=N² (stop replicate after this many consecutive already-visited moves; 0=disabled)");
             printf2("\n\tvisitedtrees\t<filename>\t\t\t(disabled) Record all visited topologies (TSV: newick, score, visit_count)");
             if(criterion == 0)
                 {
@@ -8320,6 +8321,7 @@ static void hs_merge_results(char ***par_retained, float **par_scores, int *par_
 void heuristic_search(int user, int print, int sample, int nreps)
     {
     int i=0, j=0, k=0, l=0, swaps = 0, keep = 0, nbest = 0, start = 2, error = FALSE, numswaps = 1000000, different=TRUE, do_histogram = FALSE, here = FALSE, **taxa_comp = NULL, bins = 20, found = FALSE, missing_method = 1, random_num, numspectries = 2, numgenetries = 2, nthreads = 1;
+    hs_maxskips_is_auto = 1;   /* reset: auto-scale N² unless user sets maxskips= this call */
     char *tree = NULL, c = '\0', *best_tree = NULL, *temptree = NULL, **starths = NULL, userfilename[10000], useroutfile[10000], histogramfile_name[10000];
     FILE *userfile = NULL, *outfile = NULL, *paupfile = NULL, *histogram_file = NULL;
     float distance=0, number=0, *startscores = NULL, used_weights = 0;
@@ -8676,9 +8678,10 @@ void heuristic_search(int user, int print, int sample, int nreps)
 			if(hs_maxskips < 0)
 				{
 				printf2("Error: maxskips must be >= 0\n");
-				hs_maxskips = 1000;
+				hs_maxskips = -1;
 				error = TRUE;
 				}
+			hs_maxskips_is_auto = 0;   /* user has set an explicit value — don't auto-scale */
 			}
 		if(strcmp(parsed_command[i], "mlbeta") == 0)
 			{
@@ -8749,6 +8752,12 @@ void heuristic_search(int user, int print, int sample, int nreps)
 		if(sample > sup) sample=sup;
 		if(nreps > sup) nreps=sup;
 
+        /* Auto-scale maxskips to N² when no explicit value was given.
+         * This makes the stopping criterion proportional to tree size:
+         * N=10 → 100, N=20 → 400, N=30 → 900, N=50 → 2500. */
+        if(hs_maxskips_is_auto)
+            hs_maxskips = number_of_taxa * number_of_taxa;
+
         /* Initialise global landscape map if visitedtrees= was specified */
         if(g_landscape_file[0])
             g_landscape_map = lm_create(8192);
@@ -8800,7 +8809,12 @@ void heuristic_search(int user, int print, int sample, int nreps)
                 printf2("\tOpenMP threads = %d (of %d available)\n", nthreads, omp_get_num_procs());
 #endif
                 if(hs_maxskips > 0)
-                    printf2("\tMax consecutive visited skips (maxskips) = %d\n", hs_maxskips);
+                    {
+                    if(hs_maxskips_is_auto)
+                        printf2("\tMax consecutive visited skips (maxskips) = %d (auto: N²=%d²)\n", hs_maxskips, number_of_taxa);
+                    else
+                        printf2("\tMax consecutive visited skips (maxskips) = %d\n", hs_maxskips);
+                    }
                 else
                     printf2("\tMax consecutive visited skips (maxskips) = disabled\n");
                 if(criterion != 5)
@@ -9250,21 +9264,36 @@ void heuristic_search(int user, int print, int sample, int nreps)
 						int    par_NUMSWAPS = 0;
 						VisitedSet *par_visited_set = vs_create(1024);
 
-						/* Pre-compute nreps starting trees with accumulated perturbation,
-						   matching the sequential random walk: rep 0 = NJ tree, rep i =
-						   rep i-1 + rand()%%10 SPR moves (same logic as sequential path). */
+						/* Pre-compute nreps starting trees with diverse perturbation.
+						   Rep 0 = NJ tree (best single starting point).
+						   Reps 1..nreps/2: NJ + 10-20 independent SPR moves (near-NJ),
+						   each applied freshly from the original NJ tree — not accumulated.
+						   Reps nreps/2+1..: NJ + 30-50 independent SPR moves (far),
+						   again each freshly from the original NJ tree.
+						   Independence across reps ensures diverse basin sampling. */
 						char **start_trees = malloc(nreps * sizeof(char *));
+						char *nj_tree_save = malloc(TREE_LENGTH * sizeof(char));
+						strcpy(nj_tree_save, temptree);   /* save pristine NJ tree */
 						for(k=0; k<nreps; k++)
 							{
-							if(k != 0)
+							start_trees[k] = malloc(TREE_LENGTH * sizeof(char));
+							if(k == 0)
 								{
-								random_num = (int)fmod(rand(), 10);
+								strcpy(start_trees[k], nj_tree_save);
+								}
+							else
+								{
+								strcpy(temptree, nj_tree_save);   /* restart from NJ each time */
+								if(k <= nreps / 2)
+									random_num = 10 + (int)fmod(rand(), 11);   /* 10-20 moves (near) */
+								else
+									random_num = 30 + (int)fmod(rand(), 21);   /* 30-50 moves (far) */
 								for(j=0; j<random_num; j++)
 									string_SPR(temptree);
+								strcpy(start_trees[k], temptree);
 								}
-							start_trees[k] = malloc(TREE_LENGTH * sizeof(char));
-							strcpy(start_trees[k], temptree);
 							}
+						free(nj_tree_save);
 
 						/* Initialise shared merge buffers. */
 						par_retained = malloc(par_n * sizeof(char *));
@@ -9338,20 +9367,31 @@ void heuristic_search(int user, int print, int sample, int nreps)
 #endif
 						{
 						/* ---- Sequential nreps loop ---- */
+						/* Diverse perturbation: rep 0 = NJ, reps 1..nreps/2 = NJ+10-20 SPR,
+						   reps nreps/2+1.. = NJ+30-50 SPR.  Each rep starts fresh from NJ. */
+						{
+						char *nj_tree_save = malloc(TREE_LENGTH * sizeof(char));
+						strcpy(nj_tree_save, temptree);
 						if(criterion == 6 || criterion == 7) rf_precompute_fund_biparts();
 						for(i=0; i<nreps; i++)
 							{
 							if(print) printf2("\nRepetition %d of %d:", i+1, nreps);
 							if(i != 0)
 								{
-								random_num =(int)fmod(rand(), 10);
+								strcpy(temptree, nj_tree_save);   /* restart from NJ each time */
+								if(i <= nreps / 2)
+									random_num = 10 + (int)fmod(rand(), 11);   /* 10-20 moves (near) */
+								else
+									random_num = 30 + (int)fmod(rand(), 21);   /* 30-50 moves (far) */
 								for(j=0; j<random_num; j++)
-									string_SPR(temptree);  /* do a random number of spr permutations to the tree */
+									string_SPR(temptree);
 								}
 							strcpy(tree, temptree);
 							returntree(tree);
 							swaps += do_search(tree, TRUE, print, numswaps, outfile, numspectries,numgenetries);
 							}
+						free(nj_tree_save);
+						}
 						}
 					}
 				else/* if we are to use a tree (or trees) from a file as the starting tree */
