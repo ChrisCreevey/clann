@@ -25,6 +25,7 @@
 #include "topology.h"
 #include "viz.h"
 #include "tree_io.h"
+#include "main.h"
 
 BipartSet *fund_bipart_sets = NULL;  /* [Total_fund_trees], precomputed once per analysis */
 
@@ -279,6 +280,10 @@ static int   *g_hs_num_comp_snap        = NULL;
 
 
 
+/* CLI helpers, main, seperate_commands, print_splash, print_commands,
+ * parse_command, recount_from_tree, autoprunemono_apply, execute_command:
+ * moved to main.c */
+#if 0
 /* ===== CLI direct-command interface ===================================
  *
  * Allows CLANN to be called as:
@@ -2605,6 +2610,8 @@ void execute_command(char *commandline, int do_all)
 
         }
     }
+#endif
+
     
 
 
@@ -3453,6 +3460,8 @@ int assign_taxa_name(char *inputname,int fund)
 
 
 
+/* clean_exit: moved to main.c */
+#if 0
 void clean_exit(int error)
     {
     int i=0, j=0;
@@ -3598,6 +3607,8 @@ void clean_exit(int error)
 	if(logfile!= NULL)
 		fclose(logfile);
     }
+#endif
+
     
 
 /* calculate the path metric for each of the fundamental trees */
@@ -7504,6 +7515,8 @@ void usertrees_search(void)
 	free(best_tree);
     }
 
+/* controlc1-5: moved to main.c */
+#if 0
 void controlc1(int signal)
 	{
 	char *c = NULL;
@@ -7633,6 +7646,8 @@ void controlc5(int signal)
 
 	free(c);
 	}
+#endif
+
 
 
 /* ---------- Single-copy auto-filter helpers ----------
@@ -11499,6 +11514,8 @@ int MRP_matrix(char **trees, int num_trees, int consensus)
 	}
 
 
+/* set_parameters: moved to main.c */
+#if 0
 void set_parameters(void)
     {
     int i=0, j=0, isdigit=TRUE, this=FALSE;
@@ -11610,6 +11627,8 @@ void set_parameters(void)
         }
 
     }
+#endif
+
  
 
 /* this function calculates the score of a supertree to a set of source trees using the criterion of Matrix representation using Compatibility */
@@ -22053,6 +22072,8 @@ void tips(int num)
 
 
 /* This function controls the redirection of output from CLann to a log file (off by default), allow the use of the overwritten "printf" function (below) */
+/* do_log: moved to main.c */
+#if 0
 void do_log(void)
 	{
 	int error = FALSE, newlogfile=FALSE, start=FALSE, stop=FALSE, i=0;
@@ -22145,6 +22166,8 @@ void do_log(void)
 
 
 	}
+#endif
+
 
 
 /* printf2: moved to utils.c */
