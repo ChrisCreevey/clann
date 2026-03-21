@@ -68,13 +68,15 @@ extern double sup;
 extern char   delimiter_char;
 extern char   inputfilename[10000];
 
-/* tree_top / temp_top are threadprivate in treecompare2.c.
- * The threadprivate pragma is repeated here so that tree_io.c is
- * standards-compliant per OpenMP §2.15.2. */
+/* The following variables are threadprivate in treecompare2.c.
+ * The threadprivate pragma must be repeated in every TU that uses them,
+ * per OpenMP §2.15.2. */
 extern struct taxon *tree_top;
 extern struct taxon *temp_top;
 #ifdef _OPENMP
-#pragma omp threadprivate(tree_top, temp_top)
+#pragma omp threadprivate(tree_top, temp_top, \
+                          fundamentals, presence_of_taxa, \
+                          number_of_comparisons, sourcetree_scores)
 #endif
 
 /* -----------------------------------------------------------------------

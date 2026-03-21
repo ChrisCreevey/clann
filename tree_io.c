@@ -22,6 +22,11 @@
 #include "tree_io.h"
 #include "viz.h"
 
+/* Private (static) forward declarations */
+static void quick(float **items, int count);
+static void qs(float **items, int left, int right);
+static void prune_taxa_for_exclude(struct taxon *super_pos, int *tobeexcluded);
+
 void input_fund_tree(char *intree, int fundnum)
 	{
 	int i=0,j=0, k=0, r=0, tree_length = 0, taxaposition = 0, tottaxaintree = 0;

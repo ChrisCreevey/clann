@@ -1514,7 +1514,9 @@ void print_commands(int num)
 		{
 		printf2("\n\ttests\t\tyes | no\t\t\t*no (ML topology tests; criterion=ml only)");
 		printf2("\n\tnboot\t\t<integer>\t\t\t*1000 (SH bootstrap replicates)");
+#ifdef _OPENMP
 		printf2("\n\tnthreads\t<integer>\t\t\t*%-3d (parallel SH bootstrap; default=all CPUs)", omp_get_num_procs());
+#endif
 		printf2("\n\ttestsfile\t<filename>\t\t\t*mltest_results.txt");
 		}
 	printf2("\n");
@@ -14614,8 +14616,11 @@ void qs(float **items, int left, int right)
 	if(left < j) qs(items, left, j);
 	if(i < right) qs(items, i, right);
 	}
+#endif /* qs: moved to tree_io.c (static) */
 
 
+/* exclude: moved to tree_io.c */
+#if 0
 void exclude(int do_all)
 	{
 	int worst = -2, best = -2,savetrees = FALSE, found = TRUE, taxachosen = 0, counter = 0, mode[10] = {FALSE, FALSE, FALSE, FALSE, FALSE, FALSE, FALSE, FALSE, FALSE, FALSE}, start = 0, end = Total_fund_trees, error = FALSE, i=0, j=0, k=0, l=0, num=0, equalto = -1, greaterthan =1000000000, lessthan = 0, taxa_count = 0;
@@ -15102,7 +15107,10 @@ void exclude(int do_all)
 	free(command);
 
 	}
+#endif /* exclude: moved to tree_io.c */
 
+/* returntree: moved to tree_io.c */
+#if 0
 void returntree(char *temptree) /* returns the tree with the names of the taxa included */
 	{
 	char string_num[10];
@@ -15165,7 +15173,10 @@ void returntree(char *temptree) /* returns the tree with the names of the taxa i
 	free(string);
 
 	}
+#endif /* returntree: moved to tree_io.c */
 
+/* returntree_fullnames: moved to tree_io.c */
+#if 0
 void returntree_fullnames(char *temptree, int treenum) /* returns the tree with the names of the taxa included */
 	{
 	char string_num[10];
@@ -15231,8 +15242,11 @@ void returntree_fullnames(char *temptree, int treenum) /* returns the tree with 
 	free(string);
 
 	}
+#endif /* returntree_fullnames: moved to tree_io.c */
 
 
+/* include: moved to tree_io.c */
+#if 0
 void include(int do_all)
 	{
 	int worst = -2, best = -2,savetrees = FALSE, found = TRUE, taxachosen = 0, counter = 0, mode[5] = {FALSE, FALSE, FALSE, FALSE, FALSE}, start = 0, end = Total_fund_trees, error = FALSE, i=0, j=0, k=0, l=0, num=0, equalto = -1, greaterthan =number_of_taxa, lessthan = 3, taxa_count = 0;
@@ -15546,6 +15560,7 @@ void include(int do_all)
 	free(containstaxa);
 	free(tempsourcetreetag);
 	}
+#endif /* include: moved to tree_io.c */
 
 void sourcetree_dists(void)
 	{
@@ -16039,6 +16054,8 @@ void sourcetree_dists(void)
 	free(string);
 	}
 
+/* exclude_taxa: moved to tree_io.c */
+#if 0
 void exclude_taxa(int do_all)
 	{
 	char *temptree, *pruned_tree = NULL, *tmp = malloc(TREE_LENGTH * sizeof(char)), *command = NULL, tmpfilename[10000], previnputfilename[10000];
@@ -16212,11 +16229,14 @@ void exclude_taxa(int do_all)
 		}
 
 	}
+#endif /* exclude_taxa: moved to tree_io.c */
 
 	/* Prune tree: This is a recursive function that is called for every node position of the supertree
 	it then checks to see if any of the siblings on this node are not contained in the fundamental tree, these siblings are then turned off.
 	This only turns off taxa, pointer siblings will have to be turned off using a separate program */
 
+/* prune_taxa_for_exclude: moved to tree_io.c */
+#if 0
 void prune_taxa_for_exclude(struct taxon * super_pos, int *tobeexcluded)
 	{
 
@@ -16243,6 +16263,7 @@ void prune_taxa_for_exclude(struct taxon * super_pos, int *tobeexcluded)
 		}	
 	
 	}
+#endif /* prune_taxa_for_exclude: moved to tree_io.c */
 
 void spr_dist(void)
 	{
