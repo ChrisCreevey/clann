@@ -40,4 +40,7 @@ char *xgets(char *s);
 /* Logging printf */
 void  printf2(char *format, ...);
 
+/* Error handler — defined in treecompare2.c; declared here for universal access */
+void  memory_error(int error_num);
+
 #endif /* CLANN_UTILS_H */

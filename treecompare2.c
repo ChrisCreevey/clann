@@ -25,6 +25,11 @@
 #include "topology.h"
 #include "viz.h"
 #include "tree_io.h"
+#include "tree_ops.h"
+#include "scoring.h"
+#include "consensus.h"
+#include "reconcile.h"
+#include "prune.h"
 #include "main.h"
 
 BipartSet *fund_bipart_sets = NULL;  /* [Total_fund_trees], precomputed once per analysis */
@@ -49,8 +54,8 @@ void pathmetric(char *string, int **scores);
 void weighted_pathmetric(char *string, float **scores, int fund_num);
 int unroottree(char * tree);
 void alltrees_search(int user);
-static int * apply_singlecopy_filter(void);
-static void restore_singlecopy_filter(int *saved);
+int * apply_singlecopy_filter(void);
+void restore_singlecopy_filter(int *saved);
 #ifdef _OPENMP
 static void hs_alloc_thread_state(void);
 static void hs_free_thread_state(void);
@@ -3612,6 +3617,8 @@ void clean_exit(int error)
     
 
 /* calculate the path metric for each of the fundamental trees */
+/* cal_fund_scores: moved to scoring.c */
+#if 0
 void cal_fund_scores(int printfundscores)
     {
     int i =0, j=0, k=0;
@@ -3660,11 +3667,14 @@ void cal_fund_scores(int printfundscores)
         }
     if(dists != NULL) fclose(dists);
     }
+#endif
 
 
 
 
     
+/* pathmetric: moved to scoring.c */
+#if 0
 void pathmetric(char *string, int **scores)
     {
     int i=0, j=0, charactercount = -1, **closeP = NULL, variable = 0; 
@@ -3756,7 +3766,10 @@ void pathmetric(char *string, int **scores)
     free(closeP);
     closeP = NULL;
     }
+#endif
     
+/* pathmetric_internals: moved to scoring.c */
+#if 0
 void pathmetric_internals(char *string, struct taxon * species_tree, int **scores)
     {
     int i=0, j=0, charactercount = -1, **closeP = NULL, variable = 0, **within = NULL, *presence = NULL; 
@@ -3897,8 +3910,11 @@ void pathmetric_internals(char *string, struct taxon * species_tree, int **score
 	free(closeP);
     closeP = NULL;
     }
+#endif
 
 
+/* calculate_withins: moved to scoring.c */
+#if 0
 void calculate_withins(struct taxon *position, int **within, int *presence)
 	{
 	int i=0;
@@ -3921,7 +3937,10 @@ void calculate_withins(struct taxon *position, int **within, int *presence)
 		position = position->next_sibling;
 		}
 	}
+#endif
 
+/* weighted_pathmetric: moved to scoring.c */
+#if 0
 void weighted_pathmetric(char *string, float **scores, int fund_num)
     {
     int i=0, j=0, k=0, charactercount = -1, variable = 0, node_number = -1, open = 0; 
@@ -4075,6 +4094,7 @@ void weighted_pathmetric(char *string, float **scores, int fund_num)
 	free(node_weights);
 
     }
+#endif
 
 
 
@@ -4085,6 +4105,8 @@ void weighted_pathmetric(char *string, float **scores, int fund_num)
 
 
 
+/* unroottree: moved to tree_ops.c */
+#if 0
 int unroottree(char * tree)
     {
     int i=0, j=0, k=0, l=0, m=0, basecount = 0, parentheses=0, did_unrooting=FALSE;
@@ -4267,12 +4289,15 @@ int unroottree(char * tree)
     free(restof);
     return(did_unrooting);
     }
+#endif
 
 
 /* texttoint: moved to utils.c */
 
     
     /* This function returns the number that represents the given tree */
+/* treeToInt: moved to tree_ops.c */
+#if 0
 int treeToInt(char *tree)
     {
     int i;
@@ -4336,6 +4361,7 @@ int treeToInt(char *tree)
     
     return(1);
     }
+#endif
  
  int sort_tree(struct taxon *position)   
  	{
@@ -4370,6 +4396,8 @@ int treeToInt(char *tree)
     
     
     /* this function builds a tree given its number and the number of taxa */
+/* intTotree: moved to tree_ops.c */
+#if 0
 void intTotree(int tree_num, char *array, int num_taxa)
     {
     int  i = 0, j=0, k=0, l=0, exit = 0, bracket_count = 0;
@@ -4545,6 +4573,7 @@ void intTotree(int tree_num, char *array, int num_taxa)
     free(path);
     free(string);
     }
+#endif
 
 /* toint: moved to utils.c */
 
@@ -4986,6 +5015,8 @@ void alltrees_search(int user)
     
 /* This function does the checking of every fundamental tree to the supertree at hand. It returns a float 
 	This function also bootstraps the values for the fundamental trees, if the do_bootstrap value is greater than 0 these values are printed to bootstrap.txt*/
+/* compare_trees: moved to scoring.c */
+#if 0
 float compare_trees(int spr)
     {
     int i=0, j=0, k=0, found = FALSE, here1 = FALSE, here2 = FALSE;
@@ -5091,6 +5122,7 @@ float compare_trees(int spr)
     free(pruned_tree);	
     return(total);
     }
+#endif
 
 
 
@@ -5100,6 +5132,8 @@ float compare_trees(int spr)
 /* Tree_build:
 	This function reads in a file and from it builds the tree in memory using the taxon_type definition */
 	
+/* tree_build: moved to tree_ops.c */
+#if 0
 int tree_build (int c, char *treestring, struct taxon *parent, int fromfile, int fundnum, int taxaorder)
 	{
 	
@@ -5224,10 +5258,13 @@ int tree_build (int c, char *treestring, struct taxon *parent, int fromfile, int
         c++;
         return(c);
 	}
+#endif
 
 /* Basic_Tree_build:
 	This function builds a tree in memory withouth incrementing the number of taxa etc in, bascially this is for building a tree where do don;t needall the bells and whistles. This gets used in Exclude taxa to help deal with gene names */
 
+/* basic_tree_build: moved to tree_ops.c */
+#if 0
 int basic_tree_build (int c, char *treestring, struct taxon *parent, int fullnames)
 	{
 	
@@ -5343,11 +5380,14 @@ int basic_tree_build (int c, char *treestring, struct taxon *parent, int fullnam
         c++;
         return(c);
 	}
+#endif
 
 
 
 
 /* This makes the taxon structure when we need it so I don't have to keep typing the assignments all the time */
+/* make_taxon: moved to tree_ops.c */
+#if 0
 struct taxon * make_taxon(void)
 	{
 	struct taxon *position = NULL;
@@ -5374,7 +5414,10 @@ struct taxon * make_taxon(void)
 	position->donor = NULL;
 	return(position);
 	}
+#endif
 
+/* gene_content_parsimony: moved to reconcile.c */
+#if 0
 void gene_content_parsimony(struct taxon * position, int * array)
 	{
 	/* Go to the last internal nodes on the tree that are still tagged, then calculate the possible number of copies for this node */
@@ -5393,6 +5436,7 @@ void gene_content_parsimony(struct taxon * position, int * array)
 		position = position->next_sibling;
 		}
 	}
+#endif
 
 void prune_tree_from_array(struct taxon * super_pos, int * array)
 	{
@@ -5449,6 +5493,8 @@ void add_internals_from_array(struct taxon * super_pos, int *array)
 	it then checks to see if any of the siblings on this node are not contained in the fundamental tree, these siblings are then turned off.
 	This only turns off taxa, pointer siblings will have to be turned off using a separate program */
 
+/* prune_tree: moved to tree_ops.c */
+#if 0
 void prune_tree(struct taxon * super_pos, int fund_num)
 	{
 
@@ -5475,6 +5521,7 @@ void prune_tree(struct taxon * super_pos, int fund_num)
 		}	
 	
 	}
+#endif
 	
 
 
@@ -5485,6 +5532,8 @@ void prune_tree(struct taxon * super_pos, int fund_num)
 /* This function travels through the tree recursively untagging any pointer siblings that are not being used. 
 	this effectively shrinks the tree to the size of the fundamental tree that it is being compared to 
 	this recursive function is called by shrink_tree to count how many active taxa there are below any given pointer sibling */
+/* shrink_tree: moved to tree_ops.c */
+#if 0
 int shrink_tree (struct taxon * position)
 	{
 	int count = 0, tot = 0, i, j, k, l, havelabel = FALSE;
@@ -5563,10 +5612,13 @@ int shrink_tree (struct taxon * position)
 	return(count);
 	
 	}
+#endif
 	
 	
 
 /* This function is only used to print the pruned supertree */
+/* print_pruned_tree: moved to tree_ops.c */
+#if 0
 int print_pruned_tree(struct taxon * position, int count, char *pruned_tree, int fullname, int treenum)
     {
     char *name =NULL, temper[100];
@@ -5629,10 +5681,13 @@ int print_pruned_tree(struct taxon * position, int count, char *pruned_tree, int
     free(name);
     return(count);
     }
+#endif
 
 
 
 
+/* totext: moved to tree_ops.c */
+#if 0
 void totext(int c, char *array)
     {
     int count = 0, i =0;
@@ -5656,12 +5711,15 @@ void totext(int c, char *array)
         array[1] = '\0';
         }
     }
+#endif
 
 /* inttotext: moved to utils.c */
 
 
 
 				
+/* reset_tree: moved to tree_ops.c */
+#if 0
 void reset_tree(struct	taxon * position)
 	{
 	
@@ -5673,7 +5731,10 @@ void reset_tree(struct	taxon * position)
 		}
 	
 	}		
+#endif
 				
+/* count_taxa: moved to tree_ops.c */
+#if 0
 int count_taxa(struct taxon * position, int count)
 	{
 	struct taxon * start = position;
@@ -5693,7 +5754,10 @@ int count_taxa(struct taxon * position, int count)
 		}
 	return(count);
 	}
+#endif
 
+/* find_taxa: moved to tree_ops.c */
+#if 0
 int find_taxa(struct taxon * position, char *query)
 	{
 	struct taxon * start = position;
@@ -5718,7 +5782,10 @@ int find_taxa(struct taxon * position, char *query)
 		}
 	return(found);
 	}
+#endif
 
+/* number_tree: moved to tree_ops.c */
+#if 0
 int number_tree(struct taxon * position, int num)
 	{
 	struct taxon * start = position;
@@ -5739,8 +5806,11 @@ int number_tree(struct taxon * position, int num)
 		}
 	return(num);
 	}
+#endif
 
 
+/* check_tree: moved to tree_ops.c */
+#if 0
 void check_tree(struct taxon * position, int tag_id, FILE *reconstructionfile)
 	{
 	struct taxon * start = position;
@@ -5773,7 +5843,10 @@ void check_tree(struct taxon * position, int tag_id, FILE *reconstructionfile)
 		}
 
 	}
+#endif
 	
+/* count_internal_branches: moved to tree_ops.c */
+#if 0
 int count_internal_branches(struct taxon *position, int count)
 	{
 	
@@ -5788,8 +5861,11 @@ int count_internal_branches(struct taxon *position, int count)
 		}
 	return(count);
 	}
+#endif
 	
 /* this identifies the taxa in a subtree passed to it */
+/* identify_taxa: moved to tree_ops.c */
+#if 0
 void identify_taxa(struct taxon * position, int *name_array)
 	{
 	while(position != NULL)
@@ -5805,8 +5881,11 @@ void identify_taxa(struct taxon * position, int *name_array)
 		position = position->next_sibling;
 		}
 	}
+#endif
 
 	
+/* check_taxa: moved to tree_ops.c */
+#if 0
 int check_taxa(struct taxon * position)
 	{
 	struct taxon * start = position;
@@ -5826,8 +5905,11 @@ int check_taxa(struct taxon * position)
 		}
         return(number);
 	} 
+#endif
 
 
+/* dismantle_tree: moved to tree_ops.c */
+#if 0
 void dismantle_tree(struct taxon * position)
 	{
 	struct taxon * start = position;
@@ -5855,6 +5937,7 @@ void dismantle_tree(struct taxon * position)
 		free(start);
 		}	
 	}		
+#endif
 
 
 #ifdef _OPENMP
@@ -6675,6 +6758,8 @@ void memory_error(int error_num)  /*123 so far*/
 
 
 
+/* print_named_tree: moved to tree_ops.c */
+#if 0
 void print_named_tree(struct taxon * position, char *tree)
 	{
 	struct taxon *place = position;
@@ -6705,7 +6790,10 @@ void print_named_tree(struct taxon * position, char *tree)
 	strcat(tree, ")");
 	free(name);
 	}
+#endif
 
+/* print_fullnamed_tree: moved to tree_ops.c */
+#if 0
 void print_fullnamed_tree(struct taxon * position, char *tree, int fundtreenum)
 	{
 	struct taxon *place = position;
@@ -6744,10 +6832,13 @@ void print_fullnamed_tree(struct taxon * position, char *tree, int fundtreenum)
 	strcat(tree, ")");
 	free(name);
 	}
+#endif
 
 
 
 
+/* print_tree: moved to tree_ops.c */
+#if 0
 void print_tree(struct taxon * position, char *tree)
 	{
 	struct taxon *place = position;
@@ -6777,7 +6868,10 @@ void print_tree(struct taxon * position, char *tree)
 	strcat(tree, ")");
 	free(name);
 	}
+#endif
 
+/* print_tree_withinternals: moved to tree_ops.c */
+#if 0
 void print_tree_withinternals(struct taxon * position, char *tree)
 	{
 	struct taxon *place = position;
@@ -6816,8 +6910,11 @@ void print_tree_withinternals(struct taxon * position, char *tree)
 	
 	free(name);
 	}
+#endif
 
 
+/* reallocate_retained_supers: moved to tree_ops.c */
+#if 0
 void reallocate_retained_supers(void)
     {
 
@@ -6845,6 +6942,7 @@ void reallocate_retained_supers(void)
         scores_retained_supers[i] = -1;
         }
     }
+#endif
 
 
 
@@ -7656,7 +7754,7 @@ void controlc5(int signal)
    restore sourcetreetag[] around a search so the change is invisible to
    all other commands (reconstruct, showtrees, etc.).                     */
 
-static int * apply_singlecopy_filter(void)
+int * apply_singlecopy_filter(void)
 	{
 	int i, j, multicopy, n_single = 0, n_multi = 0;
 	int *saved = NULL;
@@ -7692,7 +7790,7 @@ static int * apply_singlecopy_filter(void)
 	return saved;
 	}
 
-static void restore_singlecopy_filter(int *saved)
+void restore_singlecopy_filter(int *saved)
 	{
 	if(saved == NULL) return;
 	memcpy(sourcetreetag, saved, Total_fund_trees * sizeof(int));
@@ -7862,62 +7960,10 @@ static const char *ml_score_label(void)
  *   source trees using normalised RF distance.  Follows compare_trees().
  */
 
-static int cmp_uint64(const void *a, const void *b)
-    {
-    uint64_t x = *(const uint64_t*)a, y = *(const uint64_t*)b;
-    return (x > y) - (x < y);
-    }
+/* cmp_uint64, collect_biparts_newick, bipart_intersection_count: moved to scoring.c */
 
-static int collect_biparts_newick(const char *nwk, uint64_t total_hash, uint64_t *out)
-    {
-    uint64_t stack[2 * NAME_LENGTH + 4];  /* depth bounded by number of taxa */
-    int depth = 0, cnt = 0, i = 0;
-    stack[0] = 0;
-    while(nwk[i] && nwk[i] != ';')
-        {
-        if(nwk[i] == '(')
-            { stack[++depth] = 0; i++; }
-        else if(nwk[i] == ')')
-            {
-            uint64_t child_sh = stack[depth--];
-            uint64_t comp = total_hash ^ child_sh;
-            uint64_t bh   = (child_sh < comp) ? child_sh : comp;
-            if(bh != 0) out[cnt++] = bh;  /* skip trivial bipartitions */
-            stack[depth] ^= child_sh;
-            i++;
-            }
-        else if(nwk[i] == ',')
-            { i++; }
-        else if(nwk[i] == ':')
-            { while(nwk[i] && nwk[i] != ',' && nwk[i] != ')' && nwk[i] != ';') i++; }
-        else
-            {  /* taxon integer index */
-            char num[64]; int j = 0;
-            while(nwk[i] && nwk[i] != '(' && nwk[i] != ')' && nwk[i] != ',' && nwk[i] != ':')
-                num[j++] = nwk[i++];
-            num[j] = '\0';
-            int tidx = atoi(num);
-            if(tidx >= 0 && tidx < number_of_taxa)
-                stack[depth] ^= taxon_hash_vals[tidx];
-            }
-        }
-    qsort(out, cnt, sizeof(uint64_t), cmp_uint64);
-    return cnt;
-    }
-
-static int bipart_intersection_count(const uint64_t *a, int na,
-                                     const uint64_t *b, int nb)
-    {
-    int i = 0, j = 0, shared = 0;
-    while(i < na && j < nb)
-        {
-        if(a[i] == b[j])      { shared++; i++; j++; }
-        else if(a[i] < b[j])  i++;
-        else                  j++;
-        }
-    return shared;
-    }
-
+/* rf_precompute_fund_biparts: moved to scoring.c */
+#if 0
 void rf_precompute_fund_biparts(void)
     {
     int i, j;
@@ -7943,7 +7989,10 @@ void rf_precompute_fund_biparts(void)
         free(tmp);
         }
     }
+#endif
 
+/* compare_trees_rf: moved to scoring.c */
+#if 0
 float compare_trees_rf(int spr)
     {
     int i, j;
@@ -8012,6 +8061,7 @@ float compare_trees_rf(int spr)
     free(pruned_nwk);
     return total;
     }
+#endif
 
 /* --- ML scoring function (Steel & Rodrigo 2008) --------------------------
  * compare_trees_ml: identical to compare_trees_rf() but uses raw (unnormalised)
@@ -8020,6 +8070,8 @@ float compare_trees_rf(int spr)
  * mlscale=lust applies log10(e) factor for compatibility with Akanni et al. 2014.
  * Reuses fund_bipart_sets precomputed by rf_precompute_fund_biparts().
  */
+/* compare_trees_ml: moved to scoring.c */
+#if 0
 float compare_trees_ml(int spr)
     {
     int i, j;
@@ -8089,6 +8141,7 @@ float compare_trees_ml(int spr)
     free(pruned_nwk);
     return total;
     }
+#endif
 
 /* --- end RF/ML functions ------------------------------------------------- */
 
@@ -9561,6 +9614,8 @@ void heuristic_search(int user, int print, int sample, int nreps)
     free(best_tree);
     }
 
+/* average_consensus: moved to consensus.c */
+#if 0
 int average_consensus(int nrep, int missing_method, char * useroutfile, FILE *paupfile)
 	{
 	int **taxa_comp = NULL, i, j, k, l, found = FALSE, here = FALSE, error = FALSE;
@@ -9727,6 +9782,7 @@ int average_consensus(int nrep, int missing_method, char * useroutfile, FILE *pa
 	free(temptree);
 	return(error);
 	}
+#endif
 
 
 
@@ -11020,6 +11076,8 @@ int check_if_diff_tree(char *tree)
 
 
 /* Next is the code needed for the Baum/ragan coding scheme */
+/* coding: moved to consensus.c */
+#if 0
 int coding(int nrep, int search, int ptpreps)
     {
     int i=0, j=0, k=0, nreps=10,  parenthesis = 0, count =0, *tracking = NULL, total = 0, **BR_coding = NULL, nodecount = 0, position = 0, split_count = 0, calculate_inhouse = FALSE;
@@ -11274,7 +11332,10 @@ int coding(int nrep, int search, int ptpreps)
 	free(string);
     return(error);
     }
+#endif
 
+/* MRP_matrix: moved to consensus.c */
+#if 0
 int MRP_matrix(char **trees, int num_trees, int consensus)
 	{
 	int i=0, j=0, k=0, count =0, x=0, *tracking = NULL, total = 0, **BR_coding = NULL, nodecount = 0, position = 0, split_count = 0;
@@ -11512,6 +11573,7 @@ int MRP_matrix(char **trees, int num_trees, int consensus)
 	free(string);
 	return(position);
 	}
+#endif
 
 
 /* set_parameters: moved to main.c */
@@ -11633,6 +11695,8 @@ void set_parameters(void)
 
 /* this function calculates the score of a supertree to a set of source trees using the criterion of Matrix representation using Compatibility */
 /* This is analogous to a clique analysis */
+/* MRC: moved to scoring.c */
+#if 0
 float MRC(char *supertree)
     {
     int i=0, j=0, k=0, **super_matrix = NULL, count = 0, *tracking = NULL, parenthesis = 0, total=0, allsame1 = TRUE, allsame2 = TRUE;
@@ -11753,11 +11817,14 @@ float MRC(char *supertree)
     tracking = NULL;
     return(total_partitions-score);
     }
+#endif
                          
 
 
 /* this function calculates the score of a supertree to a set of source trees using the criterion of Matrix representation using Compatibility */
 /* This is analogous to a clique analysis */
+/* quartet_compatibility: moved to scoring.c */
+#if 0
 float quartet_compatibility(char * supertree)
     {
     int i=0, j=0, k=0,w=0, x=0, y=0, z=0, **super_matrix = NULL, count = 0, *tracking = NULL, parenthesis = 0, total=0,  allsame1 = TRUE, allsame2 = TRUE;
@@ -11899,10 +11966,13 @@ float quartet_compatibility(char * supertree)
     tracking = NULL;
     return(num_quartets-score);
     }
+#endif
 
 
 
 
+/* condense_coding: moved to consensus.c */
+#if 0
 void condense_coding(void)
     {
     int i=0, j=0, k=0, l=0, same1 = TRUE, same2 = TRUE;
@@ -11983,6 +12053,7 @@ void condense_coding(void)
     /* k isthe number of partitions that have been turned into 4's, this is the number of repeated partitions */            
     num_partitions = k;
     }
+#endif
 
 
 
@@ -13412,6 +13483,8 @@ void generatetrees(void)
  * printcolour, print_coordinates, tree_coordinates, draw_histogram:
  * moved to viz.c */
 
+/* do_consensus: moved to consensus.c */
+#if 0
 void do_consensus(void)
 	{
 	int tree_type = 0, i, j, k, l,m, numtrees = 0, present = TRUE, number, error = FALSE, useguide = FALSE;
@@ -13619,9 +13692,12 @@ void do_consensus(void)
 		}
 	
 	}
+#endif
 
     
 /*** consensus is a function to carry out a majority-rule consensus on the results of a bootstrap analysis ****/
+/* consensus: moved to consensus.c */
+#if 0
 void consensus(int num_trees, char **trees, int num_reps, float percentage, FILE *outfile, FILE *guidetreefile)
     {
     int i, j, k, q, r, same1 = FALSE, same2 = FALSE, same3 = FALSE, same4 = FALSE,same5 = FALSE,same6 = FALSE,same7 = FALSE,same8 = FALSE, l, **sets, *in, *tmpcoding = NULL, end = FALSE, found = -1;
@@ -14180,6 +14256,7 @@ void consensus(int num_trees, char **trees, int num_reps, float percentage, FILE
 	free(rest);
 	free(tmp);
     }
+#endif
 
 
 
@@ -17595,6 +17672,8 @@ void neighbor_joining(int brlens, char *tree, int names)
 	free(tmp);
 	}
 
+/* nj: moved to reconcile.c */
+#if 0
 void nj(void)
 	{
 	int i, j, missing_method = 1, error = FALSE;
@@ -17670,8 +17749,11 @@ void nj(void)
 		}
 
 	}
+#endif
 
 
+/* reroot_tree: moved to tree_ops.c */
+#if 0
 void reroot_tree(struct taxon *outgroup)
 	{
 	struct taxon *newbie = NULL, *temp_treetop = NULL, *position = NULL, *temp = NULL, *start = NULL, *parent_start = NULL, *next = NULL, *parent = NULL, *pointer = NULL;
@@ -17746,7 +17828,10 @@ void reroot_tree(struct taxon *outgroup)
 	temp_top = newbie; */
 	free(temptree);
 	}
+#endif
 	
+/* clean_pointer_taxa: moved to tree_ops.c */
+#if 0
 void clean_pointer_taxa(struct taxon *position)
 	{
 	
@@ -17833,8 +17918,11 @@ void clean_pointer_taxa(struct taxon *position)
 		
 		
 	}
+#endif
 	
 
+/* get_branch: moved to tree_ops.c */
+#if 0
 struct taxon * get_branch(struct taxon *position, int name)
 	{
 	struct taxon *start = position, *answer = NULL;
@@ -17863,7 +17951,10 @@ struct taxon * get_branch(struct taxon *position, int name)
 		}
 	return(answer);
 	}
+#endif
 
+/* get_taxa_details: moved to tree_ops.c */
+#if 0
 void get_taxa_details(struct taxon *position)
 	{
 	struct taxon *start = position;
@@ -17882,7 +17973,10 @@ void get_taxa_details(struct taxon *position)
 		position = position->next_sibling;
 		}	
 	}
+#endif
 
+/* get_taxa_names: moved to tree_ops.c */
+#if 0
 void get_taxa_names(struct taxon *position, char **taxa_fate_names)
 	{
 	struct taxon *start = position;
@@ -17901,8 +17995,11 @@ void get_taxa_names(struct taxon *position, char **taxa_fate_names)
 		position = position->next_sibling;
 		}	
 	}
+#endif
 
 
+/* get_taxon: moved to tree_ops.c */
+#if 0
 struct taxon * get_taxon(struct taxon *position, int name)
 	{
 	struct taxon *start = position, *answer = NULL;
@@ -17929,7 +18026,10 @@ struct taxon * get_taxon(struct taxon *position, int name)
 		}
 	return(answer);
 	}
+#endif
 
+/* compress_tree: moved to tree_ops.c */
+#if 0
 int compress_tree (struct taxon * position)
 	{
 	int count = 0, tot = 0, done = FALSE;
@@ -17975,7 +18075,10 @@ int compress_tree (struct taxon * position)
 		}
 	return(count);
 	}
+#endif
 
+/* compress_tree1: moved to tree_ops.c */
+#if 0
 int compress_tree1 (struct taxon * position)
 	{
 	int count = 0, tot = 0, done = FALSE, i;
@@ -18043,7 +18146,10 @@ int compress_tree1 (struct taxon * position)
 		}
 	return(count);
 	}
+#endif
 
+/* isittagged: moved to reconcile.c */
+#if 0
 void isittagged(struct taxon * position)
 	{
 	while(position != NULL)
@@ -18056,7 +18162,10 @@ void isittagged(struct taxon * position)
 		position = position->next_sibling;
 		}
 	}
+#endif
 
+/* duplicate_tree: moved to tree_ops.c */
+#if 0
 void duplicate_tree(struct taxon * orig_pos, struct taxon * prev_dup_pos)
 	{
 	struct taxon *sibling = NULL, *dup_pos = NULL;
@@ -18108,9 +18217,12 @@ void duplicate_tree(struct taxon * orig_pos, struct taxon * prev_dup_pos)
 		orig_pos = orig_pos->next_sibling;
 		}
 	}
+#endif
 
 
 			
+/* tree_map: moved to reconcile.c */
+#if 0
 float tree_map(struct taxon * gene_top, struct taxon * species_top, int print)
 	{
 	int xnum =0, *presence = NULL, i, j, num_dups = 0, num_losses = 0, best = 0;
@@ -18142,8 +18254,11 @@ float tree_map(struct taxon * gene_top, struct taxon * species_top, int print)
 	if(print)fprintf(distributionreconfile, "%d\t%d\n", num_dups, num_losses);
 	return((dup_weight*(float)num_dups)+(loss_weight*(float)num_losses));
 	}
+#endif
 
 
+/* printnamesandtags: moved to tree_ops.c */
+#if 0
 void printnamesandtags(struct taxon *position)
 	{
 	while(position != NULL)
@@ -18158,7 +18273,10 @@ void printnamesandtags(struct taxon *position)
 		position=position->next_sibling;
 		}
 	}
+#endif
 
+/* find_same: moved to tree_ops.c */
+#if 0
 struct taxon * find_same(struct taxon * position, int tofind)
 	{
 	struct taxon *answer = NULL;
@@ -18174,8 +18292,11 @@ struct taxon * find_same(struct taxon * position, int tofind)
 		}	
 	return(answer);
 	}
+#endif
 
 
+/* resolve_tricotomies: moved to reconcile.c */
+#if 0
 void resolve_tricotomies(struct taxon *position, struct taxon *species_tree)
 	{
 	struct taxon *start = position, *copy = NULL, *best1 = NULL, *best2 = NULL, **thislevel = NULL, *previous = position->parent, *pos1 = NULL, *pos2 = NULL, *newbie = NULL, *lastsibling = NULL;
@@ -18475,7 +18596,10 @@ void resolve_tricotomies(struct taxon *position, struct taxon *species_tree)
 	free(presence);
 	free(found);
 	}
+#endif
 
+/* are_siblings: moved to tree_ops.c */
+#if 0
 int are_siblings(struct taxon *position, int first, int second)
 	{
 	struct taxon *start = position;
@@ -18503,8 +18627,11 @@ int are_siblings(struct taxon *position, int first, int second)
 		}
 	return(answer);
 	}
+#endif
 
 
+/* number_tree1: moved to tree_ops.c */
+#if 0
 int number_tree1(struct taxon * position, int num)
 	{
 	struct taxon * start = position;
@@ -18533,7 +18660,10 @@ int number_tree1(struct taxon * position, int num)
 		}
 	return(num);
 	}
+#endif
 
+/* number_tree2: moved to tree_ops.c */
+#if 0
 int number_tree2(struct taxon * position, int num)
 	{
 	struct taxon * start = position;
@@ -18558,9 +18688,12 @@ int number_tree2(struct taxon * position, int num)
 		}
 	return(num);
 	}
+#endif
 
 
 
+/* print_tree_labels: moved to reconcile.c */
+#if 0
 void print_tree_labels(struct taxon *position, int **results, int treenum, struct taxon *species_tree)
 	{
 	int onetoone;
@@ -18615,9 +18748,12 @@ void print_tree_labels(struct taxon *position, int **results, int treenum, struc
 		position = position->next_sibling;
 		}
 	}
+#endif
 
 
 
+/* print_onetoone_names: moved to tree_ops.c */
+#if 0
 void print_onetoone_names(struct taxon *position, int onetoone)
 	{
     while(position != NULL)
@@ -18634,7 +18770,10 @@ void print_onetoone_names(struct taxon *position, int onetoone)
 		position=position->next_sibling;
 		}
 	}
+#endif
 			
+/* isit_onetoone: moved to tree_ops.c */
+#if 0
 int isit_onetoone(struct taxon *position, int onetoone)  /* This will return 0 if not a 1:1, 1 if it was a relaxed 1:1 and 2 if it was a strict 1:1 */
 	{
 	while(position != NULL && onetoone != 0)
@@ -18660,9 +18799,12 @@ int isit_onetoone(struct taxon *position, int onetoone)  /* This will return 0 i
 		}
 	return(onetoone);
 	}
+#endif
 
 
 			
+/* label_gene_tree: moved to reconcile.c */
+#if 0
 void label_gene_tree(struct taxon * gene_position, struct taxon * species_top, int *presence, int xnum)
 	{
 	struct taxon * position = gene_position, *tmp = NULL;
@@ -18708,7 +18850,10 @@ void label_gene_tree(struct taxon * gene_position, struct taxon * species_top, i
 		position = position->next_sibling;
 		}
 	}
+#endif
 
+/* descend: moved to reconcile.c */
+#if 0
 void descend(struct taxon * position, int *presence)
 	{
 	
@@ -18719,7 +18864,10 @@ void descend(struct taxon * position, int *presence)
 		position = position->next_sibling;
 		}
 	}
+#endif
 			
+/* get_min_node: moved to tree_ops.c */
+#if 0
 int get_min_node(struct taxon * position, int *presence, int num)
 	{
 	struct taxon * start = position;
@@ -18746,8 +18894,11 @@ int get_min_node(struct taxon * position, int *presence, int num)
 	free(tmp);
 	return(num);
 	}
+#endif
 			
 	
+/* subtree_id: moved to reconcile.c */
+#if 0
 void subtree_id(struct taxon * position, int *tmp)
 	{
 	while(position != NULL)
@@ -18760,8 +18911,11 @@ void subtree_id(struct taxon * position, int *tmp)
 		position = position->next_sibling;
 		}
 	}
+#endif
 	
 	
+/* reconstruct_map: moved to reconcile.c */
+#if 0
 int reconstruct_map(struct taxon *position, struct taxon *species_top)
 	{
 	struct taxon *start = NULL, *tmp = NULL, *spec_pointer= NULL, *daug_pointer = NULL, *newbie = NULL;
@@ -18824,8 +18978,11 @@ int reconstruct_map(struct taxon *position, struct taxon *species_top)
 	
 	return(num_dups);
 	}
+#endif
 
 
+/* add_losses: moved to reconcile.c */
+#if 0
 void add_losses(struct taxon * position, struct taxon *species_top)
 	{
 	struct taxon * start = position, *spec_equiv = NULL, *tmp1 = NULL, *pos = NULL, *pos2 = NULL, *pos3 = NULL;
@@ -18868,9 +19025,12 @@ void add_losses(struct taxon * position, struct taxon *species_top)
 	free(presence);
 	presence = NULL;
 	}
+#endif
 
 
 
+/* construct_tree: moved to reconcile.c */
+#if 0
 struct taxon * construct_tree(struct taxon * spec_pos, struct taxon *gene_pos, int *presence, struct taxon *extra_gene)
 	{
 	int first = TRUE, i, count;
@@ -18932,7 +19092,10 @@ struct taxon * construct_tree(struct taxon * spec_pos, struct taxon *gene_pos, i
 	
 	return(extra_gene);
 	}
+#endif
 	
+/* join_losses: moved to reconcile.c */
+#if 0
 int join_losses(struct taxon * position)
 	{
 	int loss = TRUE;
@@ -18954,7 +19117,10 @@ int join_losses(struct taxon * position)
 		}
 	return(loss);
 	}
+#endif
 
+/* count_losses: moved to reconcile.c */
+#if 0
 int count_losses(struct taxon * position)
 	{
 	int count = 0;
@@ -18969,7 +19135,10 @@ int count_losses(struct taxon * position)
 		}
 	return(count);
 	}
+#endif
 
+/* find: moved to tree_ops.c */
+#if 0
 void find(struct taxon * position)
 	{
 	while(position != NULL)
@@ -18980,8 +19149,11 @@ void find(struct taxon * position)
 		position = position->next_sibling;
 		}
 	}
+#endif
 
 
+/* find_remaining: moved to tree_ops.c */
+#if 0
 struct taxon * find_remaining(struct taxon * position)  /* This looks for the next tagged branch in the tree down from here and returns a pointer to it, otherwise it returns null pointer */
 	{
 	struct taxon * start = position, *pos = NULL, *found = NULL;
@@ -19003,9 +19175,12 @@ struct taxon * find_remaining(struct taxon * position)  /* This looks for the ne
 		}
 	return(found);
 	}
+#endif
 
 			
 
+/* find_tagged: moved to tree_ops.c */
+#if 0
 void find_tagged(struct taxon * position, int *thispresence)
 	{
 	struct taxon * start = position, *pos = NULL;
@@ -19029,8 +19204,11 @@ void find_tagged(struct taxon * position, int *thispresence)
 		position = position->next_sibling;
 		}
 	}
+#endif
 
 
+/* up_tree: moved to tree_ops.c */
+#if 0
 void up_tree(struct taxon * position, int * presence)
 	{
 	int i=0;
@@ -19056,7 +19234,10 @@ void up_tree(struct taxon * position, int * presence)
 			}
 		}
 	}
+#endif
 
+/* down_tree: moved to tree_ops.c */
+#if 0
 void down_tree(struct taxon * position, struct taxon *prev, int * presence)
 	{
 	int i=0;
@@ -19087,8 +19268,11 @@ void down_tree(struct taxon * position, struct taxon *prev, int * presence)
 			}
 		}
 	}
+#endif
 
 
+/* mapunknowns: moved to reconcile.c */
+#if 0
 void mapunknowns()
 	{
 	struct taxon *position = NULL, *species_tree = NULL, *gene_tree = NULL, *best_mapping = NULL, *unknown_fund = NULL, *pos = NULL,*copy = NULL;
@@ -19272,7 +19456,10 @@ void mapunknowns()
 	free(presence);
 	free(overall_placements);
 	}
+#endif
 
+/* get_recon_score: moved to reconcile.c */
+#if 0
 float get_recon_score(char *giventree, int numspectries, int numgenetries)
 	{
 	struct taxon *position = NULL, *species_tree = NULL, *gene_tree = NULL, *best_mapping = NULL, *copy = NULL, *temp_top1 = NULL, *temp_top2 = NULL, *spec_copy = NULL;
@@ -19457,7 +19644,10 @@ float get_recon_score(char *giventree, int numspectries, int numgenetries)
 	free(temptree1);
 	return(rooting_score);
 	}
+#endif
 
+/* print_descendents: moved to consensus.c */
+#if 0
 void print_descendents(struct taxon *position, FILE *outfile)
 	{
 	
@@ -19475,7 +19665,10 @@ void print_descendents(struct taxon *position, FILE *outfile)
 		position = position->next_sibling;
 		}
 	}
+#endif
 
+/* do_descendents: moved to consensus.c */
+#if 0
 void do_descendents(struct taxon *position, FILE *outfile)
 	{
 	struct taxon *start = position;
@@ -19509,7 +19702,10 @@ void do_descendents(struct taxon *position, FILE *outfile)
 	
 	
 	}
+#endif
 
+/* presence_of_trichotomies: moved to reconcile.c */
+#if 0
 int presence_of_trichotomies(struct taxon * position)
 	{
 	struct taxon *start = position;
@@ -19542,8 +19738,11 @@ int presence_of_trichotomies(struct taxon * position)
 		}
 	return(result);
 	}
+#endif
 			
 			
+/* do_resolve_tricotomies: moved to reconcile.c */
+#if 0
 struct taxon * do_resolve_tricotomies(struct taxon * gene_tree, struct taxon * species_tree, int basescore)
 	{
 	int i, j, xnum=0, *presence=NULL, **scores = NULL;
@@ -19649,8 +19848,11 @@ struct taxon * do_resolve_tricotomies(struct taxon * gene_tree, struct taxon * s
 	
 	return(gene_tree);
 	}
+#endif
 
 
+/* make_unrooted: moved to reconcile.c */
+#if 0
 void make_unrooted(struct taxon * position)
 	{
 	int i=0;
@@ -19665,7 +19867,10 @@ void make_unrooted(struct taxon * position)
 		
 		}
 	}
+#endif
 
+/* reconstruct: moved to reconcile.c */
+#if 0
 void reconstruct(int print_settings)  /* Carry out gene-tree reconciliation of source trees against a species tree */
 	{
 	struct taxon *position = NULL, *species_tree = NULL, *gene_tree = NULL, *best_mapping = NULL, *unknown_fund = NULL, *pos = NULL, *copy = NULL, *newbie = NULL;
@@ -20120,10 +20325,13 @@ void reconstruct(int print_settings)  /* Carry out gene-tree reconciliation of s
 	count_now=FALSE;
 
 	}
+#endif
 
 
 
 
+/* put_in_scores: moved to reconcile.c */
+#if 0
 void put_in_scores(struct taxon * position, float * total)
 	{
 	while(position != NULL)
@@ -20134,7 +20342,10 @@ void put_in_scores(struct taxon * position, float * total)
 		position = position->next_sibling;
 		}
 	}
+#endif
 
+/* reset_tag2: moved to tree_ops.c */
+#if 0
 void reset_tag2(struct taxon * position)
 	{
 	while(position != NULL)
@@ -20144,7 +20355,10 @@ void reset_tag2(struct taxon * position)
 		position = position->next_sibling;
 		}
 	}
+#endif
 	
+/* assign_hgtdonors: moved to reconcile.c */
+#if 0
 void assign_hgtdonors(struct taxon * position, int num, int part_num)
 	{
 	int i;
@@ -20163,7 +20377,10 @@ void assign_hgtdonors(struct taxon * position, int num, int part_num)
 		position = position->next_sibling;
 		}
 	}
+#endif
 
+/* assign_tag2: moved to tree_ops.c */
+#if 0
 int assign_tag2(struct taxon * position, int num)
 	{
 	int found = FALSE, i;
@@ -20187,7 +20404,10 @@ int assign_tag2(struct taxon * position, int num)
 		}
 	return(found);
 	}
+#endif
 
+/* hgt_reconstruction: moved to reconcile.c */
+#if 0
 void hgt_reconstruction()
 	{
 	struct taxon *position = NULL, *species_tree = NULL, *gene_tree = NULL, *best_mapping = NULL, *best_mapping1 = NULL, *best_mapping2 = NULL, *unknown_fund = NULL, *posit = NULL,*copy = NULL, *copy1 = NULL, **parts = NULL, *test_part = NULL, *pos = NULL, *best_donor = NULL, *best_HGT = NULL, *attached = NULL;
@@ -21150,8 +21370,11 @@ void hgt_reconstruction()
 
 
 	}
+#endif
 
 
+/* assign_before_after: moved to reconcile.c */
+#if 0
 void assign_before_after(struct taxon *position, int *previous, int *before, int *after, int num, int found)
 	{
 	int i=0;
@@ -21179,9 +21402,12 @@ void assign_before_after(struct taxon *position, int *previous, int *before, int
 		position = position->next_sibling;
 		}
 	}
+#endif
 
 
 
+/* assign_ances_desc: moved to reconcile.c */
+#if 0
 void assign_ances_desc(struct taxon *position, int ** allowed_species, int * previous)
 	{
 	int i=0;
@@ -21206,11 +21432,14 @@ void assign_ances_desc(struct taxon *position, int ** allowed_species, int * pre
 		position = position->next_sibling;
 		}
 	}
+#endif
 
 
 
 /* function for Konrad to automatically collapse clades that have an average branch length of less than X (user defined), it is to leave one randomly chosen taxa to represent the clade. */
 
+/* random_prune: moved to prune.c */
+#if 0
 void random_prune(char *fund_tree)
 	{
 	float user_limit;
@@ -21267,7 +21496,10 @@ void random_prune(char *fund_tree)
 	
 	fclose(rp_outfile);
 	}
+#endif
 
+/* collapse_clades: moved to prune.c */
+#if 0
 void collapse_clades(struct taxon * position, float user_limit, int * to_delete, FILE *rp_outfile)
 	{
 	float total = 0;
@@ -21295,7 +21527,10 @@ void collapse_clades(struct taxon * position, float user_limit, int * to_delete,
 		}
 	
 	}
+#endif
 
+/* get_brlens: moved to prune.c */
+#if 0
 int get_brlens(struct taxon * position, float *total, int *count)
 	{
 	int taxa_count = 0, tmpcount = 0;
@@ -21316,7 +21551,10 @@ int get_brlens(struct taxon * position, float *total, int *count)
 	*count+=tmpcount;
 	return(taxa_count);
 	}
+#endif
 
+/* return_length: moved to prune.c */
+#if 0
 float return_length(char *string)
 	{
 	int i=0, j=0;
@@ -21342,8 +21580,11 @@ float return_length(char *string)
 	free(flt_length);
 	return(length);
 	}
+#endif
 
 
+/* print_keep: moved to prune.c */
+#if 0
 int print_keep(struct taxon *position, int keep, int count, FILE *rp_outfile)
 	{
 	while(position != NULL)
@@ -21362,8 +21603,11 @@ int print_keep(struct taxon *position, int keep, int count, FILE *rp_outfile)
 		}
 	return(count);	
 	}
+#endif
 	
 	
+/* untag_taxa: moved to prune.c */
+#if 0
 int untag_taxa(struct taxon *position, int * to_delete, int keep, int count, FILE *rp_outfile)
 	{
 	
@@ -21385,8 +21629,11 @@ int untag_taxa(struct taxon *position, int * to_delete, int keep, int count, FIL
 		}
 	return(count);
 	}
+#endif
 	
 			
+/* resolve_tricotomies_dist: moved to reconcile.c */
+#if 0
 void resolve_tricotomies_dist (struct taxon *gene_tree, struct taxon *species_tree, int ** scores)
 	{
 	struct taxon *position = gene_tree, *start = gene_tree, *position2 = NULL, *new = NULL, *first = NULL, *second = NULL;
@@ -21495,8 +21742,11 @@ void resolve_tricotomies_dist (struct taxon *gene_tree, struct taxon *species_tr
 		}
 	free(presence);
 	}
+#endif
 		
 
+/* get_taxa: moved to tree_ops.c */
+#if 0
 void get_taxa(struct taxon *position, int *presence)
 	{
 	while(position != NULL)
@@ -21509,9 +21759,12 @@ void get_taxa(struct taxon *position, int *presence)
 		position = position->next_sibling;
 		}
 	}
+#endif
 			
 	
 	
+/* get_best_node: moved to tree_ops.c */
+#if 0
 int get_best_node(struct taxon * position, int *presence, int num)
 	{
 	struct taxon * start = position;
@@ -21555,7 +21808,10 @@ int get_best_node(struct taxon * position, int *presence, int num)
 	free(tmp1);
 	return(num);
 	}
+#endif
 
+/* check_treeisok: moved to tree_ops.c */
+#if 0
 void check_treeisok(struct taxon *position)
 	{
 	struct taxon *start = position;
@@ -21581,11 +21837,14 @@ void check_treeisok(struct taxon *position)
 		position = position->next_sibling;
 		}
 	}
+#endif
 
 
 
 /* function for Karen to automatically collapse clades that have all of the same taxa in them, keeping only the one with the longest sequence (found in the full name) */
 
+/* prune_monophylies: moved to prune.c */
+#if 0
 void prune_monophylies(void)
     {
     int i=0, j=0, k=0, l=0, num_nodes=0, trees_included=0, trees_excluded=0, numt=0, *taxa_fate = NULL, clannID =0, report=FALSE, taxaorder=0;
@@ -21745,8 +22004,11 @@ void prune_monophylies(void)
     fprintf(tempoutfile, "\n");
     fclose(tempoutfile);
     }
+#endif
 
 
+/* identify_species_specific_clades: moved to prune.c */
+#if 0
 int identify_species_specific_clades(struct taxon * position, int numt, int * taxa_fate, int clannID)
     {
     float total = 0, keepnew=FALSE;
@@ -21846,7 +22108,10 @@ int identify_species_specific_clades(struct taxon * position, int numt, int * ta
     free(tmp_taxa_fate);
     return(clannID);
     }
+#endif
 
+/* list_taxa_above: moved to prune.c */
+#if 0
 long list_taxa_above(struct taxon * position, int * foundtaxa, struct taxon * longest, long seqlength) /* this function will check the parts of the tree above this position, it fixes aproblem that the tree rooting may mask monophylys */
     {
     long newseqlength=0;
@@ -21886,7 +22151,10 @@ long list_taxa_above(struct taxon * position, int * foundtaxa, struct taxon * lo
 
     return(seqlength);
     }
+#endif
 
+/* list_taxa_in_clade: moved to prune.c */
+#if 0
 long list_taxa_in_clade(struct taxon * position, int * foundtaxa, struct taxon * longest, long seqlength) /* descend through the tree finding what taxa are there (and putting result into an array) and also identifying the longest sequence (the first number in the <<full>> name of the sequence, after the first "." and before the first "|") */
     {
     long newseqlength=0;
@@ -21921,9 +22189,12 @@ long list_taxa_in_clade(struct taxon * position, int * foundtaxa, struct taxon *
         }
     return(seqlength);
     } 
+#endif
 
 
 
+/* extract_length: moved to prune.c */
+#if 0
 long extract_length(char * fullname)
     {
     /* this function assumes that the length of the sequence is embedded in the full name of the taxa in the form "SPECIESNAME.SEQLEN|BLAHBLAHBLAH"
@@ -21947,8 +22218,11 @@ long extract_length(char * fullname)
 
     return(seqlength);
     }
+#endif
 
 
+/* untag_nodes_below: moved to prune.c */
+#if 0
 void untag_nodes_below(struct  taxon * position, int * taxa_fate, int clannID)
     {
     
@@ -21976,7 +22250,10 @@ void untag_nodes_below(struct  taxon * position, int * taxa_fate, int clannID)
         }
     
     }
+#endif
     
+/* untag_nodes_above: moved to prune.c */
+#if 0
 void untag_nodes_above(struct  taxon * position, int * taxa_fate, int clannID)
     {
     struct taxon * origin = position;
@@ -22007,6 +22284,7 @@ void untag_nodes_above(struct  taxon * position, int * taxa_fate, int clannID)
         }
     
     }
+#endif
 
 
 void tips(int num)
