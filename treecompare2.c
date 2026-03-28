@@ -4386,6 +4386,40 @@ void heuristic_search(int user, int print, int sample, int nreps)
                         }
                     }
 
+                /**** Filter retained supertrees: keep only those equal to the best rescored score ****/
+                /* Trees added as "equal-score" during NNI may have been scored with stale cached
+                 * source-tree scores; after the fresh rescore above some will have higher scores.
+                 * Compact the retained_supers[] array, keeping only those at the minimum score. */
+                {
+                float best_rs = -1.0f;
+                int out = 0;
+                for(i = 0; i < number_retained_supers && scores_retained_supers[i] != -1; i++)
+                    {
+                    if(best_rs < 0.0f || scores_retained_supers[i] < best_rs)
+                        best_rs = scores_retained_supers[i];
+                    }
+                for(i = 0; i < number_retained_supers && scores_retained_supers[i] != -1; i++)
+                    {
+                    if(scores_retained_supers[i] <= best_rs * 1.000001f &&
+                       scores_retained_supers[i] >= best_rs * 0.999999f)
+                        {
+                        if(out != i)
+                            {
+                            char *tmp_swap = retained_supers[out];
+                            retained_supers[out] = retained_supers[i];
+                            retained_supers[i] = tmp_swap;
+                            scores_retained_supers[out] = scores_retained_supers[i];
+                            }
+                        out++;
+                        }
+                    }
+                for(; out < number_retained_supers && scores_retained_supers[out] != -1; out++)
+                    {
+                    retained_supers[out][0] = '\0';
+                    scores_retained_supers[out] = -1;
+                    }
+                }
+
                 /**** Write visited-topology landscape file if requested ******/
                 if(g_landscape_file[0] && g_landscape_map)
                     {
