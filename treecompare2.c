@@ -1334,14 +1334,15 @@ void bootstrap_search(void)
 
 #ifdef _OPENMP
             if(nthreads > 1)
-                printf2("Bootstrap: %d replicates using %d threads\n", Nreps, nthreads);
+                printf2("Bootstrap: %d replicates using %d threads", Nreps, nthreads);
             else
 #endif
-                printf2("Bootstrap progress indicator:\n");
+                printf2("Bootstrap progress indicator:");
 
             /* Shared accumulators — protected by boot_merge critical section */
             {
             int    boot_reps_done = 0;
+            int    boot_reps_completed = 0;  /* actual replicate count, updated once per rep */
             char **boot_results_acc = malloc(1*sizeof(char*));
             float *boot_scores_acc  = malloc(1*sizeof(float));
             boot_results_acc[0] = malloc(TREE_LENGTH*sizeof(char));
@@ -1424,7 +1425,12 @@ void bootstrap_search(void)
 #ifdef _OPENMP
                         #pragma omp critical (boot_merge)
 #endif
+                            {
                             printf2("\n\trepetition %d: taxon missing — skipped\n", i+1);
+                            boot_reps_completed++;
+                            printf2("\r\t%d / %d replicates done", boot_reps_completed, Nreps);
+                            fflush(stdout);
+                            }
                         continue;
                         }
 
@@ -1485,8 +1491,6 @@ void bootstrap_search(void)
                                     scores_retained_supers[k]);
                             fflush(bootfile);
                             boot_reps_done++;
-                            if(boot_reps_done % 10 == 0 || boot_reps_done == Nreps)
-                                printf2("\r\t%d / %d replicates done", boot_reps_done, Nreps);
                             fflush(stdout);
                             }
                         }
@@ -1501,6 +1505,14 @@ void bootstrap_search(void)
                         }
                     } /* end collect */
                     next_replicate: ;
+#ifdef _OPENMP
+                    #pragma omp critical (boot_merge)
+#endif
+                        {
+                        boot_reps_completed++;
+                        printf2("\r\t%d / %d replicates done", boot_reps_completed, Nreps);
+                        fflush(stdout);
+                        }
                     } /* end loop body (i) */
 
 #ifdef _OPENMP
@@ -1540,6 +1552,7 @@ void bootstrap_search(void)
                 free(thr_taxa_present);
                 } /* end parallel region */
 
+            printf2("\n");   /* move off the \r progress line before consensus output */
             hsprint = TRUE;  /* restore after bootstrap */
 
             /* Restore original threadprivate pointers (boot copies already freed) */
@@ -10545,120 +10558,6 @@ void neighbor_joining(int brlens, char *tree, int names)
 	free(string);
 	free(tmp);
 	}
-
-
-
-	
-	
-
-
-
-
-
-
-
-
-
-
-
-			
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-			
-
-
-			
-
-			
-			
-	
-	
-	
-
-
-
-
-
-	
-
-
-
-
-
-			
-
-
-
-
-
-
-
-
-
-
-			
-			
-
-
-
-
-
-
-
-
-	
-
-
-
-
-
-
-
-
-
-
-/* function for Konrad to automatically collapse clades that have an average branch length of less than X (user defined), it is to leave one randomly chosen taxa to represent the clade. */
-
-
-
-
-
-
-	
-	
-	
-			
-		
-
-			
-	
-	
-
-
-
-
-/* function for Karen to automatically collapse clades that have all of the same taxa in them, keeping only the one with the longest sequence (found in the full name) */
-
-
-
-
-
-
-
-
 
 
     
