@@ -1438,7 +1438,7 @@ void bootstrap_search(void)
                     if(search == 0)
                         alltrees_search(FALSE);
                     else
-                        heuristic_search(FALSE, FALSE, 10000, 10);
+                        heuristic_search(FALSE, FALSE, 10000, 1);
 
                     /* ---- Collect results from (threadprivate) retained_supers ---- */
                     {

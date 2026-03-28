@@ -1352,7 +1352,7 @@ void print_commands(int num)
         printf2("\t===========================================================\n");
         if(criterion != 1)
             {
-            printf2("\n\tnreps\t\t<integer number>\t\t*100\n\thsreps\t\t<integer number>\t\t*10\n\tsample\t\t<integer number>\t\t*10,000\n\tswap\t\tnni | spr | tbr | all\t\t");
+            printf2("\n\tnreps\t\t<integer number>\t\t*100\n\thsreps\t\t<integer number>\t\t*1\n\tsample\t\t<integer number>\t\t*10,000\n\tswap\t\tnni | spr | tbr | all\t\t");
             if(method == 1) printf2("nni");
             if(method == 2) printf2("spr");
             printf2("\n\tstart\t\trandom | <filename>\t\trandom");
@@ -1413,7 +1413,7 @@ void print_commands(int num)
         if(criterion != 1)
             {
             printf2("\n\tmethod\t\tequiprobable | markovian\t*equiprobable");
-            printf2("\n\tnreps\t\t<integer number>\t\t*100\n\thsreps\t\t<integer number>\t\t*10\n\tsample\t\t<integer number>\t\t*10,000\n\tsearch\t\tnni | spr | all\t\t\t");
+            printf2("\n\tnreps\t\t<integer number>\t\t*100\n\thsreps\t\t<integer number>\t\t*1\n\tsample\t\t<integer number>\t\t*10,000\n\tsearch\t\tnni | spr | all\t\t\t");
             if(method == 1) printf2("nni");
             if(method == 2) printf2("spr");
             printf2("\n\tnsteps\t\t<integer number>\t\t%d\n\ttreefile\t<output treefile name>\t\tyaptp.ph\n\tmaxswaps\t<integer number>\t\t*1,000,000\n", number_of_steps);
