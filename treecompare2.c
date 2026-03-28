@@ -288,7 +288,8 @@ time_t thread_report_last = 0;        /* threadprivate: wall-clock time of last 
     visited_set, thread_visited_acc, landscape_map, \
     rep_start_time, hs_do_print, last_status_score, \
     skip_streak, nni_swaps, rep_abandon, hs_par_rep, thread_report_last, \
-    fundamentals, presence_of_taxa, fund_scores, number_of_comparisons \
+    fundamentals, presence_of_taxa, fund_scores, number_of_comparisons, \
+    fund_bipart_sets \
 )
 #endif
 
@@ -299,6 +300,7 @@ static char **g_hs_fundamentals_snap    = NULL;
 static int  **g_hs_presence_snap        = NULL;
 static int ***g_hs_fund_scores_snap     = NULL;
 static int   *g_hs_num_comp_snap        = NULL;
+static BipartSet  *g_hs_fund_bipart_snap = NULL;  /* snapshot of master's fund_bipart_sets for HS worker threads */
 #endif
 
 
@@ -1019,6 +1021,8 @@ static void boot_alloc_thread_state(int ntrees, int ntaxa)
     int k;
     for(k = 0; k < ntrees; k++) sourcetree_scores[k]  = -1;
     for(k = 0; k < ntaxa;  k++) presenceof_SPRtaxa[k] = -1;
+    /* Each bootstrap thread builds its own bipart sets from its resampled fundamentals. */
+    fund_bipart_sets = NULL;
     }
     BESTSCORE    = -1;
     NUMSWAPS     = 0;
@@ -1061,6 +1065,16 @@ static void boot_free_thread_state(int ntrees, int ntaxa)
         if(scores_retained_supers) { free(scores_retained_supers); scores_retained_supers = NULL; }
         if(best_topology)          { free(best_topology);          best_topology          = NULL; }
         if(best_topology_scores)   { free(best_topology_scores);   best_topology_scores   = NULL; }
+        }
+
+    /* Free per-thread bipart sets built from resampled fundamentals (all threads). */
+    if(fund_bipart_sets != NULL)
+        {
+        int _fi;
+        for(_fi = 0; _fi < ntrees; _fi++)
+            if(fund_bipart_sets[_fi].hashes) free(fund_bipart_sets[_fi].hashes);
+        free(fund_bipart_sets);
+        fund_bipart_sets = NULL;
         }
 
     /* Free the thread-private fundamental data arrays.
@@ -1314,10 +1328,9 @@ void bootstrap_search(void)
             /******* Parallel bootstrap over replicates *******/
             hsprint = FALSE;  /* suppress per-replicate HS settings banner during bootstrap */
 
-            /* fund_bipart_sets is a shared global recomputed per-replicate for RF/ML.
-             * Concurrent writes would corrupt the data, so force single-threaded
-             * bootstrap for those criteria.  Dfit/sfit/qfit parallelism is unaffected. */
-            if(criterion == 6 || criterion == 7) nthreads = 1;
+            /* fund_bipart_sets is now threadprivate: each bootstrap thread builds its own
+             * copy from its resampled fundamentals via rf_precompute_fund_biparts().
+             * Parallel bootstrap is therefore safe for all criteria. */
 
 #ifdef _OPENMP
             if(nthreads > 1)
@@ -1346,6 +1359,7 @@ void bootstrap_search(void)
             int  **boot_save_presence        = presence_of_taxa;
             int ***boot_save_fund_scores     = fund_scores;
             int   *boot_save_num_comparisons = number_of_comparisons;
+            BipartSet *boot_save_fund_biparts = fund_bipart_sets;
 
 #ifdef _OPENMP
             #pragma omp parallel num_threads(nthreads) default(shared) \
@@ -1533,6 +1547,7 @@ void bootstrap_search(void)
             presence_of_taxa      = boot_save_presence;
             fund_scores           = boot_save_fund_scores;
             number_of_comparisons = boot_save_num_comparisons;
+            fund_bipart_sets      = boot_save_fund_biparts;
 
             /* Install merged results into the globals consensus() expects */
             if(bootstrap_results)
@@ -2525,6 +2540,8 @@ static void hs_alloc_thread_state(void)
         presence_of_taxa      = g_hs_presence_snap;
         fund_scores           = g_hs_fund_scores_snap;
         number_of_comparisons = g_hs_num_comp_snap;
+        /* Share master's precomputed bipart sets (read-only during HS parallel reps). */
+        fund_bipart_sets = g_hs_fund_bipart_snap;
         }
     else
         {
@@ -2596,6 +2613,8 @@ static void hs_free_thread_state(void)
     if(!is_master)
         {
         /* Non-master: free everything that was allocated per-thread. */
+        /* fund_bipart_sets points to master's data (shared read-only) -- NULL the pointer, do not free. */
+        fund_bipart_sets = NULL;
         if(sourcetree_scores) { free(sourcetree_scores); sourcetree_scores = NULL; }
         if(presenceof_SPRtaxa) { free(presenceof_SPRtaxa); presenceof_SPRtaxa = NULL; }
         for(k=0; k<number_retained_supers; k++)
@@ -3862,6 +3881,7 @@ void heuristic_search(int user, int print, int sample, int nreps)
                     g_hs_presence_snap     = presence_of_taxa;
                     g_hs_fund_scores_snap  = fund_scores;
                     g_hs_num_comp_snap     = number_of_comparisons;
+                    g_hs_fund_bipart_snap  = fund_bipart_sets;
                     #pragma omp parallel num_threads(nthreads) default(shared) \
                             private(prl_i)
                         {
@@ -4070,6 +4090,7 @@ void heuristic_search(int user, int print, int sample, int nreps)
                     g_hs_presence_snap     = presence_of_taxa;
                     g_hs_fund_scores_snap  = fund_scores;
                     g_hs_num_comp_snap     = number_of_comparisons;
+                    g_hs_fund_bipart_snap  = fund_bipart_sets;
 						#pragma omp parallel num_threads(nthreads) default(shared) \
 						        private(prl_i)
 							{

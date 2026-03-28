@@ -29,6 +29,9 @@
 
 /* fund_bipart_sets: defined in treecompare2.c, used by rf scoring */
 extern BipartSet *fund_bipart_sets;
+#ifdef _OPENMP
+#pragma omp threadprivate(fund_bipart_sets)
+#endif
 
 /* -----------------------------------------------------------------------
  * Distance and path-metric scoring
