@@ -1334,6 +1334,7 @@ void bootstrap_search(void)
             {
             int    boot_reps_done = 0;
             int    boot_reps_completed = 0;  /* actual replicate count, updated once per rep */
+            int    boot_reps_running = 0;   /* reps currently executing (across all threads) */
             char **boot_results_acc = malloc(1*sizeof(char*));
             float *boot_scores_acc  = malloc(1*sizeof(float));
             boot_results_acc[0] = malloc(TREE_LENGTH*sizeof(char));
@@ -1419,13 +1420,22 @@ void bootstrap_search(void)
                             {
                             printf2("\n\trepetition %d: taxon missing — skipped\n", i+1);
                             boot_reps_completed++;
-                            printf2("\r\t%d / %d replicates done", boot_reps_completed, Nreps);
+                            printf2("\r\t%d running, %d done / %d",
+                                    boot_reps_running, boot_reps_completed, Nreps);
                             fflush(stdout);
                             }
                         continue;
                         }
 
                     /* ---- Run the search ---- */
+#ifdef _OPENMP
+                    #pragma omp critical (boot_merge)
+#endif
+                        {
+                        boot_reps_running++;
+                        printf2("\r\t%d running, %d done / %d", boot_reps_running, boot_reps_completed, Nreps);
+                        fflush(stdout);
+                        }
                     if(search == 0)
                         alltrees_search(FALSE);
                     else
@@ -1500,8 +1510,10 @@ void bootstrap_search(void)
                     #pragma omp critical (boot_merge)
 #endif
                         {
+                        boot_reps_running--;
                         boot_reps_completed++;
-                        printf2("\r\t%d / %d replicates done", boot_reps_completed, Nreps);
+                        printf2("\r\t%d running, %d done / %d",
+                                boot_reps_running, boot_reps_completed, Nreps);
                         fflush(stdout);
                         }
                     } /* end loop body (i) */
