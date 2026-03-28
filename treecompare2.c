@@ -1060,8 +1060,10 @@ static void boot_free_thread_state(int ntrees, int ntaxa)
         {
         int _fi;
         for(_fi = 0; _fi < ntrees; _fi++)
+            {
             if(fund_bipart_sets[_fi].hashes) free(fund_bipart_sets[_fi].hashes);
             if(fund_bipart_sets[_fi].sizes)  free(fund_bipart_sets[_fi].sizes);
+            }
         free(fund_bipart_sets);
         fund_bipart_sets = NULL;
         }
