@@ -718,29 +718,30 @@ struct taxon * make_taxon(void)
 
 void prune_tree(struct taxon * super_pos, int fund_num)
 	{
+	int _g = 0, _gmax = number_of_taxa * 4 + 16;
 
-	
 	/* Traverse the supertree, visiting every taxa and checking if that taxa is on the fundamental tree */
-	
-	while(super_pos != NULL)
+
+	while(super_pos != NULL && !user_break && _g++ < _gmax)
 		{
-		
+
 		if(super_pos->daughter != NULL) prune_tree(super_pos->daughter, fund_num);  /* If this is pointer sibling, move down the tree */
-	
+
 		if(super_pos->name != -1) /* If there is an actual taxa on this sibling */
-			{	
+			{
 			/* Check to see if that taxa is on the fundamental tree */
-			
-			if(presence_of_taxa[fund_num][super_pos->name] == FALSE)  /* presence of taxa is an array that is filled in as the fundamental trees are inputted */		
+
+			if(presence_of_taxa[fund_num][super_pos->name] == FALSE)  /* presence of taxa is an array that is filled in as the fundamental trees are inputted */
 				{  /* if its not there */
 				super_pos->tag = FALSE;
 				}
 			}
-		
+
 		super_pos = super_pos->next_sibling;
-		
-		}	
-	
+
+		}
+	if(_g >= _gmax) rep_abandon = 1;
+
 	}
 
 int shrink_tree (struct taxon * position)
@@ -749,10 +750,11 @@ int shrink_tree (struct taxon * position)
 	float one, two;
 	char tempstr[1000] , tmplabel[1000];
 	struct taxon *tmppos = NULL;
-	
+	int _g = 0, _gmax = number_of_taxa * 4 + 16;
+
 	tmplabel[0] = '\0';
-	
-	while(position != NULL)
+
+	while(position != NULL && !user_break && _g++ < _gmax)
 		{
 		if(position->daughter != NULL) 
 			{
@@ -815,23 +817,26 @@ int shrink_tree (struct taxon * position)
 		else  /* else this is a taxa node */
 			{
 			if(position->tag) count++;  /* if this taxa is not switched off then increment count */
-			}				
+			}
 		position = position->next_sibling;
 		}
+	if(_g >= _gmax) rep_abandon = 1;
 	return(count);
-	
+
 	}
 
 int print_pruned_tree(struct taxon * position, int count, char *pruned_tree, int fullname, int treenum)
     {
-    char *name =NULL, temper[100];
-    int i=0;
-    
-    name = malloc(1000000*sizeof(char));
-    if(!name) memory_error(33);
+    /* name only holds a leaf label: either a decimal integer (~12 chars) or a
+     * fullname (bounded by NAME_LENGTH).  Use a stack buffer — the old 1 MB
+     * malloc was called recursively for every internal node on every source
+     * tree causing massive heap contention under parallel load. */
+    char name[NAME_LENGTH + 16];
+    int _g = 0, _gmax = number_of_taxa * 4 + 16;
+
     name[0] = '\0';
-    
-    while(position != NULL)
+
+    while(position != NULL && !user_break && _g++ < _gmax)
         {
         if(position->daughter != NULL)
             {
@@ -881,7 +886,7 @@ int print_pruned_tree(struct taxon * position, int count, char *pruned_tree, int
 			}
         position = position->next_sibling;
         }
-    free(name);
+    if(_g >= _gmax) rep_abandon = 1;
     return(count);
     }
 
@@ -911,22 +916,25 @@ void totext(int c, char *array)
 
 void reset_tree(struct	taxon * position)
 	{
-	
-	while(position != NULL)
+	int _g = 0, _gmax = number_of_taxa * 4 + 16;
+
+	while(position != NULL && !user_break && _g++ < _gmax)
 		{
 		position->tag = TRUE;
 		if(position->daughter != NULL) reset_tree(position->daughter);
 		position = position->next_sibling;
 		}
-	
+	if(_g >= _gmax) rep_abandon = 1;
+
 	}		
 
 int count_taxa(struct taxon * position, int count)
 	{
 	struct taxon * start = position;
 	int i =0;
-	
-	while(position != NULL)
+	int _g = 0, _gmax = number_of_taxa * 4 + 16;
+
+	while(position != NULL && !user_break && _g++ < _gmax)
 		{
 		if(position->daughter != NULL)
 			{
@@ -970,15 +978,18 @@ int number_tree(struct taxon * position, int num)
 	{
 	struct taxon * start = position;
 	int i =0;
-	
-	while(position != NULL)
+	int _g, _gmax = number_of_taxa * 4 + 16;
+
+	_g = 0;
+	while(position != NULL && !user_break && _g++ < _gmax)
 		{
 		if(position->daughter != NULL)
 			num = number_tree(position->daughter, num);
 		position = position->next_sibling;
 		}
 	position = start;
-	while(position != NULL)
+	_g = 0;
+	while(position != NULL && !user_break && _g++ < _gmax)
 		{
 		position->tag = num;
 		num++;
@@ -1037,7 +1048,8 @@ int count_internal_branches(struct taxon *position, int count)
 
 void identify_taxa(struct taxon * position, int *name_array)
 	{
-	while(position != NULL)
+	int _g = 0, _gmax = number_of_taxa * 4 + 16;
+	while(position != NULL && !user_break && _g++ < _gmax)
 		{
 		if(position->daughter != NULL)
 			{
@@ -1055,8 +1067,9 @@ int check_taxa(struct taxon * position)
 	{
 	struct taxon * start = position;
 	int i =0, number = 0;
+	int _g = 0, _gmax = number_of_taxa * 4 + 16;
 
-	while(position != NULL)
+	while(position != NULL && !user_break && _g++ < _gmax)
 		{
 		if(position->daughter != NULL)
                     {
@@ -1069,46 +1082,51 @@ int check_taxa(struct taxon * position)
                 position = position->next_sibling;
 		}
         return(number);
-	} 
+	}
 
 void dismantle_tree(struct taxon * position)
 	{
 	struct taxon * start = position;
-	
+	int _g, _gmax = number_of_taxa * 4 + 16;
+
 	/* first scan through this level and go down any pointer there are here */
-	while(position != NULL)
+	_g = 0;
+	while(position != NULL && !user_break && _g++ < _gmax)
 		{
 		if(position->daughter != NULL)
 			dismantle_tree(position->daughter);
-			
+
 		position = position->next_sibling;
 		}
 	position = start;
-	while(position->next_sibling != NULL) position= position->next_sibling;
-	
+	_g = 0;
+	while(position->next_sibling != NULL && _g++ < _gmax) position= position->next_sibling;
+
 	/* now remove every thing at this level */
-	while(position != NULL)
+	{ int _g3 = 0;
+	while(position != NULL && _g3++ < _gmax)
 		{
-		
 		if(count_now)malloc_check--;
 		start = position;
 		position = position->prev_sibling;
 		if(start->donor != NULL) free(start->donor);
 		if(start->fullname != NULL) free(start->fullname);
 		free(start);
-		}	
-	}		
+		}
+	}
+	}
 
 void print_named_tree(struct taxon * position, char *tree)
 	{
 	struct taxon *place = position;
 	int count = 0, j=0;
         char *name = NULL;
+	int _g = 0, _gmax = number_of_taxa * 4 + 16;
 	strcat(tree, "(");
-        
+
 	name = malloc(30*sizeof(char));
 	name[0] = '\0';
-	while(position != NULL)
+	while(position != NULL && !user_break && _g++ < _gmax)
 		{
 		if(count >0) strcat(tree, ",");
 		if(position->daughter != NULL)
@@ -1135,11 +1153,12 @@ void print_fullnamed_tree(struct taxon * position, char *tree, int fundtreenum)
 	struct taxon *place = position;
 	int count = 0, j=0;
         char *name = NULL;
+	int _g = 0, _gmax = number_of_taxa * 4 + 16;
 	strcat(tree, "(");
-        
+
 	name = malloc(30*sizeof(char));
 	name[0] = '\0';
-	while(position != NULL)
+	while(position != NULL && !user_break && _g++ < _gmax)
 		{
 		if(count >0) strcat(tree, ",");
 		if(position->daughter != NULL)
@@ -1174,11 +1193,12 @@ void print_tree(struct taxon * position, char *tree)
 	struct taxon *place = position;
 	int count = 0, j=0;
         char *name = NULL;
+	int _g = 0, _gmax = number_of_taxa * 4 + 16;
 	strcat(tree, "(");
-        
+
 	name = malloc(30*sizeof(char));
 	name[0] = '\0';
-	while(position != NULL)
+	while(position != NULL && !user_break && _g++ < _gmax)
 		{
 		if(count >0) strcat(tree, ",");
 		if(position->daughter != NULL)
@@ -1197,6 +1217,40 @@ void print_tree(struct taxon * position, char *tree)
 		}
 	strcat(tree, ")");
 	free(name);
+	}
+
+/* Print exactly one node's subtree as a Newick fragment — does NOT traverse
+ * next_sibling of `node` itself.  Unlike print_tree() which iterates the
+ * whole sibling chain starting at `position`, this function treats `node`
+ * as the sole root of the subtree being serialised.  Used by the TBR
+ * string-based rerooting helpers in treecompare2.c. */
+void print_single_subtree(struct taxon *node, char *buf)
+	{
+	char name[30];
+	int _g = 0, _gmax = number_of_taxa * 4 + 16;
+
+	if(node == NULL) return;
+
+	if(node->daughter != NULL)
+		{
+		struct taxon *child = node->daughter;
+		int first = 1;
+		strcat(buf, "(");
+		while(child != NULL && !user_break && _g++ < _gmax)
+			{
+			if(!first) strcat(buf, ",");
+			first = 0;
+			print_single_subtree(child, buf);   /* recurse on each child */
+			child = child->next_sibling;
+			}
+		strcat(buf, ")");
+		}
+	else
+		{
+		name[0] = '\0';
+		totext(node->name, name);
+		strcat(buf, name);
+		}
 	}
 
 void print_tree_withinternals(struct taxon * position, char *tree)
@@ -1270,6 +1324,7 @@ void reroot_tree(struct taxon *outgroup)
 	{
 	struct taxon *newbie = NULL, *temp_treetop = NULL, *position = NULL, *temp = NULL, *start = NULL, *parent_start = NULL, *next = NULL, *parent = NULL, *pointer = NULL;
 	char *temptree = NULL;
+	int _g, _gmax = number_of_taxa * 4 + 16;
 	temptree = malloc(TREE_LENGTH*sizeof(char));
 	temptree[0] = '\0';
 	newbie = make_taxon();
@@ -1279,14 +1334,16 @@ void reroot_tree(struct taxon *outgroup)
 	position = outgroup;
 	if(outgroup->prev_sibling != NULL)
 		{
-		while(position->prev_sibling != NULL) position = position->prev_sibling;
+		_g = 0;
+		while(position->prev_sibling != NULL && _g++ < _gmax) position = position->prev_sibling;
+		if(_g >= _gmax) { rep_abandon = 1; free(temptree); return; }
 		}
 	else
 		position = position->next_sibling;
-	
+
 	start = position;
 	newbie->daughter = start;
-	
+
 	/***2: extract the ougroup ***/
 	if(outgroup->next_sibling != NULL)(outgroup->next_sibling)->prev_sibling = outgroup->prev_sibling;
 	if(outgroup->prev_sibling != NULL)(outgroup->prev_sibling)->next_sibling = outgroup->next_sibling;
@@ -1298,21 +1355,29 @@ void reroot_tree(struct taxon *outgroup)
 		}
 	outgroup->next_sibling = NULL;
 	outgroup->prev_sibling = NULL;
-	
+
 	if(start!=NULL)parent = start->parent;
 	else parent=NULL;
-	
+
 	/** create new pointer on first level */
 	pointer = make_taxon();
 	position = start;
-	while(position->next_sibling != NULL) position = position->next_sibling;
+	_g = 0;
+	while(position->next_sibling != NULL && _g++ < _gmax) position = position->next_sibling;
+	if(_g >= _gmax) { free(pointer); free(temptree); rep_abandon = 1; return; }
 	position->next_sibling = pointer;
 	pointer->prev_sibling = position;
-	
-	while(parent != NULL)
+
+	/* Walk up the parent chain inverting parent-child relationships.
+	 * Guard against a cyclic parent chain (corrupt tree) with a depth counter. */
+	_g = 0;
+	while(parent != NULL && _g++ < _gmax)
 		{
 		position = parent;
-		while(position->prev_sibling != NULL) position = position->prev_sibling;
+		{ int _g2 = 0;
+		  while(position->prev_sibling != NULL && _g2++ < _gmax) position = position->prev_sibling;
+		  if(_g2 >= _gmax) { free(temptree); rep_abandon = 1; return; }
+		}
 		parent_start = position;
 		pointer->daughter = parent_start;
 		next = parent_start->parent;
@@ -1320,16 +1385,16 @@ void reroot_tree(struct taxon *outgroup)
 		pointer = parent;
 		start = parent_start;
 		parent = next;
-		
 		}
+	if(_g >= _gmax) { free(temptree); rep_abandon = 1; return; } /* cyclic parent chain */
 	pointer->daughter = NULL;
-	
+
 	(newbie->daughter)->parent = newbie;
-	
+
 	/* now make outgroup a siblig to newbie */
 	newbie->next_sibling = outgroup;
 	outgroup->prev_sibling = newbie;
-	
+
 	temp_top = temp_treetop;
 	/**** Now we need to remove any pointer taxa that are nolonger pointing to anything **/
 	clean_pointer_taxa(temp_top);
@@ -1343,20 +1408,23 @@ void reroot_tree(struct taxon *outgroup)
 
 void clean_pointer_taxa(struct taxon *position)
 	{
-	
+
 	struct taxon *start = position, *tmp = NULL;
 	int i=0;
-	
-	while(position != NULL)
+	int _g, _gmax = number_of_taxa * 4 + 16;
+
+	_g = 0;
+	while(position != NULL && !user_break && _g++ < _gmax)
 		{
 		if(position->daughter != NULL) clean_pointer_taxa(position->daughter);
 		position = position->next_sibling;
 		}
 	position = start;
-	
+
 	/*** Check to see if there are any pointer taxa not going anywhere ***/
-	
-	while(position != NULL)
+
+	_g = 0;
+	while(position != NULL && !user_break && _g++ < _gmax)
 		{
 		if(position->name == -1 && position->daughter == NULL)
 			{
@@ -1392,14 +1460,16 @@ void clean_pointer_taxa(struct taxon *position)
 	
 	/*** Count the number of children of each pointer taxa, if any only have 1 then delete that pointer taxa and replace it with its daughter ***/
 	/** however if there are any weights (like branch lenghs or bootstraps) they need to be assigned to the parent of this level  (Aug 17)**/
-	
-	while(position != NULL)
+
+	_g = 0;
+	while(position != NULL && !user_break && _g++ < _gmax)
 		{
 		if(position->daughter != NULL)
 			{
+			int _g2 = 0;
 			i=0;
 			tmp = position->daughter;
-			while(tmp != NULL)
+			while(tmp != NULL && _g2++ < _gmax)
 				{
 				i++;
 				tmp = tmp->next_sibling;
@@ -1431,9 +1501,10 @@ void clean_pointer_taxa(struct taxon *position)
 struct taxon * get_branch(struct taxon *position, int name)
 	{
 	struct taxon *start = position, *answer = NULL;
-	
-	
-	while(position != NULL && answer == NULL)
+	int _g, _gmax = number_of_taxa * 4 + 16;
+
+	_g = 0;
+	while(position != NULL && answer == NULL && !user_break && _g++ < _gmax)
 		{
 		if(position->daughter != NULL)
 			{
@@ -1444,12 +1515,13 @@ struct taxon * get_branch(struct taxon *position, int name)
 	if(answer == NULL)
 		{
 		position = start;
-		while(position != NULL && answer == NULL)
+		_g = 0;
+		while(position != NULL && answer == NULL && !user_break && _g++ < _gmax)
 			{
 			if(position->tag == name)
 				{
 				answer = position;
-				
+
 				}
 			position = position->next_sibling;
 			}
@@ -1643,7 +1715,7 @@ void duplicate_tree(struct taxon * orig_pos, struct taxon * prev_dup_pos)
 	
 	if(orig_pos->parent == NULL) done = TRUE;
 	
-	while(orig_pos != NULL)
+	while(orig_pos != NULL && !user_break)
 		{
 		dup_pos = make_taxon();
 		if(done)

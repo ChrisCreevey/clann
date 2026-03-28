@@ -558,6 +558,12 @@ float compare_trees(int spr)
     /******* Next score this supertree against every fundamental tree in memory *********/
     for(i=0; i< Total_fund_trees; i++)
         {
+        /* Allow Ctrl+C to interrupt long scoring loops; flush ensures the flag
+         * is visible to worker threads on all architectures (e.g. ARM64). */
+#ifdef _OPENMP
+        #pragma omp flush(user_break)
+#endif
+        if(user_break) break;
 		if(sourcetreetag[i]) /* if this sourcetree is to be used in the analysis ---- defined by the exclude command */
 			{
 			
@@ -674,11 +680,18 @@ float compare_trees_rf(int spr)
     int i, j;
     float total = 0.0f;
     char *pruned_nwk    = malloc(TREE_LENGTH * sizeof(char));
+    if(!pruned_nwk) memory_error(80);
     char *tmp           = malloc(TREE_LENGTH * sizeof(char));
+    if(!tmp) { free(pruned_nwk); memory_error(81); }
     uint64_t *super_bp  = malloc(number_of_taxa * sizeof(uint64_t));
+    if(!super_bp) { free(pruned_nwk); free(tmp); memory_error(82); }
 
     for(i = 0; i < Total_fund_trees; i++)
         {
+#ifdef _OPENMP
+        #pragma omp flush(user_break)
+#endif
+        if(user_break) break;
         if(!sourcetreetag[i]) continue;
 
         int found = FALSE, here1 = TRUE, here2 = TRUE;
@@ -743,11 +756,18 @@ float compare_trees_ml(int spr)
     int i, j;
     float total = 0.0f;
     char *pruned_nwk   = malloc(TREE_LENGTH * sizeof(char));
+    if(!pruned_nwk) memory_error(83);
     char *tmp          = malloc(TREE_LENGTH * sizeof(char));
+    if(!tmp) { free(pruned_nwk); memory_error(84); }
     uint64_t *super_bp = malloc(number_of_taxa * sizeof(uint64_t));
+    if(!super_bp) { free(pruned_nwk); free(tmp); memory_error(85); }
 
     for(i = 0; i < Total_fund_trees; i++)
         {
+#ifdef _OPENMP
+        #pragma omp flush(user_break)
+#endif
+        if(user_break) break;
         if(!sourcetreetag[i]) continue;
 
         int found = FALSE, here1 = TRUE, here2 = TRUE;

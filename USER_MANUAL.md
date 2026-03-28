@@ -330,8 +330,11 @@ hs [options]
 | `maxswaps` | `<integer>` | 1,000,000 | Maximum number of branch swaps per replicate. |
 | `savetrees` | `<filename>` | `Heuristic_result.txt` | Output file for the best supertree(s) found. |
 | `nthreads` | `<integer>` | all CPUs | Number of OpenMP threads. Each thread runs an independent search replicate in parallel. Not available for `criterion=recon`. |
-| `maxskips` | `<integer>` | 1,000 | Stop a replicate after this many consecutive already-visited SPR moves. Set to `0` to disable. Prevents long runs that have converged. |
+| `maxskips` | `<integer>` | auto (2N²) | Stop a replicate after this many consecutive already-visited SPR moves. Set to `0` to disable. Default auto-scales to 2×(number of taxa)². Prevents long runs that have converged. |
+| `progress` | `<integer>` | 5 | *(OpenMP only)* How often (in seconds) to print a best-so-far status line when running multiple threads. Set to `0` to print every time a new global best is found. Has no effect when running single-threaded. |
+| `droprep` | `<float>` | 0 (disabled) | *(OpenMP only)* Abandon a replicate early if its current best score is more than this fraction above the current global best across all threads (e.g. `0.1` = 10%). The per-rep completion line will show `droprep` as the stop reason. The freed thread immediately starts the next queued replicate. Set to `0` to disable. Has no effect when running single-threaded. |
 | `visitedtrees` | `<filename>` | *(disabled)* | Record every unique topology visited during the search to a tab-separated file (columns: `newick`, `score`, `visit_count`). Accumulated across all replicates and threads. See [Tree-space landscape analysis](#tree-space-landscape-analysis) for post-processing. |
+| `autoprunemono` | — | — | Set via the `exe` command (`exe myfile.ph autoprunemono=yes`), not `hs` directly. Prunes monophyletic same-species clades from multicopy trees at load time so more source trees contribute to the search. See [Autoprunemono](#autoprunemono). |
 
 **Weight options (criterion-specific):**
 
@@ -465,9 +468,13 @@ bootstrap [options]
 | `start` | `random`, `<filename>` | `random` | Starting tree for each heuristic search. |
 | `nsteps` | `<integer>` | 5 | Steps per replicate. |
 | `maxswaps` | `<integer>` | 1,000,000 | Maximum swaps per replicate. |
+| `nthreads` | `<integer>` | all CPUs | Number of OpenMP threads. Each thread runs an independent bootstrap replicate in parallel. |
+| `progress` | `<integer>` | 5 | *(OpenMP only)* How often (in seconds) to print a best-so-far status line when running multiple threads. Set to `0` to print every time a new global best is found. |
+| `droprep` | `<float>` | 0 (disabled) | *(OpenMP only)* Abandon a bootstrap heuristic search replicate early if its score is more than this fraction above the current global best. See `hs droprep` for details. |
 | `treefile` | `<filename>` | `bootstrap.txt` | Output file for all bootstrap trees. |
 | `consensus` | `strict`, `majrule`, `minor`, `<float 0–1>` | `majrule` | Consensus method: strict (1.0), majority-rule (0.5), or a custom threshold (e.g. `0.75` for 75%). |
 | `consensusfile` | `<filename>` | `consensus.ph` | Output file for the consensus tree with bootstrap support. |
+| `autoprunemono` | — | — | Set via the `exe` command (`exe myfile.ph autoprunemono=yes`), not `boot` directly. Prunes monophyletic same-species clades from multicopy trees at load time. See [Autoprunemono](#autoprunemono). |
 
 **Weight and criterion-specific options** are the same as for `hs`.
 

@@ -25,6 +25,7 @@
 #include "viz.h"
 #include "main.h"
 
+
 /* ===== CLI direct-command interface ===================================
  *
  * Allows CLANN to be called as:
@@ -1287,7 +1288,18 @@ void print_commands(int num)
 #ifdef _OPENMP
             printf2("\n\tnthreads\t<integer number>\t\t*%-3d (OpenMP threads; default=all CPUs; not available for criterion=recon)", omp_get_num_procs());
 #endif
-            printf2("\n\tmaxskips\t<integer number>\t\t*1000 (stop replicate after this many consecutive already-visited SPR moves; 0=disabled)");
+            printf2("\n\tmaxskips\t<integer number>\t\t*auto=2N² (stop replicate after this many consecutive already-visited moves; 0=disabled)");
+#ifdef _OPENMP
+            if(hs_progress_interval == 0)
+                printf2("\n\tprogress\t<integer seconds | 0>\t\t0 (report every improvement)");
+            else
+                printf2("\n\tprogress\t<integer seconds | 0>\t\t%d (parallel best-so-far update interval; 0=every improvement)", hs_progress_interval);
+            if(hs_droprep > 0.0f)
+                printf2("\n\tdroprep\t\t<float 0-1>\t\t\t%.4f (abandon rep if score >X%% above global best; 0=disabled)", hs_droprep);
+            else
+                printf2("\n\tdroprep\t\t<float 0-1>\t\t\t0 (disabled; abandon rep if score >X%% above global best; parallel only)");
+#endif
+            printf2("\n\tautoprunemono\t(set via exe) prune monophyletic same-species clades from multicopy trees at load time");
             printf2("\n\tvisitedtrees\t<filename>\t\t\t(disabled) Record all visited topologies (TSV: newick, score, visit_count)");
             if(criterion == 0)
                 {
@@ -1376,7 +1388,16 @@ void print_commands(int num)
 				printf2("\n\tnthreads\t<integer number>\t\t*%-3d (parallel bootstrap replicates; default=all CPUs)", omp_get_num_procs());
 			else if(criterion == 6 || criterion == 7)
 				printf2("\n\tnthreads\t(single-threaded for RF/ML; parallelism not yet implemented)");
+			if(hs_progress_interval == 0)
+				printf2("\n\tprogress\t<integer seconds | 0>\t\t0 (report every improvement)");
+			else
+				printf2("\n\tprogress\t<integer seconds | 0>\t\t%d (parallel best-so-far update interval; 0=every improvement)", hs_progress_interval);
+			if(hs_droprep > 0.0f)
+				printf2("\n\tdroprep\t\t<float 0-1>\t\t\t%.4f (abandon rep if score >X%% above global best; 0=disabled)", hs_droprep);
+			else
+				printf2("\n\tdroprep\t\t<float 0-1>\t\t\t0 (disabled; abandon rep if score >X%% above global best; parallel only)");
 #endif
+			printf2("\n\tautoprunemono\t(set via exe) prune monophyletic same-species clades from multicopy trees at load time");
 			printf2("\n\tconsensus\tstrict | majrule | minor | <proportion>\t*majrule");
 			printf2("\n\tconsensusfile\t<filename>\t\t\tconsensus.ph\n");
             printf2("\n");
@@ -2526,31 +2547,30 @@ void controlc1(int signal)
 
 	}
 
-void controlc2(int signal)
+void controlc2(int sig)
 	{
-	char *c = NULL;
-	
-	c = malloc(10000*sizeof(char));
-	
-	printf2("\n\n\n\nCompleted the assessment of %d trees...best tree found so far has a score of %f\nDo you want to stop the heuristic searches now? (Y/N): \n", NUMSWAPS, BESTSCORE);
-	xgets(c);
-	while(strcmp(c, "Y") != 0 && strcmp(c, "y") != 0 && strcmp(c, "N") != 0 && strcmp(c, "n") != 0)
-		{
-		printf2("Error '%s' is not a valid response, please respond Y or N\n", c);
-		xgets(c);
-		}
-	
-	if(strcmp(c, "Y") == 0 || strcmp(c, "y") == 0)
+	(void)sig;
+	/* async-signal-safe: only write() and _exit() are used here.
+	 * printf/fflush/signal are NOT async-signal-safe and can deadlock
+	 * if the signal interrupts a thread holding the stdio mutex. */
+	static volatile sig_atomic_t ctrl_c_count = 0;
+	ctrl_c_count++;
+	if(ctrl_c_count == 1)
 		{
 		user_break = TRUE;
-		printf2("Stopping heuristic search. The resulting tree may be sub-optimal\n\n");
+		static const char msg1[] =
+			"\nSearch interrupted \xe2\x80\x94 threads will stop after their current swap; "
+			"best tree will be written to output.\n"
+			"Press Ctrl+C again to force-quit immediately (output will NOT be saved).\n";
+		write(STDOUT_FILENO, msg1, sizeof(msg1) - 1);
+		/* Handler persists on macOS/Linux (BSD signal semantics); no re-arm needed. */
 		}
-
-
-	if(strcmp(c, "N") == 0 || strcmp(c, "n") == 0)
-			printf2("Continuing heuristic searches.....\n");
-	
-	free(c);
+	else
+		{
+		static const char msg2[] = "\nForce quit \xe2\x80\x94 output not saved.\n";
+		write(STDOUT_FILENO, msg2, sizeof(msg2) - 1);
+		_exit(1);
+		}
 	}
 
 void controlc3(int signal)

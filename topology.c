@@ -285,10 +285,12 @@ uint64_t tree_topo_hash(struct taxon *root)
     int ti;
     if(!root || !taxon_hash_vals) return 0;
     for(ti = 0; ti < number_of_taxa; ti++) total ^= taxon_hash_vals[ti];
-    /* Traverse from root's daughters — the root node itself is the
-       unrooted tree's trifurcation/multifurcation, not an internal edge */
-    if(root->daughter)
-        sth_aux(root->daughter, total, &tree_h);
+    /* Traverse from root itself.  In Clann's tree representation, tree_top
+       is one branch of the unrooted trifurcation (not a virtual super-root):
+       the trifurcation branches are tree_top, tree_top->next_sibling, etc.
+       Calling sth_aux(root) processes all trifurcation branches correctly
+       and is rooting-independent. */
+    sth_aux(root, total, &tree_h);
     /* Remap 0 → 1 so that 0 remains the "empty" sentinel in VisitedSet */
     return (tree_h == 0) ? 1 : tree_h;
     }

@@ -31,6 +31,7 @@
 #include "reconcile.h"
 #include "prune.h"
 #include "main.h"
+#include "spr_tree.h"
 
 BipartSet *fund_bipart_sets = NULL;  /* [Total_fund_trees], precomputed once per analysis */
 
@@ -94,6 +95,7 @@ void heuristic_search(int user, int print, int sample, int nreps);
 int average_consensus(int nrep, int missing_method, char * useroutfile, FILE *paupfile);
 int do_search(char *tree, int user, int print, int maxswaps, FILE *outfile, int numspectries, int numgenetries);
 int branchswap(int number_of_swaps, float score, int numspectries, int numgenetries);
+static void fix_parent_pointers(struct taxon *pos, struct taxon *parent);
 int find_swaps(float * number, struct taxon * position, int number_of_swaps, int numspectries,int numgenetries);
 void do_swap(struct taxon * first, struct taxon * second);
 int swapper(struct taxon * position,struct taxon * prev_pos, int stepstaken, struct taxon * first_swap, struct taxon * second_swap, float * number, int * swaps, int number_of_swaps, int numspectries, int numgenetries);
@@ -209,6 +211,11 @@ void get_taxa_names(struct taxon *position, char **taxa_fate_names);
 int basic_tree_build (int c, char *treestring, struct taxon *parent, int fullnames);
 int sort_tree(struct taxon *position);
 int spr_new(struct taxon * master, int maxswaps, int numspectries, int numgenetries);
+static int spr_new2(struct taxon *master, int maxswaps, int numspectries, int numgenetries);
+static int tbr_new(struct taxon *master, int maxswaps, int numspectries, int numgenetries);
+static int evaluate_candidate(const char *candidate_nwk, float *tmp_fund_scores, int numspectries, int numgenetries);
+static int spr_new3(struct taxon *master, int maxswaps, int numspectries, int numgenetries);
+static int tbr_new2(struct taxon *master, int maxswaps, int numspectries, int numgenetries);
 void do_log(void);
 void print_splash(void);
 
@@ -237,7 +244,8 @@ int   ml_scale = 2;     /* ML score scale: 0=paper (raw sum), 1=lust (log10), 2=
 time_t interval1, interval2;
 double sup=1;
 char saved_supertree[TREE_LENGTH],  *test_array, inputfilename[10000], delimiter_char = '.', logfile_name[10000], system_call[100000];
-int trees_in_memory = 0, *sourcetreetag = NULL, remainingtrees = 0, GC, user_break = FALSE, delimiter = TRUE, print_log = FALSE, num_gene_nodes, testarraypos = 0;
+volatile int user_break = FALSE;
+int trees_in_memory = 0, *sourcetreetag = NULL, remainingtrees = 0, GC, delimiter = TRUE, print_log = FALSE, num_gene_nodes, testarraypos = 0;
 int malloc_check =0, count_now = FALSE, another_check =0;
 unsigned int thread_seed = 0;   /* per-thread random seed for rand_r(); see threadprivate block below */
 uint64_t *taxon_hash_vals = NULL; /* shared read-only: splitmix64 weight per taxon; set at taxa load time */
@@ -255,8 +263,17 @@ float  par_progress_best   = -1.0f; /* best score seen so far across ALL paralle
 float  par_last_print_score= -1.0f; /* par_progress_best at last status line (thread-0 only) */
 time_t par_search_start    = 0;     /* wall-clock time when the parallel region began */
 int    skip_streak         = 0;     /* threadprivate: consecutive already-visited skips since last new topology */
+int    nni_swaps           = 0;     /* threadprivate: NNI refinement swaps performed after SPR/TBR in last do_search() rep */
 int    hs_maxskips         = -1;    /* shared: stop replicate when skip_streak reaches this (0=disabled, -1=auto: N*N) */
 int    hs_maxskips_is_auto = 1;    /* 1=auto-scale to N*N at search start; 0=user has set an explicit value */
+int    hs_strategy         = 0;    /* 0=first-improvement (depth-first); 1=best-improvement (breadth-first) */
+int    hs_progress_interval= 5;    /* shared: parallel progress print interval in seconds (0=every improvement) */
+time_t par_last_progress_time = 0; /* shared: wall-clock time of last parallel progress line printed */
+float  hs_droprep          = 0.0f; /* shared: abandon rep if its score is >droprep fraction above par_progress_best; 0=disabled */
+int    rep_abandon         = 0;    /* threadprivate: set when this rep should be abandoned due to droprep */
+int    hs_par_rep          = 0;    /* threadprivate: 1-based rep number for the rep currently running on this thread */
+int    hs_thread_report_interval = 0; /* shared: per-thread status report interval in seconds (0=disabled) */
+time_t thread_report_last = 0;        /* threadprivate: wall-clock time of last per-thread status print */
 
 /****** OpenMP thread-private state: one independent copy per thread in parallel regions ******/
 #ifdef _OPENMP
@@ -270,7 +287,7 @@ int    hs_maxskips_is_auto = 1;    /* 1=auto-scale to N*N at search start; 0=use
     thread_seed, \
     visited_set, thread_visited_acc, landscape_map, \
     rep_start_time, hs_do_print, last_status_score, \
-    skip_streak, \
+    skip_streak, nni_swaps, rep_abandon, hs_par_rep, thread_report_last, \
     fundamentals, presence_of_taxa, fund_scores, number_of_comparisons \
 )
 #endif
@@ -288,2916 +305,10 @@ static int   *g_hs_num_comp_snap        = NULL;
 
 /* CLI helpers, main, seperate_commands, print_splash, print_commands,
  * parse_command, recount_from_tree, autoprunemono_apply, execute_command:
- * moved to main.c */
-#if 0
-/* ===== CLI direct-command interface ===================================
- *
- * Allows CLANN to be called as:
- *   clann <command> <treefile> [key=value ...]
- *   clann usertrees <source> <candidates> [key=value ...]
- *   clann --help
- *   clann hs --help
- *
- * Options with '=' are parsed as key=value pairs.
- * Named file flags: --source=<f>/--trees=<f> set the gene-tree file;
- *   --topologies=<f>/--candidates=<f> set the usertrees candidates file.
- * Global options (criterion, nthreads, mlbeta, mlscale, seed) become
- * "set X Y" commands; all others are appended to the command string.
- * Leading '--' is stripped so GNU-style --criterion=ml also works.
- * ===================================================================== */
-
-static const char *cli_known_commands[] = {
-    "hs", "hsearch", "alltrees", "usertrees", "consensus", "nj", "boot", "bootstrap", NULL
-};
-
-static int is_cli_command(const char *s)
-    {
-    int i;
-    for(i = 0; cli_known_commands[i]; i++)
-        if(strcmp(s, cli_known_commands[i]) == 0) return TRUE;
-    return FALSE;
-    }
-
-/* Print usage.  cmd==NULL: general help.  cmd!=NULL: per-command help
- * (synthesises "<cmd> ?" into stored_commands[] for the REPL to handle). */
-static void cli_usage(const char *cmd)
-    {
-    if(cmd == NULL)
-        {
-        printf("\nUsage:\n");
-        printf("  clann <command> <treefile> [options]\n");
-        printf("  clann usertrees --source=<gene-trees> --topologies=<candidates> [options]\n\n");
-        printf("Commands:\n");
-        printf("  hs / hsearch   Heuristic supertree search\n");
-        printf("  alltrees       Exhaustive supertree search (small datasets)\n");
-        printf("  usertrees      Score / test user-supplied topologies (requires two files)\n");
-        printf("  consensus      Consensus tree from source trees\n");
-        printf("  nj             Neighbour-joining supertree\n\n");
-        printf("File options (all commands):\n");
-        printf("  --source=<f> / --trees=<f>        Source gene-tree file (positional arg also accepted)\n");
-        printf("  --topologies=<f> / --candidates=<f>  Candidate-topology file (usertrees only)\n\n");
-        printf("Global options (applied before the command):\n");
-        printf("  criterion=<c>   dfit (default), ml, rf, sfit, qfit, avcon\n");
-        printf("  nthreads=<n>    threads for parallel search (default: all CPUs)\n");
-        printf("  mlbeta=<f>      beta for ML criterion (default 1.0)\n");
-        printf("  mlscale=<s>     lnl (default), paper, lust\n");
-        printf("  seed=<n>        random seed\n\n");
-        printf("Examples:\n");
-        printf("  clann hs gene_trees.ph criterion=ml nthreads=4\n");
-        printf("  clann usertrees --source=gene_trees.ph --topologies=candidates.ph criterion=ml tests=yes\n\n");
-        printf("Run 'clann <command> --help' for command-specific options.\n");
-        printf("Run 'clann' with no arguments to start the interactive session.\n\n");
-        }
-    else
-        {
-        /* Let the existing REPL help system handle per-command help */
-        snprintf(stored_commands[parts], 10000, "%s ?", cmd);
-        parts++;
-        }
-    }
-
-/* Populate stored_commands[] with synthesised CLANN commands derived
- * from argv[start..argc-1].
- *
- * Returns  TRUE  : CLI mode; caller should set command_line / doexecute_command
- *          -1    : general --help printed; caller should clean_exit(0)
- *          -2    : per-command help queued; run REPL without loading a tree
- *
- * out_treefiles[0] = source-trees file (for exe / execute_command)
- * out_treefiles[1] = candidate-topologies file (usertrees only)
- */
-static int cli_dispatch(int argc, char *argv[], int start,
-                        char out_treefiles[2][1000])
-    {
-    static const char *global_keys[] = {
-        "criterion", "mlbeta", "mlscale", "seed", NULL
-    };
-
-    const char *cmdname = argv[start];
-    char main_cmd[10000];
-    int file_count = 0, k, g, is_usertrees;
-
-    is_usertrees = (strcmp(cmdname, "usertrees") == 0);
-
-    /* Scan for --help / -h */
-    for(k = start; k < argc; k++)
-        {
-        const char *a = argv[k];
-        while(*a == '-') a++;
-        if(strcmp(a, "help") == 0 || strcmp(a, "h") == 0)
-            {
-            /* Per-command help: queue "<cmd> ?" for the REPL to print */
-            snprintf(stored_commands[parts], 10000, "%s ?", cmdname);
-            parts++;
-            return -2;  /* run REPL, no tree needed */
-            }
-        }
-
-    snprintf(main_cmd, sizeof(main_cmd), "%s", cmdname);
-
-    for(k = start + 1; k < argc; k++)
-        {
-        char stripped[10000];
-        char key[512], val[512];
-        char *p, *eq;
-
-        strncpy(stripped, argv[k], sizeof(stripped) - 1);
-        stripped[sizeof(stripped) - 1] = '\0';
-
-        /* Strip leading -- or - */
-        p = stripped;
-        if(p[0] == '-' && p[1] == '-')      p += 2;
-        else if(p[0] == '-' && p[1] != '\0') p += 1;
-
-        /* Split on first '=' */
-        eq = strchr(p, '=');
-        if(eq)
-            {
-            int klen = (int)(eq - p);
-            strncpy(key, p, klen); key[klen] = '\0';
-            strncpy(val, eq + 1, sizeof(val) - 1); val[sizeof(val) - 1] = '\0';
-            }
-        else
-            {
-            strncpy(key, p, sizeof(key) - 1); key[sizeof(key) - 1] = '\0';
-            val[0] = '\0';
-            }
-
-        /* No '=' → file argument */
-        if(val[0] == '\0')
-            {
-            if(file_count == 0)
-                strncpy(out_treefiles[0], key, 999);
-            else if(file_count == 1 && is_usertrees)
-                {
-                /* usertrees needs the candidates file as its first argument */
-                snprintf(main_cmd, sizeof(main_cmd), "%s %s", cmdname, key);
-                }
-            file_count++;
-            continue;
-            }
-
-        /* Named file flags: --source=<f> / --trees=<f> → source-trees file
-         *                   --topologies=<f> / --candidates=<f> → usertrees candidates */
-        if(strcasecmp(key, "source") == 0 || strcasecmp(key, "trees") == 0)
-            { strncpy(out_treefiles[0], val, 999); continue; }
-        if(is_usertrees &&
-           (strcasecmp(key, "topologies") == 0 || strcasecmp(key, "candidates") == 0))
-            { snprintf(main_cmd, sizeof(main_cmd), "%s %s", cmdname, val); continue; }
-
-        /* Is it a global set option? */
-        int is_global = FALSE;
-        for(g = 0; global_keys[g]; g++)
-            if(strcasecmp(key, global_keys[g]) == 0) { is_global = TRUE; break; }
-
-        if(is_global)
-            {
-            snprintf(stored_commands[parts], 10000, "set %s %s", key, val);
-            parts++;
-            }
-        else
-            {
-            /* Command-specific: append to main_cmd */
-            snprintf(main_cmd + strlen(main_cmd),
-                     sizeof(main_cmd) - strlen(main_cmd),
-                     " %s %s", key, val);
-            }
-        }
-
-    /* Enqueue the main command */
-    snprintf(stored_commands[parts], 10000, "%s", main_cmd);
-    parts++;
-    return TRUE;
-    }
-
-/* ===== end CLI helpers =============================================== */
-
-
-int main(int argc, char *argv[])
-    {
-	
-    int i = 0, j=0, k=0, l=0, m=0, error=FALSE, x, doexecute_command = FALSE, command_line = FALSE, tipnum=0, autocommands=FALSE;
-    char c, s, *command = NULL, *prev_command = NULL, HOME[1000], PATH[1000], exefilename[1000], string[10000];
-    time_t time1, time2;
-    double diff=0;    
-    FILE *tmpclann = NULL;
-	
-	exefilename[0] = '\0';
-	inputfilename[0] = '\0';
-    saved_supertree[0] = '\0';
-    logfile_name[0] = '\0';
-	strcpy(logfile_name, "clann.log");
-	system_call[0] ='\0';
-
-	test_array = malloc(TREE_LENGTH*sizeof(int));
-	test_array[0] = '\0';
-
-	
-	/********** START OF READLINE STUFF ***********/
-	#ifdef HAVE_READLINE    
-	if(command_line == FALSE)
-		{
-		PATH[0] ='\0'; HOME[0] = '\0'; 
-		
-		system("echo $HOME > clann5361temp1023");
-		tmpclann = fopen("clann5361temp1023", "r");
-		fscanf(tmpclann, "%s", HOME);
-		fclose(tmpclann);
-		remove("clann5361temp1023"); 
-		strcpy(PATH, HOME);
-		strcat(PATH, "/.clannhistory");
-		read_history(PATH);
-		}
-    #endif
-    /********** END OF READLINE STUFF *************/
-    
-    
-    time1 = time(NULL);
-    /*seed the rand number with the calander time + the PID of the process ---- used for bootstrapping and others */
-    #ifdef HAVE_READLINE
-    seed=(int)((time(NULL)/2)+getpid());
-    srand((unsigned) (seed));
-    #else
-    seed=(int)(time(NULL)/2);
-    srand((unsigned) (seed));
-    #endif
-
-    command = malloc(1000000*sizeof(char));
-    if(!command) memory_error(74);
-    command[0] = '\0';
-
-    prev_command = malloc(1000000*sizeof(char));
-    if(!prev_command) memory_error(74);
-    prev_command[0] = '\0';
-
-    tempsuper = malloc(TREE_LENGTH*sizeof(char));
-    tempsuper[0] = '\0';
-
-    /** allocate the array to store multiple commands that are sepatated by ";" on the commandline */
-
-    stored_commands = malloc(100*sizeof(char *));
-    if(!stored_commands) memory_error(62);
-    for(i=0; i<100; i++)
-        {
-        stored_commands[i] = malloc(10000*sizeof(char));
-        if(!stored_commands[i]) memory_error(63);
-        stored_commands[i][0] = '\0';
-        }
-
-
-    /* allocate the array to hold the retained supertrees */
-    retained_supers = malloc(number_retained_supers*sizeof(char *));
-    if(!retained_supers) memory_error(45);
-    for(i=0; i<number_retained_supers; i++)
-        {
-        retained_supers[i] = malloc(TREE_LENGTH*sizeof(char));
-        if(!retained_supers[i]) memory_error(46);
-        retained_supers[i][0] = '\0';
-        }
-    scores_retained_supers = malloc(number_retained_supers*sizeof(float));
-    if(!scores_retained_supers) memory_error(47);
-    for(i=0; i<number_retained_supers; i++)
-        scores_retained_supers[i] = -1;
-    
-    /* assign the parsed_command array */
-    
-    parsed_command = malloc(10000*sizeof(char *));
-    for(i=0; i<10000; i++)
-        {
-        parsed_command[i] = malloc(10000*sizeof(char));
-        parsed_command[i][0] = '\0';
-        }
-
-
-	/* Pre-getopt: handle --help before BSD getopt tries to parse double-dash */
-	if(argc >= 2 && strcmp(argv[1], "--help") == 0)
-		{
-		cli_usage(NULL);
-		clean_exit(0);
-		}
-
-	if(argc > 1)
-		{
-		while ((c = getopt(argc, argv, "nlhc:")) != -1)
-		    {   
-			switch (c) 
-			      {
-			      case 'n':
-				        command_line = TRUE;
-						printf("\nNon-Internactive mode entered - commands must be provided in a nexus \'clann block\' or with \'-c\'\n");
-				        break;
-			      case 'l':
-				        printf2("opening logfile %s\n", logfile_name);	
-			        	if((logfile = fopen(logfile_name, "w")) == NULL)
-			        		{	
-			        		printf2("Error opening log file named %s\n", logfile_name);
-			        		}
-			        	else
-			        		{
-			        		printf2("starting logging to logfile %s\n", logfile_name );
-			        		print_log = TRUE;
-			        		}
-				        break;
-				  case 'c':
-				  		commands_filename = optarg;
-				  		printf2("opening commands file %s\n", commands_filename);
-
-			        	if((commands_file = fopen(commands_filename, "r")) == NULL)
-			        		{	
-			        		printf2("Error opening commands file named %s\n", commands_filename);
-			        		}
-			        	else
-			        		{
-			        		s = getc(commands_file);
-							while(!feof(commands_file) && !error)
-								{
-								i=0;
-								while((s == ' ' || s == '\n' || s == '\r' || s == '\t' || s == ';') && !feof(commands_file)) s = getc(commands_file);
-								if(s == '#') /* skip over lines that start with a '#' -- this allows the user to add comments */
-									{
-									while(!feof(commands_file) && s != '\n' && s != '\r') s = getc(commands_file);
-									}	
-								while(s != ';' && s != '\n' && !feof(commands_file)) /* commands can finish with a ';' or a newline character */
-									{
-									string[i] = s;
-									i++;
-									s = getc(commands_file);
-									}
-								string[i] = ';';
-								string[i+1] = '\0';
-								strcpy(stored_commands[parts], string);
-								parts++;
-								}
-							autocommands=TRUE; /* this is used indicate that we need to print the commands both to screen and log, as otherwise they will not appear */
-							fclose(commands_file);
-			        		}
-			        	break;
-			      case 'h':
-			      		print_splash();
-			      		
-
-			      		printf("\nUsage: \"clann -lnh [-c commands file] [tree file]\"\n");
-			      		printf("\n\tWhere [tree file] is an optional Nexus or Phylip formatted file of phylogenetic trees\n");
-			      		printf("\t-l turn on logging of screen output to file \"clann.log\"\n");
-			      		printf("\t-n turns off interactive mode - requires commands to be provided in a nexus \'clann block\' or with \'-c\'\n");
-			      		printf("\t-c <file name> specifies a file with commands to be executed (one command per line)\n");
-			      		printf("\t-h prints this message\n\n");
-
-				        print_commands(0);
-
-				        clean_exit(0);
-				        break;
-			      }
-		 	}
-		for (i = optind; i < argc; i++)
-			{
-			doexecute_command = TRUE;
-			strcpy(exefilename, argv[i]);
-			}
-
-		/* ---- CLI direct-command mode ------------------------------------ *
-		 * If the first non-flag argument is a known command name, synthesise *
-		 * the stored_commands queue and run non-interactively.              *
-		 * ------------------------------------------------------------------ */
-		if(optind < argc && is_cli_command(argv[optind]))
-			{
-			char cli_treefiles[2][1000];
-			int cli_r;
-			cli_treefiles[0][0] = '\0';
-			cli_treefiles[1][0] = '\0';
-			/* Reset any state set by the earlier non-flag argv loop */
-			doexecute_command = FALSE;
-			exefilename[0] = '\0';
-			cli_r = cli_dispatch(argc, argv, optind, cli_treefiles);
-			if(cli_r == -1) clean_exit(0);   /* general --help printed */
-			if(cli_r == -2)
-				{
-				/* Per-command help: run REPL with "cmd ?" queued, no tree */
-				command_line = TRUE;
-				}
-			if(cli_r == TRUE)
-				{
-				command_line = TRUE;
-				if(cli_treefiles[0][0] != '\0')
-					{
-					doexecute_command = TRUE;
-					strcpy(exefilename, cli_treefiles[0]);
-					}
-				}
-			/* prevent the earlier non-flag loop from double-loading */
-			optind = argc;
-			}
-		}
-	if(command_line == TRUE)
-		{
-		strcpy(stored_commands[parts], "quit");
-		parts++;
-		}
-
-    print_splash(); /* Print the Clann splash screen */
-
-     
-    if(doexecute_command) /* if the user has specified an input file at the command line */
-        {
-        execute_command(exefilename, TRUE);
-        }
-    
-
-    i=0;
-    while(strcmp(parsed_command[0], "quit") != 0)  /* while the user has not chosen to quit */
-        {
-        
-        if(num_commands > 0)
-            {
-            
-            if(print_log && strcmp(command, "") != 0)
-            	{ 
-            	fprintf(logfile, "clann> %s\n", command);
-            	if(autocommands==TRUE) printf("clann> %s\n", command);
-            	}
-            if(strcmp(parsed_command[0], "execute") == 0 || strcmp(parsed_command[0], "exe") == 0)
-                {
-                if(num_commands == 2 && parsed_command[1][0] == '?')
-                    print_commands(1);
-                else
-                    {
-                
-                    if(num_commands > 1)
-                        {
-                        delimiter = TRUE;   /* default: on; user can override with maxnamelen=full */
-                        execute_command(parsed_command[1], TRUE);
-							
-						/*spr_dist(); */ 
-                        }
-                    }
-                }
-            else
-                {
-                if(strcmp(parsed_command[0], "help") == 0)
-                    {
-                    print_commands(0);
-                    }
-                else	
-                    {
-                    if(strcmp(parsed_command[0], "alltrees") == 0)
-                        {
-                        if(num_commands == 2 && parsed_command[1][0] == '?')
-                            print_commands(2);
-                        else
-                            {
-                            if(number_of_taxa > 0)
-                                {                                        
-                                if(criterion == 0 || criterion == 2 || criterion == 3 || criterion == 5 || criterion == 6 || criterion == 7)
-                                    alltrees_search(TRUE);
-                                else
-                                    {
-                                    BR_file = fopen("coding.nex", "w");
-                                    x = coding(0, 0, 0);
-                                    fclose(BR_file);
-									if(x == FALSE)
-										{
-										if(print_log == FALSE) 
-											strcpy(system_call, "paup coding.nex");
-										else
-											{
-											strcpy(system_call, "paup coding.nex");
-											strcat(system_call, " | tee -a ");
-											strcat(system_call, logfile_name);
-											}
-
-										if(system(system_call) != 0) printf2("Error calling paup, please execute the file coding.nex in paup to perform the parsimony step\n");
-										}
-									if(x == FALSE)
-										{
-										remove("clanntmp.chr");
-										remove("clanntree.chr");
-										/*pars("coding.nex", "clanntmp.chr"); */
-										remove("clanntmp.chr");
-										remove("clanntree.chr");
-										}
-                                    }
-                                }
-                            else
-                                {
-                                printf2("Error: You need to load source trees before using this command\n");
-                                }
-                            }
-                        }
-                    else
-                        {
-                        if(strcmp(parsed_command[0], "usertrees") == 0)
-                            {
-                            if(num_commands == 2 && parsed_command[1][0] == '?')
-                                print_commands(3);
-                            else
-                                {
-                                if(number_of_taxa > 0)
-                                    {
-                                    if(criterion == 1)
-                                        printf2("Error: You cannont do a user tree search in MRP\n");
-                                    else
-                                        usertrees_search();
-                                    }
-                                else
-                                    {
-                                    printf2("Error: You need to load source trees before using this command\n");
-                                    }
-                                }
-                            }
-                        else
-                            {
-                            if(strcmp(parsed_command[0], "hs") == 0 || strcmp(parsed_command[0], "hsearch") == 0)
-                                {
-                                if(num_commands == 2 && parsed_command[1][0] == '?')
-                                    print_commands(4);
-                                else
-                                    {
-                                    if(number_of_taxa > 0)
-                                        {
-                                  
-                                        heuristic_search(TRUE, TRUE, 10000, 25);
-										
-                                        }
-                                    else
-                                        {
-                                        printf2("Error: You need to load source trees before using this command\n");
-                                        }
-                                    }
-                                }
-                            else
-                                {
-                                if(strcmp(parsed_command[0], "bootstrap") == 0 || strcmp(parsed_command[0], "boot") == 0)
-                                    {
-                                    if(num_commands == 2 && parsed_command[1][0] == '?')
-                                        print_commands(5);
-                                    else
-                                        {
-                                        if(number_of_taxa > 0)
-                                            {
-                                            bootstrap_search(); 
-                                            }
-                                        else
-                                            {
-                                            printf2("Error: You need to load source trees before using this command\n");
-                                            }
-                                        }
-                                    }
-                                else
-                                    {
-                                    if(strcmp(parsed_command[0], "yaptp") == 0)
-                                        {
-                                        if(num_commands == 2 && parsed_command[1][0] == '?')
-                                            print_commands(6);
-                                        else	
-                                            {
-                                            if(number_of_taxa > 0)
-                                                {
-                                                yaptp_search(); 
-                                                }
-                                            else
-                                                {
-                                                printf2("Error: You need to load source trees before using this command\n");
-                                                }
-                                            }
-                                        }
-                                    else
-                                        {
-                                        if(strcmp(parsed_command[0], "ideal") == 0)
-                                            {
-                                            if(num_commands == 2 && parsed_command[1][0] == '?')
-                                                print_commands(7);
-                                            else
-                                                {
-                                                if(number_of_taxa > 0)
-                                                    {
-                                                    /* ideal_search(); */
-                                                    }
-                                                else
-                                                    {
-                                                    printf2("Error: You need to load source trees before using this command\n");
-                                                    }
-                                                }
-                                            }
-                                        else
-                                            {
-                                            if(strcmp(parsed_command[0], "set") == 0)
-                                                {
-                                                if(num_commands == 2 && parsed_command[1][0] == '?')
-                                                    print_commands(8);
-                                                else
-                                                    set_parameters(); 
-                                                }
-                                            else
-                                                {
-                                                if(strcmp(parsed_command[0], "quit") == 0)
-                                                    {
-                                                    if(num_commands == 2 && parsed_command[1][0] == '?')
-                                                        {
-                                                        print_commands(13);
-                                                        strcpy(parsed_command[0], "hi");
-                                                        }
-                                                    }
-                                                else
-                                                    {
-                                                    if(strcmp(parsed_command[0], "deletetrees") == 0)
-                                                        {
-                                                        if(num_commands == 2 && parsed_command[1][0] == '?')
-                                                            print_commands(17);
-                                                        else
-															{
-															if(number_of_taxa > 0)
-																exclude(TRUE);
-															else
-																printf2("Error: You need to load source trees before using this command\n");
-															}
-														}
-                                                    else
-                                                        {
-                                                        if(strcmp(parsed_command[0], "1includetrees") == 0)
-                                                            {
-                                                            if(num_commands == 2 && parsed_command[1][0] == '?')
-                                                                print_commands(18);
-                                                            else
-																{
-																if(number_of_taxa > 0)
-																		include(TRUE);
-																else
-																	printf2("Error: You need to load source trees before using this command\n");
-																}
-                                                            }
-                                                        else
-                                                            {
-                                                            if(strcmp(parsed_command[0], "!") == 0)
-                                                                {
-                                                                if(num_commands == 2 && parsed_command[1][0] == '?')
-                                                                    print_commands(12);
-                                                                else
-                                                                    {
-                                                                    printf2("\n\tType exit to return to Clann\n\n");
-                                                                    system("bash");
-                                                                    }
-                                                                }
-															else
-																{
-																if(strcmp(parsed_command[0], "generatetrees") == 0)
-																	{
-																	if(num_commands == 2 && parsed_command[1][0] == '?')
-																			print_commands(14);
-																	else
-																		{
-																		if(number_of_taxa > 0)
-																				generatetrees();
-																		else
-																			printf2("Error: You need to load source trees before using this command\n");
-																		}
-																	}
-																else
-																	{
-																	if(strcmp(parsed_command[0], "showtrees") == 0)
-																		{
-																		if(num_commands == 2 && parsed_command[1][0] == '?')
-																			print_commands(16);
-																		else
-																			{
-																			if(number_of_taxa > 0)
-																					showtrees(FALSE);
-																			else
-																				printf2("Error: You need to load source trees before using this command\n");
-																			}
-																		}
-																	else
-																		{
-																		if(strcmp(parsed_command[0], "rfdists") == 0)
-																			{
-																			if(num_commands == 2 && parsed_command[1][0] == '?')
-																				print_commands(19);
-																			else
-																				{
-																				if(number_of_taxa > 0)
-																					sourcetree_dists();
-																				else
-																					printf2("Error: You need to load source trees before using this command\n");
-																				}
-																			}
-																		else
-																			{
-																			if(strcmp(parsed_command[0], "deletetaxa") == 0)
-																				{
-																				if(num_commands == 2 && parsed_command[1][0] == '?')
-																					print_commands(20);
-																				else
-																					{
-																					if(number_of_taxa > 0)
-																						{
-																						exclude_taxa(TRUE);
-																						}
-																					else
-																						printf2("Error: You need to load source trees before using this command\n");
-																					}
-																				}
-
-																			else
-																				{
-																				if(strcmp(parsed_command[0], "consensus") == 0)
-																					{
-																					if(num_commands == 2 && parsed_command[1][0] == '?')
-																						print_commands(15);
-																					else
-																						{
-																						if(number_of_taxa > 0)
-																							do_consensus();
-																						else
-																							printf2("Error: You need to load source trees before using this command\n");
-																						}
-																					}
-																				else
-																					{
-																					if(strcmp(parsed_command[0], "nj") == 0)
-																						{
-																						if(num_commands == 2 && parsed_command[1][0] == '?')
-																							print_commands(21);
-																						else
-																							{
-																							if(number_of_taxa > 0)
-																								nj();
-																							else
-																								printf2("Error: You need to load source trees before using this command\n");
-																							}
-																						}
-																					else
-																						{
-																						if(strcmp(parsed_command[0], "sprdists") == 0)
-																							{
-																							if(num_commands == 2 && parsed_command[1][0] == '?')
-																								print_commands(22);
-																							else
-																								{
-																								if(number_of_taxa > 0)
-																									spr_dist();
-																								else
-																									printf2("Error: You need to load source trees before using this command\n");	
-																								}
-																							}
-																						else
-																							{
-																							if(strcmp(parsed_command[0], "mapunknowns") == 0)
-																								{
-																								if(num_commands == 2 && parsed_command[1][0] == '?')
-																									print_commands(23);
-																								else
-																									{
-																									if(number_of_taxa > 0)
-																										mapunknowns();
-																									else
-																										printf2("Error: You need to load source trees before using this command\n");	
-																									}
-																								}
-																							else
-																								{
-																								if(strcmp(parsed_command[0], "reconstruct") == 0)
-																									{
-																									if(num_commands == 2 && parsed_command[1][0] == '?')
-																										print_commands(24);
-																									else
-																										{
-																										if(number_of_taxa > 0)
-																											reconstruct(TRUE);
-																										else
-																											printf2("Error: You need to load source trees before using this command\n");	
-																										}
-																									}
-																								else
-																									{
-																									if(strcmp(parsed_command[0], "hgtanalysis") == 0)
-																										{
-																										if(num_commands == 2 && parsed_command[1][0] == '?')
-																											print_commands(23);
-																										else
-																											{
-																											if(number_of_taxa > 0)
-																												hgt_reconstruction();
-																											else
-																												printf2("Error: You need to load source trees before using this command\n");	
-																											}
-																										}
-																									else
-																										{
-																										if(strcmp(parsed_command[0], "exhaustivespr") == 0)
-																											{
-																											if(num_commands == 2 && parsed_command[1][0] == '?')
-																												print_commands(23);
-																											else
-																												{
-																												if(number_of_taxa > 0)
-																													exhaustive_SPR(fundamentals[0]);
-																												else
-																													printf2("Error: You need to load source trees before using this command\n");	
-																												}
-																											}
-																										else
-																											{
-																											if(strcmp(parsed_command[0], "pars") == 0)
-																												{
-																												if(num_commands == 2 && parsed_command[1][0] == '?')
-																													print_commands(23);
-																												else
-																													{
-																													if(number_of_taxa > 0)
-																														{
-																														remove("clanntmp.chr");
-																														remove("clanntree.chr");
-																														/*pars();*/
-																														remove("clanntmp.chr");
-																														remove("clanntree.chr");
-																														
-																														}
-																													else
-																														printf2("Error: You need to load source trees before using this command\n");	
-																													}
-																												}
-																											else
-																												{	
-																												if(strcmp(parsed_command[0], "randomisetrees") == 0)
-																													{
-																													if(num_commands == 2 && parsed_command[1][0] == '?')
-																														print_commands(27);
-																													else
-																														{
-																														if(number_of_taxa > 0)
-																															{
-																															for(j=0; j<Total_fund_trees; j++)
-																																{
-																																randomise_tree(fundamentals[j]); /*equiprobable */
-																																}
-																															printf2("The source trees have now been randomised\n");
-																															}
-																														else
-																															printf2("Error: You need to load source trees before using this command\n");	
-																														}
-																													}
-																												else
-																													{
-																													if(strcmp(parsed_command[0], "randomprune") == 0)
-																														{
-																														if(num_commands == 2 && parsed_command[1][0] == '?')
-																															print_commands(28);
-																														else
-																															{
-																															if(number_of_taxa > 0)
-																																{
-																																for(j=0; j<Total_fund_trees; j++)
-																																	{
-																																	random_prune(fundamentals[j]); /*equiprobable */
-																																	}
-																																
-																																}
-																															else
-																																printf2("Error: You need to load source trees before using this command\n");	
-																															}
-																														}
-																													else
-                                                                                                                        {
-                                                                                                                        if(strcmp(parsed_command[0], "prunemonophylies") == 0)
-                                                                                                                            {
-                                                                                                                            if(num_commands == 2 && parsed_command[1][0] == '?')
-                                                                                                                                print_commands(25);
-                                                                                                                            else
-                                                                                                                                {
-                                                                                                                                if(number_of_taxa > 0)
-                                                                                                                                    {
-                                                                                                                                    prune_monophylies();
-                                                                                                                                    }
-                                                                                                                                else
-                                                                                                                                    printf2("Error: You need to load source trees before using this command\n"); 
-                                                                                                                                }
-                                                                                                                            }
-                                                                                                                        else
-                                                                                                                        	{
-                                                                                                                        	if(strcmp(parsed_command[0], "tips") == 0)
-                                                                                                                            	{                                     
-                                                                                                                            	if(num_commands == 2 && parsed_command[1][0] == '?')
-	                                                                                                                                print_commands(26);
-	                                                                                                                            else
-	                                                                                                                            	{
-	                                                                                                                            	if(num_commands == 2 && (tipnum = atoi(parsed_command[1])) > 0 && tipnum < 11)	
-	                                                                                                                                	tips(tipnum-1);
-	                                                                                                                            	else
-	                                                                                                                            		tips((int)fmod(rand(), 10));
-	                                                                                                                            	}
-	                                                                                                                        	}
-	                                                                                                                        else
-	                                                                                                                        	{
-	                                                                                                                        	if(strcmp(parsed_command[0], "log") == 0)
-	                                                                                                                            	{                                     
-	                                                                                                                            	if(num_commands == 2 && parsed_command[1][0] == '?')
-		                                                                                                                                print_commands(29);
-		                                                                                                                            else
-		                                                                                                                            	{
-		                                                                                                                            	do_log();
-		                                                                                                                            	}
-		                                                                                                                        	}
-		                                                                                                                        else
-		                                                                                                                            {
-	                                                                                                                        		if(strcmp(parsed_command[0], "savetrees") == 0)
-	                                                                                                                            		{                                     
-	                                                                                                                            		if(num_commands == 2 && parsed_command[1][0] == '?')
-		                                                                                                                                	print_commands(30);
-		                                                                                                                            	else
-		                                                                                                                            		{
-		                                                                                                                            		if(number_of_taxa > 0)
-																																				showtrees(TRUE);
-																																			else
-																																				{
-																																				printf2("Error: You need to load source trees before using this command\n");
-																																				}
-		                                                                                                                            		}
-		                                                                                                                        		}
-		                                                                                                                        	else
-	                                                                                                                        			printf2("Error: command not known.\n\tType help at the prompt to get a list of available commands.\n");
-	                                                                                                                        		}
-	                                                                                                                        	}
-	                                                                                                                        }  
-                                                                                                                        }
-																													}
-																												}
-																											}
-																										}
-																									}
-																								}
-																							}
-																						}
-																					}
-																				}
-																			}
-																		}
-																	}
-																}
-                                                            }
-                                                        }
-                                                    }
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            } /* end if*/
-
-        time2 = time(NULL);
-        diff = difftime(time2, time1);
-        if(diff > 0)
-            {
-            printf2("\nTime taken:"); 
-            if(diff > 60)
-                {
-                if(diff > 3600)
-                    {
-                    if(diff > 86400)
-                        {
-                        printf2(" %0.0lf Day", diff/86400);
-                        if(diff/86400 > 1) printf2("s");
-                        diff = diff- (86400 * ((int)diff/86400));
-                        }
-                    printf2(" %0.0lf Hour", diff/3600);
-                    if(diff/3600 > 1) printf2("s");
-                    diff = diff - (3600 * ((int)diff/3600));
-                    }
-                printf2(" %0.0lf Minute", diff/60);
-                if(diff/60 > 1) printf2("s");
-                diff = diff - (60 * ((int)diff/60));
-                }
-            printf2(" %0.0lf second", diff);
-            if(diff > 1) printf2("s");
-            printf2("\n\n");
-            }
-
-        if(logfile!=NULL) fflush(logfile);
-
-        if(i == parts)
-            {
-            parts =0;
-			#ifdef HAVE_READLINE
-/****/      free(command);
-			#endif
-			user_break = FALSE;
-			if(signal(SIGINT, controlc4) == SIG_ERR)
-				{
-				printf2("An error occurred while setting a signal handler\n");
-				}
-		   #ifdef HAVE_READLINE
-/*****/    command = readline("clann> "); 
-/*****/    command = realloc(command, 10000*sizeof(char));
-		   #else
- 	        printf2("clann> ");
- 	        fflush(stdout);
- 	        command = xgets(command);
-		   #endif
-          	autocommands=FALSE; /* indicate that from this point on any commands have been entered by the user and have not come from a commands file */
-           
-            /* if the commmand doesn't end in a ";" then put one on */
-            k=0;
-            while(command[k] != '\0') k++;
-            if(command[k-1] != ';')
-                strcat(command, ";");  
-
-            
-            
-			#ifdef HAVE_READLINE
-            if(strcmp(command, ";") != 0 && command_line == FALSE)   /* if the command is not just a blank line */
-                {
-            	if(strcmp(prev_command, command) != 0)  /* This gets rid of multiple instances of the exact same command in a row being recorded */
-            		{
-/******/            add_history(command);
-            		strcpy(prev_command, command);  
-            		}
-                }
-			#endif
-            parts = seperate_commands(command); /* if there is more than one command, break each of them up */
-            i=0;
-			#ifdef HAVE_READLINE
-/****/         free(command); 
-            command = malloc(10000*sizeof(char));
-            command[0] = '\0';
-/*****/		#endif
-
-
-                       
-            }
-        for(j=0; j<1000; j++)
-            {
-            parsed_command[j][0] = '\0';
-            }
-        command[0] = '\0';
-        strcpy(command, stored_commands[i]);
-        num_commands = parse_command(command);  /* parse each individual part of the command */
-        i++;
-        time1 = time(NULL);
-    	
-
-        } /* end while */
-    
-    free(command);
-    free(prev_command);
-    free(tempsuper);
-	#ifdef HAVE_READLINE
-/****/ if(command_line == FALSE) write_history(PATH);  /* write the history of commands to file */
-	#endif
-/*	printf2("malloc_check = %d x (%d)\n", malloc_check, sizeof(taxon_type));
- */   
-	clean_exit(0);
-    return(0);
-    }
-
-
-int seperate_commands(char *command)
-    {
-    int i=0, j=0, numcommands = 0;
-    /* each seperate command is to be seperated by a ";" */
-    
-    /*initialise the stored command array */
-    for(i=0; i<100; i++)
-        strcpy(stored_commands[i], "");
-    
-    /* run down the command looking for ";" */
-    i=0;
-    while(command[i] != '\0')
-        {
-        j=0;
-        while(command[i] != '\0' && command[i] != ';')
-            {
-            stored_commands[numcommands][j] = command[i];
-            i++;j++;
-            }
-        if(command[i] == ';')   /* this both makes sure 'i' doesn't fall off the array and we disregard any command that doesn't end in a ';' */
-            {
-            stored_commands[numcommands][j] = ';';
-            stored_commands[numcommands][j+1] = '\0';
-            numcommands++;
-            i++;
-            }
-        }
-    return(numcommands);
-    }
-
-void print_splash(void)
-	{
-	printf2("\n\n\t*********************************************************************");
-    printf2("\n\t*                                                                   *");
-    printf2("\n\t*                           Clann  v%s                           *", VERSION);
-    printf2("\n\t* Investigating phylogenetic information through supertree analyses *");
-    printf2("\n\t*                                                                   *");
-    printf2("\n\t*                  lab: http://www.creeveylab.org                   *");
-    printf2("\n\t*                  email: %s                   *", PACKAGE_BUGREPORT);
-    printf2("\n\t*                                                                   *");
-    printf2("\n\t*                 Copyright Chris Creevey 2003-2020                 *");
-    printf2("\n\t*                                                                   *");
-    printf2("\n\t*          HINT: Type \"help\" to see all available commands          *");
-    printf2("\n\t*********************************************************************\n\n");
-
-	}
- 
-    
-void print_commands(int num)
-    {
-    
-    if(num == 0)
-        {
-        printf2("\nAvailable Commands:\n\n");
-        printf2("\nThe following commands are always available:\n\n");
-        printf2("\texecute (exe)\t- Read in a file of source trees\n");
-        printf2("\thelp\t\t- Display this message\n");
-        printf2("\tquit\t\t- Quit Clann\n");
-        printf2("\tset\t\t- Set global parameters such as optimality criterion for carrying reconstructing a supertree\n");
-        printf2("\t!\t\t- Run a shell session, while preserving the current Clann session (type \'exit\' to return)\n");
-        printf2("\ttips\t\t- Show tips and hints for better use of Clann\n");
-        printf2("\tlog\t\t- Control logging of screen output to a log file\n");
-
-        printf2("\nThe following commands are only available when there are source trees in memory:\n");
-
-        printf2("\nSupertree reconstruction:\n");
-        printf2("\ths\t\t- Carry out a heuristic search for the best supertree usign the criterion selected\n");
-        printf2("\tbootstrap\t- Carry out a bootstrap supertree analysis using the criterion selected\n");
-        printf2("\tnj\t\t- Construct a neighbour-joining supertree\n");
-        printf2("\talltrees\t- Exhaustively search all possible supertrees\n");
-        printf2("\tusertrees\t- Assess user-defined supertrees (from seperate file), to find the best scoring\n");
-        printf2("\tconsensus\t- Calculate a consensus tree of all trees containing all taxa\n");
-
-        printf2("\nSource tree selection and modification:\n");
-        printf2("\tsavetrees\t- Save source trees to file in phylip format (subsets of trees can be chosen based on a number of criteria)\n");
-        printf2("\tshowtrees\t- Visualise selected source trees in ASCII format (also can save selected trees to file)\n");
-       	printf2("\tdeletetrees\t- Specify source trees to delete from memory (based on a variety of criteria)\n"); 
-      /*  printf2("\tincludetrees\t- Specify trees for inclusion in the analysis (based on a variety of criteria)\n"); */ /* we are excluding the include command because it is problematic*/
-        printf2("\tdeletetaxa\t- Specify taxa to delete from all source trees in memory (i.e. prune from the trees while preserving branch lengths)\n");
-        printf2("\trandomisetrees\t- Randomises the source trees in memory, while preserving taxa composition in each tree\n");
-
-        printf2("\nMiscellaneous calculations:\n");
-        printf2("\trfdists\t\t- Calculate Robinson-Foulds distances between all source trees\n");
-        printf2("\tgeneratetrees\t- Generate random supertrees & assess  against source trees in memory\n");
-        printf2("\tyaptp\t\t- \"Yet another permutation-tail-probability\" test - performs a randomisation test\n");
-
-
-
-        printf2("\nExperimental Options:\n");
-        printf2("\treconstruct\t- Carry out a gene-tree reconciliation (source trees against a species tree)\n");
-        printf2("\tprunemonophylies - Prunes clades which consist of multiple sequences from the same species, to a single representative\n");
-        printf2("\tsprdists\t- Carry out estimation of SPR distances of real data versus ideal and randomised versions of the data\n");
-
-        printf2("\n\n\nType a command followed by '?' in interactive mode to get information on the options available i.e.: \"exe ?\"\n");
-        printf2("Full descriptions of the commands are available in the manual\n\n\n");
-
-
-        }
-   
-        
-
-    if(num == 1)
-        {
-        printf2("\nexecute (exe)\t<filename>\n");
-        printf2("\nexe\t<filename>\n\n");
-		 printf2("\tOptions\t\tSettings\t\t\tCurrent\n");
-        printf2("\t===========================================================\n");
-		printf2("\n\tmaxnamelen\t<integer> | delimited | full\t*delimited");
-		printf2("\n\t  (delimiter mode is ON by default: species names extracted before '.'");
-		printf2("\n\t   use 'maxnamelen=full' to disable and use full taxon names)");
-		printf2("\n\tdelimiter_char\t<character>\t\t\t'.'");
-		printf2("\n\tsummary\t\tshort | long\t\t\t*long");
-		printf2("\n\tautoprunemono\tyes | no\t\t\t*no");
-		printf2("\n\t  (prune monophyletic same-species clades from multicopy trees at load time;");
-		printf2("\n\t   trees that become single-copy after pruning join the supertree pool;");
-		printf2("\n\t   original unpruned trees are preserved for 'reconstruct')");
-        }
-    if(num == 2)
-        {
-        printf2("\nalltrees [options]\n\n");
-        printf2("\tOptions\t\tSettings\t\t\tCurrent\n");
-        printf2("\t===========================================================\n");
-        if(delimiter) printf2("\n\t(Note: delimiter mode is ON -- multicopy gene trees will be automatically\n\texcluded from the search; use 'maxnamelen=full' to disable)\n");
-        if(criterion == 0 || criterion == 2 || criterion == 3 || criterion == 6 || criterion == 7)
-            {
-            printf2("\n\trange\t\t<treenumber> - <treenumber>\t*all\n\tsavetrees\t<filename>\t\t\ttop_alltrees.txt\n\tcreate\t\tyes | no\t\t\t*no\n");
-            if(criterion == 0)
-                {
-                printf2("\tweight\t\tequal | comparisons\t\t");
-                if(dweight == 1) printf2("comparisons\n");else printf2("euqal\n");
-                }
-            if(criterion == 2)
-                {
-                printf2("\tweight\t\tequal | splits\t\t\t");
-                if(splits_weight == 1) printf2("equal\n");if(splits_weight == 2) printf2("splits\n");
-                }
-            if(criterion == 3)
-                {
-                printf2("\tweight\t\tequal | taxa | quartets\t\t");
-                if(quartet_normalising == 1) printf2("equal\n");if(quartet_normalising == 2) printf2("taxa\n");if(quartet_normalising == 3) printf2("quartets\n");
-                }
-            }
-        
-        }
-    if(num == 3)
-        {
-        printf2("\nusertrees <candidates-file> [options]\n");
-        printf2("  (source gene trees must be loaded first with 'exe <file>')\n");
-        printf2("  CLI form: clann usertrees --source=<gene-trees> --topologies=<candidates> [options]\n");
-        printf2("        or: clann usertrees <gene-trees> <candidates> [options]\n\n");
-        printf2("\tOptions\t\tSettings\t\t\tCurrent\n");
-        printf2("\t===========================================================\n");
-        printf2("\n\toutfile\t\t<filename>\t\t\tUsertrees_result.txt");
-        if(criterion == 0)
-            {
-            printf2("\n\tweight\t\tequal | comparisons\t\t");
-            if(dweight == 1) printf2("comparisons\n");else printf2("splits\n");
-            }
-        if(criterion == 2)
-            {
-            printf2("\n\tweight\t\tequal | splits\t\t\t");
-            if(splits_weight == 1) printf2("equal\n");if(splits_weight == 2) printf2("splits\n");
-            }
-        if(criterion == 3)
-            {
-            printf2("\n\tweight\t\tequal | taxa | quartets\t\t");
-            if(quartet_normalising == 1) printf2("equal\n");if(quartet_normalising == 2) printf2("taxa\n");if(quartet_normalising == 3) printf2("quartets\n");
-            }
-		printf2("\n\tprintsourcescores\tyes | no\t\t\t*no");
-	if(criterion == 7)
-		{
-		printf2("\n\ttests\t\tyes | no\t\t\t*no (ML topology tests; criterion=ml only)");
-		printf2("\n\tnboot\t\t<integer>\t\t\t*1000 (SH bootstrap replicates)");
-#ifdef _OPENMP
-		printf2("\n\tnthreads\t<integer>\t\t\t*%-3d (parallel SH bootstrap; default=all CPUs)", omp_get_num_procs());
-#endif
-		printf2("\n\ttestsfile\t<filename>\t\t\t*mltest_results.txt");
-		}
-	printf2("\n");
-        }
-    if(num == 4)
-        {
-        printf2("\nhs (or hsearch) [options]  \n");
-        printf2("\tOptions\t\tSettings\t\t\tCurrent\n");
-        printf2("\t===========================================================\n");
-        if(delimiter) printf2("\n\t(Note: delimiter mode is ON -- multicopy gene trees will be automatically\n\texcluded from the search; use 'maxnamelen=full' to disable)\n");
-        if(criterion == 0 || criterion == 2 || criterion == 3 || criterion==5 || criterion==6 || criterion==7)
-            {
-            printf2("\n\tsample\t\t<integer number>\t\t*10,000\n\tnreps\t\t<integer number>\t\t*25");
-            printf2("\n\tswap\t\tnni | spr | tbr\t\t\t");
-            if(method == 1) printf2("nni");
-            if(method == 2) printf2("spr"); 
-            if(method == 3) printf2("tbr");
-            printf2("\n\tnsteps\t\t<integer number>\t\t%d", number_of_steps);
-			printf2("\n\tstart\t\tnj | random | <filename>\tnj");
-
-			printf2("\n\tmaxswaps\t<integer number>\t\t*1,000,000\n\tsavetrees\t<filename>\t\t\tHeuristic_result.txt");
-#ifdef _OPENMP
-            printf2("\n\tnthreads\t<integer number>\t\t*%-3d (OpenMP threads; default=all CPUs; not available for criterion=recon)", omp_get_num_procs());
-#endif
-            printf2("\n\tmaxskips\t<integer number>\t\t*auto=N² (stop replicate after this many consecutive already-visited moves; 0=disabled)");
-            printf2("\n\tvisitedtrees\t<filename>\t\t\t(disabled) Record all visited topologies (TSV: newick, score, visit_count)");
-            if(criterion == 0)
-                {
-                printf2("\n\tweight\t\tequal | comparisons\t\t");
-                if(dweight == 1) printf2("comparisons");else printf2("splits");
-                }
-            if(criterion == 2)
-                {
-                printf2("\n\tweight\t\tequal | splits\t\t\t");
-                if(splits_weight == 1) printf2("equal");if(splits_weight == 2) printf2("splits");
-                }
-            if(criterion == 3)
-                {
-                printf2("\n\tweight\t\tequal | taxa | quartets\t\t");
-                if(quartet_normalising == 1) printf2("equal");if(quartet_normalising == 2) printf2("taxa");if(quartet_normalising == 3) printf2("quartets");
-                }
-			if(criterion == 0)
-				{
-				printf2("\n\tdrawhistogram\tyes | no\t\t\t*no\n\tnbins\t\t<integer number>\t\t*20\n\thistogramfile\t<filename>\t\t\t*Heuristic_histogram.txt");
-				}
-            
-            }
-        if(criterion == 1)
-            {
-            printf2("\n\tanalysis\tparsimony | nj\t\t\t*parsimony\n");
-            printf2("\n\tParsimony options:\n\tweighted\tyes | no\t\t\t*no\n\tswap\t\tnni | spr | tbr\t\t\t*tbr\n\taddseq\t\tsimple | closest | asis |\n\t\t\trandom | furthest\t\t*random\n\tnreps\t\t<integer number>\t\t*10\n\n\tGeneral Options:\n\tsavetrees\t<filename>\t\t\tMRP.tree\n");
-            }
-		if(criterion == 4)
-			{
-			printf2("\n\tmissing\t4point | ultrametric\t\t\t*4point\n");
-			}
-		if(criterion == 5)
-			{
-			printf2("\n\tduplications\t<value>\t\t\t\t*1.0\n\tlosses\t\t<value>\t\t\t\t*1.0");
-			printf2("\n\tnumspeciesrootings\t<value> | all\t\t*2\n\tnumgenerootings\t\t<value> | all\t\t*2\n");
-			}
-		if(criterion == 7)
-			{
-			printf2("\n\tmlbeta\t\t<float > 0>\t\t\t%.4f", ml_beta);
-			printf2("\n\tmlscale\t\tpaper | lust | lnl\t\t%s", ml_scale==1?"lust":ml_scale==2?"lnl":"paper");
-			printf2("\n\t  paper = Steel & Rodrigo (2008) formula: minimise beta*RF directly");
-			printf2("\n\t  lust  = L.U.st (Akanni et al. 2014) log10 scaling (beta*d*log10(e))");
-			printf2("\n\t  lnl   = report as lnL = -beta*RF  [default; matches ML tool conventions]\n");
-			}
-        }
-    if(num == 5)
-        {
-        printf2("\nbootstrap (or boot) [options]  \n\n\n");
-        printf2("\tOptions\t\tSettings\t\t\tCurrent\n");
-        printf2("\t===========================================================\n");
-        if(criterion != 1)
-            {
-            printf2("\n\tnreps\t\t<integer number>\t\t*100\n\thsreps\t\t<integer number>\t\t*10\n\tsample\t\t<integer number>\t\t*10,000\n\tswap\t\tnni | spr | tbr | all\t\t");
-            if(method == 1) printf2("nni");
-            if(method == 2) printf2("spr");
-            printf2("\n\tstart\t\trandom | <filename>\t\trandom");
-            
-            printf2("\n\tnsteps\t\t<integer number>\t\t%d\n\ttreefile\t<output treefile name>\t\tbootstrap.txt\n\tmaxswaps\t<integer number>\t\t*1,000,000\n", number_of_steps);
-            if(criterion == 0)
-                {
-                printf2("\tweight\t\tequal | comparisons\t\t");
-                if(dweight == 1) printf2("comparisons");else printf2("splits");
-                }
-            if(criterion == 2)
-                {
-                printf2("\tweight\t\tequal | splits\t\t\t");
-                if(splits_weight == 1) printf2("equal");if(splits_weight == 2) printf2("splits");
-                }
-            if(criterion == 3)
-                {
-                printf2("\tweight\t\tequal | taxa | quartets\t\t");
-                if(quartet_normalising == 1) printf2("equal");if(quartet_normalising == 2) printf2("taxa");if(quartet_normalising == 3) printf2("quartets");
-                }
-			if(criterion == 5)
-				{
-				printf2("\n\tduplications\t<value>\t\t\t\t*1.0\n\tlosses\t\t<value>\t\t\t\t*1.0");
-				printf2("\n\tnumspeciesrootings\t<value> | all\t\t*2\n\tnumgenerootings\t\t<value> | all\t\t*2\n");
-				}
-			if(criterion == 7)
-				{
-				printf2("\n\tmlbeta\t\t<float > 0>\t\t\t%.4f", ml_beta);
-				printf2("\n\tmlscale\t\tpaper | lust | lnl\t\t%s", ml_scale==1?"lust":ml_scale==2?"lnl":"paper");
-				}
-#ifdef _OPENMP
-			if(criterion == 0 || criterion == 2 || criterion == 3)
-				printf2("\n\tnthreads\t<integer number>\t\t*%-3d (parallel bootstrap replicates; default=all CPUs)", omp_get_num_procs());
-			else if(criterion == 6 || criterion == 7)
-				printf2("\n\tnthreads\t(single-threaded for RF/ML; parallelism not yet implemented)");
-#endif
-			printf2("\n\tconsensus\tstrict | majrule | minor | <proportion>\t*majrule");
-			printf2("\n\tconsensusfile\t<filename>\t\t\tconsensus.ph\n");
-            printf2("\n");
-            }
-        if(criterion == 1)
-            printf2("\n\tnreps\t\t<integer number>\t\t*100\n\tswap\t\tnni | spr | tbr | all\t\t*tbr\n\taddseq\t\tsimple | closest | asis |\n\t\t\trandom | furthest\t\t*random\n\ttreefile\t<output treefile name>\t\tMRP.tree\n");
-        }
-    if(num == 6)
-        {
-        printf2("\nyaptp [options]  \n\n\n");
-        printf2("\tOptions\t\tSettings\t\t\tCurrent\n");
-        printf2("\t===========================================================\n");
-        if(criterion != 1)
-            {
-            printf2("\n\tmethod\t\tequiprobable | markovian\t*equiprobable");
-            printf2("\n\tnreps\t\t<integer number>\t\t*100\n\thsreps\t\t<integer number>\t\t*10\n\tsample\t\t<integer number>\t\t*10,000\n\tsearch\t\tnni | spr | all\t\t\t");
-            if(method == 1) printf2("nni");
-            if(method == 2) printf2("spr");
-            printf2("\n\tnsteps\t\t<integer number>\t\t%d\n\ttreefile\t<output treefile name>\t\tyaptp.ph\n\tmaxswaps\t<integer number>\t\t*1,000,000\n", number_of_steps);
-            if(criterion == 0)
-                {
-                printf2("\tweight\t\tequal | comparisons\t\t");
-                if(dweight == 1) printf2("comparisons");else printf2("splits");
-                }
-            if(criterion == 2)
-                {
-                printf2("\tweight\t\tequal | splits\t\t\t");
-                if(splits_weight == 1) printf2("equal");if(splits_weight == 2) printf2("splits");
-                }
-            if(criterion == 3)
-                {
-                printf2("\tweight\t\tequal | taxa | quartets\t\t");
-                if(quartet_normalising == 1) printf2("equal");if(quartet_normalising == 2) printf2("taxa");if(quartet_normalising == 3) printf2("quartets");
-                }
-	if(criterion == 5)
-		{
-		printf2("\n\tduplications\t<value>\t\t\t\t*1.0\n\tlosses\t\t<value>\t\t\t\t*1.0");
-		printf2("\n\tnumspeciesrootings\t<value> | all\t\t*2\n\tnumgenerootings\t\t<value> | all\t\t*2\n");
-		}
-
-            printf2("\n");
-            }
-        else
-            {
-            printf2("\n\tnreps\t\t<integer number>\t\t*100\n");
-            }
-            
-        }
-    if(num == 7)
-        {
-        
-        }
-    if(num == 8)
-        {
-        printf2("\nset [options]  \n\n\n");
-        printf2("\tOptions\t\tSettings\t\t\tCurrent\n");
-        printf2("\t===========================================================\n");
-        printf2("\n\tcriterion\tdfit | sfit | qfit | mrp | avcon | rf | ml\t");
-        printf2("\n\tmlbeta\t\t<float > 0>\t\t\t\t%.4f", ml_beta);
-        printf2("\n\tmlscale\t\tpaper | lust | lnl\t\t\t%s", ml_scale == 1 ? "lust (Akanni et al. 2014)" : ml_scale == 2 ? "lnl" : "Steel & Rodrigo 2008");
-        if(criterion == 0) printf2("dfit");
-        if(criterion == 1) printf2("mrp");
-        if(criterion == 2) printf2("sfit");
-        if(criterion == 3) printf2("qfit");
-        if(criterion == 4) printf2("avcon");
-        if(criterion == 6) printf2("rf");
-        if(criterion == 7) printf2("ml");
-        printf2("\n");
-        printf2("\n\t  dfit  = Distance Fit (path-length distances; default)");
-        printf2("\n\t  sfit  = Splits Fit (bipartition compatibility)");
-        printf2("\n\t  qfit  = Quartet Fit (quartet topology compatibility)");
-        printf2("\n\t  mrp   = Matrix Representation Parsimony (requires PAUP*)");
-        printf2("\n\t  avcon = Average Consensus distances (requires PAUP*)");
-        printf2("\n\t  recon = Duplication/Loss Reconciliation");
-        printf2("\n\t  rf    = Robinson-Foulds distance (normalised, sum across gene trees)");
-        printf2("\n\t  ml    = Maximum Likelihood supertree (Steel & Rodrigo 2008; exponential RF model)\n");
-        printf2("\n\tseed\t\t<integer number>\t\t\t%d", seed);
-/*        printf2("\n\n\t\t\tdfit = best Distance Fit\n\t\t\tsfit = maximum Splits Fit\n\t\t\tqfit = maximum Quartet Fit\n\t\t\tmrp = Matrix representation using parsimony\n");
-  */      }
-    if(num == 9)
-        printf2("\nquit \n\tquit from the program and return to the operating system\n");
-    if(num == 10)
-        {
-        printf2("\nexclude [options]  \nNOT IMPLEMENTED YET\n\n");
-        printf2("\tOptions\t\tSettings\t\t\tCurrent\n");
-        printf2("\t===========================================================\n");
-
-        printf2("\n\tall\t\tyes | no\t\t\tno\n\tlessthan\t<integer number>  \n\tgreaterthan\t<integer number>\n\tequalto\t\t<integer number>\n\tcontaining\t<taxanumbers>\n");
-        }
-    if(num == 11)
-        {
-        printf2("\ninclude [options]  \nNOT IMPLEMENTED YET\n\n");
-        printf2("\tOptions\t\tSettings\t\t\tCurrent\n");
-        printf2("\t===========================================================\n");
-
-        printf2("\n\tall\t\tyes | no\t\t\tno\n\tlessthan\t<integer number>  \n\tgreaterthan\t<integer number>\n\tequalto\t\t<integer number>\n\tcontaining\t<taxanumbers>\n");
-        }
-     if(num == 12)
-        {
-        printf2("\n!  \n\n\n");
-        printf2("\tOptions\t\tSettings\t\t\tCurrent\n");
-        printf2("\t===========================================================\n");
-
-        printf2("\n\tTemporarily returns the user to the operating system by running a C shell\n\tType 'exit' to return to clann");
-        }
-    if(num == 13)
-        printf2("\nquit\n\tThis command quits Clann\n");
-	
-	if(num == 14)
-		{
-        printf2("\ngeneratetrees [options]  \n\n\n");
-        printf2("\tOptions\t\tSettings\t\t\tCurrent\n");
-        printf2("\t===========================================================\n");
-
-        printf2("\n\tmethod\t\tequiprobable | markovian\t*equiprobable\n\tntrees\t\tall | <integer number>\t\t*100\n\tnbins\t\t<integer number>\t\t*20\n\toutfile\t\t<output file name>\t\t*histogram.txt\n\tsourcedata\treal | randomised | ideal\t*real\n\tsavescores\tyes | no\t\t\t*no\n\tsupertree\tmemory | <supertree file name>\t*memory\n\tsavesourcetrees\tyes | no\t\t\t*no\n\n\tThe option 'supertree' is only used when idealised data are being created\n\n");
-		
-		
-		}
-     
-	 if(num == 15)
-		{
-		printf2("\nconsensus [options]\n\n\n");
-		printf2("\tOptions\t\tSettings\t\t\tCurrent\n");
-        printf2("\t===========================================================\n");
-		
-		printf2("\n\tmethod\tstrict | majrule | minor | <value>\t*minor\n\tguidetree\t<guide tree file name>\t\t*<none>\n\tfilename\t<output file name>\t\t*consensus.ph\n");
-		}
-	 
-	 if(num == 16)
-		{
-		printf2("\nshowtrees\trange | size | namecontains | containstaxa | score \n\n");
-		printf2("\tOptions\t\tSettings\t\t\tCurrent\n");
-        printf2("\t===========================================================\n");
-		
-		printf2("\n\trange\t\t<integer value> - <integer value> \t*all\n\tsize\t\tequalto <integer value>\n\t\t\tlessthan <integer value>\n\t\t\tgreaterthan <integer value>\t\t*none\n\tnamecontians\t<character string>\t\t\t*none\n\tcontainstaxa\t<character string>\t\t\t*none\n\tscore\t\t<min score> - <max score>\t\t*none\n\tsavetrees\tyes | no\t\t\t\t*no\n\tfilename\t<output file name>\t\t\t*showtrees.txt\n\tdisplay\t\tyes | no\t\t\t\t*yes\n");
-		}
-
-	 if(num == 17)
-		{
-		printf2("\tdeletetrees\trange | size | namecontains | containstaxa | score \n\n");
-		printf2("\tOptions\t\tSettings\t\t\tCurrent\n");
-        printf2("\t===========================================================\n");
-		
-		printf2("\n\tsinglecopy\tN/A\n\tmulticopy\tN/A\n\trange\t\t<integer value> - <integer value> \t*all\n\tsize\t\tequalto <integer value>\n\t\t\tlessthan <integer value>\n\t\t\tgreaterthan <integer value>\t\t*none\n\tnamecontains\t<character string>\t\t\t*none\n\tcontainstaxa\t<character string>\t\t\t*none\n\tscore\t\t<min score> - <max score>\t\t*none\n");
-		}
-
-	 if(num == 18)
-		{
-		printf2("\nincludetrees\trange | size | namecontains | containstaxa | score \n\n");
-		printf2("\tOptions\t\tSettings\t\t\tCurrent\n");
-        printf2("\t===========================================================\n");
-		
-		printf2("\n\trange\t\t<integer value> - <integer value> \t*all\n\tsize\t\tequalto <integer value>\n\t\t\tlessthan <integer value>\n\t\t\tgreaterthan <integer value>\t\t*none\n\tnamecontians\t<character string>\t\t\t*none\n\tcontainstaxa\t<character string>\t\t\t*none\n\tscore\t\t<min score> - <max score>\t\t*none\n");
-		}
-	
-	 if(num == 19)
-		{
-		printf2("\nrfdists [options]\t\n\n");
-		printf2("\tOptions\t\tSettings\t\t\tCurrent\n");
-        printf2("\t===========================================================\n");
-		printf2("\n\tfilename\t<output file name>\t\t*robinson_foulds.txt\n\toutput\t\tmatrix | vector\t\t*matrix\n\tmissing\t\tnone | 4point | ultrametric\t*none\n");
-		}
-	if(num == 20)
-		{
-		printf2("\ndeletetaxa\t <taxa name> <taxa name> etc...\n\n");
-		printf2("\tOptions\t\tSettings\t\t\tCurrent\n");
-        printf2("\t===========================================================\n");
-		}
-	if(num == 21)
-		{
-		printf2("\nnj [options]\t\n\n");
-		printf2("\tOptions\t\tSettings\t\t\tCurrent\n");
-        printf2("\t===========================================================\n");
-		if(delimiter) printf2("\n\t(Note: delimiter mode is ON -- multicopy gene trees will be automatically\n\texcluded from the search; use 'maxnamelen=full' to disable)\n");
-		printf2("\n\tmissing\t\t4point | ultrametric\t\t*4point\n\tsavetrees\t<file name>\t\t\t*NJtree.ph\n");
-		}
-	 if(num == 22)
-		{
-		printf2("\nsprdists [options]\t\n\n");
-		printf2("\tOptions\t\tSettings\t\t\tCurrent\n");
-        printf2("\t===========================================================\n");
-		printf2("\n\tsupertree\tcreate | memory | <file name>\t*create\n\tdorandomisation\tyes | no\t\t\t*yes\n\toutfile\t\t<file name>\t\t\t*SPRdistances.txt\n");
-		}
-	 if(num == 23)
-		{
-		printf2("\nmapunknowns \t\n\n");
-		printf2("\tOptions\t\tSettings\t\t\tCurrent\n");
-        printf2("\t===========================================================\n");
-		printf2("\n\t\n");
-		}
-	 if(num == 24)
-		{
-		printf2("\nreconstruct [options]\t\n\n");
-		printf2("\tOptions\t\tSettings\t\t\tCurrent\n");
-        printf2("\t===========================================================\n");
-		printf2("\n\tduplications\t<value>\t\t\t\t*1.0\n\tlosses\t\t<value>\t\t\t\t*1.0");
-		printf2("\n\tshowrecon\tyes | no\t\t\t*no\n\tbasescore\t<value>\t\t\t\t*1.0\n\tprintfiles\tyes | no\t\t\t*yes\n\tspeciestree\tmemory | first | <file>\t\t*memory");
-		}
-     if(num == 25)
-        {
-        printf2("\nprunemonophylies [options]\t\n\n");
-        printf2("\tOptions\t\tSettings\t\t\tCurrent\n");
-        printf2("\t===========================================================\n");
-        printf2("\n\tfilename\t<output file name>\t\t*prunedtrees.txt");
-        printf2("\n\tselection\trandom | length\t\t\t*random\n\n\tIf \"length\" is chosen, then name MUST have a number directly following the name of the species\n\t representing the sequence length. i.e.: \"Speces.length.XXXXXX\n\n" );
-        }
-    if(num == 26)
-        {
-        printf2("\ntips [options]\t\n\n");
-        printf2("\tOptions\t\tSettings\t\t\tCurrent\n");
-        printf2("\t===========================================================\n");
-        printf2("\n\tnumber\t<value between 1 and 10>\t\trandom");
-        }
-    if(num == 27)
-        {
-        printf2("\nrandomisetrees \t\n\n");
-        printf2("\tOptions\t\tSettings\t\t\tCurrent\n");
-        printf2("\t===========================================================\n");
-        printf2("\n\tThis command randomises all source trees in memory\n");
-        }
-    if(num == 28)
-        {
-        printf2("\nrandomprune \t\n\n");
-        printf2("\tOptions\t\tSettings\t\t\tCurrent\n");
-        printf2("\t===========================================================\n");
-        printf2("\n\tThis command randomly prunes the source trees in memory\n");
-        }
-   if(num == 29)
-        {
-        printf2("\nlog [options]\t\n\n");
-        printf2("\tOptions\t\tSettings\t\t\tCurrent\n");
-        printf2("\t===========================================================\n");
-        printf2("\n\tstatus\t\ton|off\t\t\t\t");
-        if(print_log == TRUE) printf2("on");
-        else printf2("off");
-        printf2("\n\tfile\t\t<output file name>\t\t%s", logfile_name);
-        }
-	 if(num == 30)
-		{
-		printf2("\nsavetrees\trange | size | namecontains | containstaxa | score \n\n");
-		printf2("\tOptions\t\tSettings\t\t\tCurrent\n");
-        printf2("\t===========================================================\n");
-		
-		printf2("\n\trange\t\t<integer value> - <integer value> \t*all\n\tsize\t\tequalto <integer value>\n\t\t\tlessthan <integer value>\n\t\t\tgreaterthan <integer value>\t\t*none\n\tnamecontians\t<character string>\t\t\t*none\n\tcontainstaxa\t<character string>\t\t\t*none\n\tscore\t\t<min score> - <max score>\t\t*none\n\tfilename\t<output file name>\t\t\t*savedtrees.txt\n");
-		}
-	
-	
-		
-     if(num != 0)
-        {
-        printf2("\n\n\t\t\t\t\t\t\t*Option is nonpersistent\n");
-        printf2("\t===========================================================\n\n");    
-        }
-    }
-    
-    
-    
-    
-    
-int parse_command(char *command)
-    {
-    int i=0, j=0, k=0;
-    
-    for(i=0; i<1000*parsed_command_assignments; i++)  /* reset the array for the new commands */ 
-        {
-        strcpy(parsed_command[i], "");
-        }
-    i=0;
-    
-    while(command[i] != '\0' && command[i] != ';')
-        {
-        while(command[i] == ' ' || command[i] == '=' || command[i] == '-')
-            i++;
-        k = 0;
-        while(command[i] != ' ' && command[i] != '=' && command[i] != '-' && command[i] != '\0' && command[i] != ';')
-            {
-           /* parsed_command[j][k] = tolower(command[i]); */
-			if(command[i] == '\'' || command[i] == '"')
-				{
-				i++;
-				while(command[i] != '\'' && command[i] != ';' && command[i] != '\0' &&  command[i] != '"')
-					{
-					parsed_command[j][k] = command[i];
-					i++; k++;
-					}
-				i++;
-				}
-			else
-				{
-				parsed_command[j][k] = command[i];
-				i++;k++;
-				}
-            }
-        parsed_command[j][k] = '\0';
-        j++;i++;
-        while(command[i] == ' ' || command[i] == '=' || command[i] == '-')
-            i++;
-		if(j+1 == 1000*parsed_command_assignments)
-			{
-			parsed_command_assignments++;
-			parsed_command = realloc(parsed_command, parsed_command_assignments*1000*sizeof(char *));
-			k=0;
-			for(k=((parsed_command_assignments-1)*1000); k<(parsed_command_assignments*1000); k++)
-				{
-				parsed_command[k] = malloc(1000*sizeof(char));
-				parsed_command[k][0] = '\0';
-				}
-			}
-        }
-
-    return(j);
-    }
-
-
-        
-/* --- autoprunemono helpers --- */
-
-/* Recursively walk in-memory tree and recount presence_of_taxa[treenum][j] from surviving leaves.
- * Checks pos->tag: pruned leaves have tag==FALSE and are skipped (same logic as print_pruned_tree).
- * Uses pos->name which holds the taxa_names[] index set by find_taxon() at tree-build time. */
-static void recount_from_tree(struct taxon *pos, int treenum)
-	{
-	while(pos != NULL)
-		{
-		if(pos->daughter != NULL)
-			{
-			/* internal node: always recurse into daughters */
-			recount_from_tree(pos->daughter, treenum);
-			}
-		else
-			{
-			/* leaf node: only count if not pruned (tag != FALSE) */
-			if(pos->tag != FALSE && pos->name >= 0 && pos->name < number_of_taxa)
-				presence_of_taxa[treenum][pos->name]++;
-			}
-		pos = pos->next_sibling;
-		}
-	}
-
-/* After loading trees, prune monophyletic same-species clades from multicopy trees.
- * Promoted (become single-copy) trees join the supertree pool.
- * Originals are saved in original_fundamentals[] for reconstruct. */
-static void autoprunemono_apply(void)
-	{
-	int i, j, n_multicopy = 0, n_promoted = 0, n_still_multi = 0, n_pruned = 0;
-	int numt = 0, clannID = 0, num_nodes = 0, leaf_count = 0;
-	int *taxa_fate = NULL;
-	char *temptree = malloc(TREE_LENGTH * sizeof(char));
-	char *pruned_tree = NULL, *tmp = NULL;
-
-	if(!temptree) { printf2("Error: out of memory for autoprunemono\n"); return; }
-
-	/* Allocate original_fundamentals if not already done */
-	if(original_fundamentals == NULL)
-		{
-		original_fundamentals = (char **)calloc(fundamental_assignments * FUNDAMENTAL_NUM, sizeof(char *));
-		if(!original_fundamentals)
-			{
-			printf2("Error: out of memory for autoprunemono\n");
-			free(temptree);
-			return;
-			}
-		}
-
-	pruned_tree = malloc(TREE_LENGTH * sizeof(char));
-	if(!pruned_tree) { free(temptree); printf2("Error: out of memory for autoprunemono\n"); return; }
-	tmp = malloc(TREE_LENGTH * sizeof(char));
-	if(!tmp) { free(temptree); free(pruned_tree); printf2("Error: out of memory for autoprunemono\n"); return; }
-
-	for(i = 0; i < Total_fund_trees; i++)
-		{
-		if(!sourcetreetag[i]) continue;
-
-		/* Check if multicopy */
-		int multicopy = FALSE;
-		for(j = 0; j < number_of_taxa; j++)
-			if(presence_of_taxa[i][j] > 1) { multicopy = TRUE; break; }
-		if(!multicopy) continue;
-		n_multicopy++;
-
-		/* Dismantle any tree already in memory */
-		if(tree_top != NULL) { dismantle_tree(tree_top); tree_top = NULL; }
-		temp_top = NULL;
-
-		/* Build tree from stored representation using full names */
-		temptree[0] = '\0';
-		strcpy(temptree, fundamentals[i]);
-		returntree_fullnames(temptree, i);
-		basic_tree_build(1, temptree, tree_top, TRUE);
-		tree_top = temp_top;
-		temp_top = NULL;
-		reset_tree(tree_top);
-
-		/* Number all taxa (sets tag2 on leaves) */
-		numt = 0; clannID = 0;
-		numt = number_tree2(tree_top, numt);
-
-		/* Mark species-specific clades */
-		taxa_fate = malloc(numt * sizeof(int));
-		if(!taxa_fate)
-			{
-			printf2("Error: out of memory for autoprunemono\n");
-			free(temptree); free(pruned_tree); free(tmp);
-			if(tree_top != NULL) { dismantle_tree(tree_top); tree_top = NULL; }
-			return;
-			}
-		for(j = 0; j < numt; j++) taxa_fate[j] = 0;
-		clannID = identify_species_specific_clades(tree_top, numt, taxa_fate, clannID);
-		free(taxa_fate); taxa_fate = NULL;
-
-		/* Shrink and build pruned Newick (numeric IDs = fundamentals[] format) */
-		shrink_tree(tree_top);
-		pruned_tree[0] = '\0';
-		leaf_count = print_pruned_tree(tree_top, 0, pruned_tree, FALSE, i);
-
-		/* Count commas to determine remaining taxon count */
-		num_nodes = 0;
-		for(j = 0; j < (int)strlen(pruned_tree); j++)
-			if(pruned_tree[j] == ',') num_nodes++;
-
-		/* Wrap with outer parens if multi-node (same as prune_monophylies) */
-		if(leaf_count > 1)
-			{
-			tmp[0] = '\0';
-			strcpy(tmp, "(");
-			strcat(tmp, pruned_tree);
-			strcat(tmp, ")");
-			strcpy(pruned_tree, tmp);
-			}
-		strcat(pruned_tree, ";");
-
-		if(num_nodes > 2)  /* tree has 4+ taxa: worth keeping */
-			{
-			n_pruned++;
-
-			/* Save original fundamentals[i] */
-			original_fundamentals[i] = malloc((strlen(fundamentals[i]) + 2) * sizeof(char));
-			if(!original_fundamentals[i])
-				{
-				printf2("Error: out of memory for autoprunemono\n");
-				free(temptree); free(pruned_tree); free(tmp);
-				if(tree_top != NULL) { dismantle_tree(tree_top); tree_top = NULL; }
-				return;
-				}
-			strcpy(original_fundamentals[i], fundamentals[i]);
-
-			/* Replace fundamentals[i] with pruned version */
-			free(fundamentals[i]);
-			fundamentals[i] = malloc((strlen(pruned_tree) + 100) * sizeof(char));
-			if(!fundamentals[i]) memory_error(220);
-			strcpy(fundamentals[i], pruned_tree);
-
-			/* Recount presence_of_taxa[i][*] from in-memory pruned tree */
-			for(j = 0; j < number_of_taxa; j++)
-				presence_of_taxa[i][j] = 0;
-			recount_from_tree(tree_top, i);
-
-			/* Check if now single-copy */
-			int still_multicopy = FALSE;
-			for(j = 0; j < number_of_taxa; j++)
-				if(presence_of_taxa[i][j] > 1) { still_multicopy = TRUE; break; }
-			if(still_multicopy)
-				n_still_multi++;
-			else
-				n_promoted++;
-			}
-
-		/* Free in-memory tree for next iteration */
-		if(tree_top != NULL) { dismantle_tree(tree_top); tree_top = NULL; }
-		temp_top = NULL;
-		}
-
-	free(temptree);
-	free(pruned_tree);
-	free(tmp);
-
-	if(n_multicopy > 0)
-		{
-		printf2("\nAutoprunemono: pruned monophyletic same-species clades in %d multicopy trees.\n", n_pruned);
-		printf2("  Promoted to single-copy pool:   %d trees\n", n_promoted);
-		printf2("  Still multicopy after pruning:  %d trees (retained for reconstruct)\n", n_still_multi);
-		if(n_pruned > 0)
-			printf2("  Original (unpruned) trees stored for reconstruct.\n");
-		}
-	}
-
-void execute_command(char *commandline, int do_all)
-    {
-    int i = 0, j=0, k=0, printfundscores = FALSE, error = FALSE, do_autoprunemono = FALSE;
-    char c = '\0', temp[NAME_LENGTH], filename[10000], *newbietree, string_num[1000];
-    int newbietree_alloc = 0;  /* tracks allocated size of newbietree for overflow detection */
-	float num = 0;
-
-    for(i=0; i<num_commands; i++)
-        {
-        if(strcmp(parsed_command[i], "print") == 0)
-            printfundscores = TRUE;
-        
-		if(strcmp(parsed_command[i], "summary") == 0)
-			{
-			if(strcmp(parsed_command[i+1], "short") == 0)
-				do_all = FALSE;
-			}
-		
-		
-        if(strcmp(parsed_command[i], "maxnamelen") == 0)
-            {
-            max_name_length = toint(parsed_command[i+1]);
-            if(max_name_length == 0)
-                {
-				if(strcmp(parsed_command[i+1], "delimited") == 0)
-					{
-					max_name_length = NAME_LENGTH;
-					delimiter = TRUE;
-					}
-				else if(strcmp(parsed_command[i+1], "full") == 0)
-					{
-					max_name_length = NAME_LENGTH;
-					delimiter = FALSE;
-					printf2("Full taxon names in use (delimiter mode disabled).\n");
-					}
-				else
-					{
-					error = TRUE;
-					printf2("Error: value %s not valid for maxnamelen\n\n", parsed_command[i+1]);
-					}
-				}
-            }
-        if(strcmp(parsed_command[i], "delimiter_char") == 0)
-            {
-            max_name_length = toint(parsed_command[i+1]);
-            if(max_name_length == 0)
-                {
-                if(parsed_command[i+1][0] != '\0')
-					{
-					delimiter_char=parsed_command[i+1][0];
-					}					
-				else
-					{
-					error = TRUE;
-					printf2("Error: A character must be provided as a delimiter\n");
-					}
-				}
-            }
-        if(strcmp(parsed_command[i], "autoprunemono") == 0)
-            {
-            if(strcmp(parsed_command[i+1], "yes") == 0)
-                do_autoprunemono = TRUE;
-            else if(strcmp(parsed_command[i+1], "no") == 0)
-                do_autoprunemono = FALSE;
-            else
-                {
-                printf2("Error: value '%s' not valid for autoprunemono (use yes or no)\n", parsed_command[i+1]);
-                error = TRUE;
-                }
-            }
-        }
-
-    if(delimiter == TRUE) printf2("\nDelimiter mode active: species names extracted before '%c' (use maxnamelen=full to disable)\n", delimiter_char);
-
-    /********** open the input file ************/
-    filename[0] = '\0';
- 
-    if(commandline == NULL)
-        {
-        strcpy(filename, parsed_command[1]);
-        }
-    else
-        strcpy(filename, commandline);
-    
-    if((infile = fopen(filename, "r")) == NULL)		/* check to see if the file is there */
-        {								/* Open the source tree file */
-        printf2("Cannot open file %s\n", filename);
-        error = TRUE;
-        }
-	strcpy(inputfilename, filename);
-    if(!error)
-        {
-		largest_tree = 0;
-		if(yaptp_results != NULL)
-			{
-			free(yaptp_results);
-			yaptp_results = NULL;
-			}
-		num_excluded_trees = 0;
-		num_excluded_taxa = 0;
-		trees_in_memory = 0;
-            /************************ Assign the dynamic arrays *************************/
-        newbietree_alloc = TREE_LENGTH;
-        newbietree = malloc(newbietree_alloc*sizeof(char));
-		if(newbietree == NULL) memory_error(110);
-		newbietree[0] = '\0';
-		if(weighted_scores != NULL)
-			{
-			for(i=0; i<number_of_taxa; i++)
-				free(weighted_scores[i]);
-			free(weighted_scores);
-			weighted_scores = NULL;
-			}
-		
-        if(fundamentals != NULL)  /* if we have assigned the fundamental array earlier */ 
-            {
-            for(i=0; i<fundamental_assignments*FUNDAMENTAL_NUM; i++)
-                {
-                free(fundamentals[i]);
-                }
-            free(fundamentals);
-			
-            fundamentals = NULL;
-            }
-        /* Reset autoprunemono state when new trees are loaded */
-        if(original_fundamentals != NULL)
-            {
-            for(i=0; i<fundamental_assignments*FUNDAMENTAL_NUM; i++)
-                {
-                if(original_fundamentals[i] != NULL)
-                    {
-                    free(original_fundamentals[i]);
-                    original_fundamentals[i] = NULL;
-                    }
-                }
-            free(original_fundamentals);
-            original_fundamentals = NULL;
-            }
-        autoprunemono_active = 0;
-
-        
-		
-		
-        if(presence_of_taxa != NULL)  /* if we have already assigned presence_of_taxa */
-            {
-            for(i=0; i<fundamental_assignments*FUNDAMENTAL_NUM; i++)
-                {
-                free(presence_of_taxa[i]);
-                }
-            free(presence_of_taxa);
-            presence_of_taxa = NULL;
-            }
-    
-    
-        
-        fundamental_assignments = 1;
-        tree_length_assignments = 1;   
-		
-
-		if(fulltaxanames != NULL)
-			{
-			for(i=0; i<fundamental_assignments*FUNDAMENTAL_NUM; i++)
-				{
-				if(fulltaxanames[i] != NULL)
-					{
-					for(j=0; j<numtaxaintrees[i]; j++)
-						{
-						if(fulltaxanames[i][j] != NULL)
-							free(fulltaxanames[i][j]);
-						}
-					free(fulltaxanames[i]);
-					}
-				}
-			free(fulltaxanames);
-			fulltaxanames = NULL;
-			}
-		
-		if(numtaxaintrees != NULL)
-			free(numtaxaintrees);		
-		fulltaxanames = malloc((fundamental_assignments*FUNDAMENTAL_NUM)*sizeof(char **));
-		if(!fulltaxanames) memory_error(106);
-		numtaxaintrees = malloc((fundamental_assignments*FUNDAMENTAL_NUM)*sizeof(int));
-		if(!numtaxaintrees) memory_error(106);
-		tree_names = malloc((fundamental_assignments*FUNDAMENTAL_NUM)*sizeof(char *));
-		if(!tree_names) memory_error(106);
-		tree_weights = malloc((fundamental_assignments*FUNDAMENTAL_NUM)*sizeof(float));
-		if(!tree_weights) memory_error(107);
-        fundamentals = malloc((fundamental_assignments*FUNDAMENTAL_NUM)*sizeof(char *));
-        if(!fundamentals) memory_error(1);
-        for(i=0; i<fundamental_assignments*FUNDAMENTAL_NUM; i++)
-            {
-			
-			fulltaxanames[i] = NULL;
-
-			tree_names[i] = malloc(1000*sizeof(char));
-			if(!tree_names) memory_error(108);
-			tree_names[i][0] = '\0';
-			tree_weights[i] = 1;
-			fundamentals[i] = NULL;
-         /*   fundamentals[i] = malloc((tree_length_assignments*TREE_LENGTH)*sizeof(char));
-            if(!fundamentals[i]) memory_error(2);
-                
-            fundamentals[i][0] = '\0';
-           */ }
-    
-    
-        if(fund_scores != NULL)  /* if we have already assigned fund_scores */
-            {
-            for(i=0; i<Total_fund_trees; i++)
-                {
-                for(j=0; j<number_of_taxa; j++)
-                    {
-                    free(fund_scores[i][j]);
-                    }
-                free(fund_scores[i]);
-                }
-            free(fund_scores);
-            fund_scores = NULL;
-            }
-
-    
-        if(taxa_names != NULL) /* if we have assigned taxa names earlier */
-            {
-            for(i=0; i<TAXA_NUM*name_assignments; i++)
-                {
-                free(taxa_names[i]);
-                }
-            free(taxa_names);
-            free(taxa_incidence);
-            taxa_names = NULL;
-            }
-    
-        if(Cooccurrance != NULL) /* if we have assigned taxa names earlier */
-            {
-            for(i=0; i<TAXA_NUM*name_assignments; i++)
-                {
-                free(Cooccurrance[i]);
-                }
-            free(Cooccurrance);
-            free(same_tree);
-            Cooccurrance = NULL;
-            same_tree = NULL;
-            }
-            
-        name_assignments = 1;
-        
-        presence_of_taxa = malloc((fundamental_assignments*FUNDAMENTAL_NUM)*sizeof(int *));
-        if(!presence_of_taxa) memory_error(3);
-           
-        for(i=0; i<fundamental_assignments*FUNDAMENTAL_NUM; i++)
-            {
-            presence_of_taxa[i] = malloc((TAXA_NUM*name_assignments)*sizeof(int));
-            if(!presence_of_taxa[i]) memory_error(4);
-                
-            for(j=0; j<TAXA_NUM*name_assignments; j++)
-                {
-                presence_of_taxa[i][j] = FALSE;
-                }
-            }
-            
-
-
-        taxa_names = malloc((TAXA_NUM*name_assignments)*sizeof(char *));
-            if(!taxa_names) memory_error(5);
-                
-            for(j=0; j<TAXA_NUM*name_assignments; j++)
-                {
-                taxa_names[j] = malloc(NAME_LENGTH*sizeof(char));
-                if(!taxa_names[j]) memory_error(6);
-                    
-                taxa_names[j][0] = '\0';
-                }
-                
-        Cooccurrance = malloc((TAXA_NUM*name_assignments)*sizeof(int *));
-        if(!Cooccurrance) memory_error(7);
-                
-        for(j=0; j<TAXA_NUM*name_assignments; j++)
-            {
-            Cooccurrance[j] = malloc((TAXA_NUM*name_assignments)*sizeof(int));
-            if(!Cooccurrance[j]) memory_error(8);
-                
-            for(k=0; k<TAXA_NUM*name_assignments; k++)
-                Cooccurrance[j][k] = 0;
-            }
-    
-        same_tree = malloc((TAXA_NUM*name_assignments)*sizeof(int));
-        if(!same_tree) memory_error(9);
-            
-        for(j=0; j<TAXA_NUM*name_assignments; j++)
-            same_tree[j] = 0;
-    
-    
-        taxa_incidence = malloc((TAXA_NUM*name_assignments)*sizeof(int));
-        if(!taxa_incidence) memory_error(10);
-            
-        for(j=0; j<TAXA_NUM*name_assignments; j++)
-            taxa_incidence[j] = 0;
-    
-        
-        if(number_of_comparisons != NULL)
-            {
-            free(number_of_comparisons);
-            number_of_comparisons = NULL;
-            }
-        
-        number_of_comparisons = malloc((fundamental_assignments*FUNDAMENTAL_NUM)*sizeof(int));
-        if(!number_of_comparisons) memory_error(11);
-            
-        for(j=0; j<fundamental_assignments*FUNDAMENTAL_NUM; j++)
-            number_of_comparisons[j] =0;
-
-    
-		hsprint = TRUE;
-        number_of_taxa = 0;
-        num_excluded_trees = 0;
-        Total_fund_trees = 0;
-         /************** next read in all the source trees into memory **************/
-        /* we need to determine whether the input file is in NEXUS or in newhapshire (nested parenthsis) format */
-        /* If it is in NEXUS format then the first (non redundant) character will be a "#" */ 
-
-        while(((c = getc(infile)) == ' ' || c == '\n' || c == '\r' || c == '[') && !feof(infile)) 
-            {
-            if(c == '[')
-                while(!feof(infile) && (c = getc(infile)) != ']');
-            }		/* Skip over nontree characters */
-        
-        if(c == '#')
-            {
-            printf2("\nReading Nexus format source tree file \n");
-
-
-			if(nexusparser(infile) == TRUE)
-				{
-				printf2("error reading nexus file\n");
-				}
-
-
-            
-            
-            
-            }  /* End reading NEXUS format tree */
-        else
-            {
-			printf2("\nReading Newhampshire (Phylip) format source trees\n");
-            
-			if(c != '(')
-                {
-                printf2("Error: Treefile not in correct format\n");
-                }
-            else
-                {
-                got_weights = FALSE;
-                while(!feof(infile)) /* While we haven't reached the end of the file */
-                    {
-                    for(i=0; i<10; i++) string_num[i] = '\0';
-					i=0;
-                    while(!feof(infile) && c != ';' )
-                        {
-						if(c != ' ' && c != '\n' && c != '\r')
-							{
-							/* Grow buffer if approaching the limit (handles trees longer than TREE_LENGTH) */
-							if(i >= newbietree_alloc - 3)
-								{
-								newbietree_alloc *= 2;
-								newbietree = realloc(newbietree, newbietree_alloc * sizeof(char));
-								if(newbietree == NULL) memory_error(111);
-								}
-							newbietree[i] = c;
-							i++;
-							}
-						c = getc(infile);
-						if(c == '[')
-							{
-							j=0;
-							while(c != ']' && !feof(infile))
-								{
-								c = getc(infile);
-								string_num[j] = c; j++;
-								}
-							string_num[j] = '\0';
-							tree_weights[Total_fund_trees] = atof(string_num);
-							c = getc(infile);
-							}
-						}
-					
-					newbietree[i] = ';';
-					newbietree[i+1] = '\0';
-
-					input_fund_tree(newbietree, Total_fund_trees);
-
-					c = getc(infile);
-					while((c == ' ' || c == '\t' || c == '\n' || c == '\r') && !feof(infile)) c = getc(infile);
-					if(c == '[')
-						{
-						j=0;
-						c = getc(infile);
-						while(c != ']' && !feof(infile))
-							{
-
-							tree_names[Total_fund_trees-1][j] = c;
-							if(j<99) j++;
-							c = getc(infile);
-							}
-
-						tree_names[Total_fund_trees-1][j] = '\0';
-						while((c == ' ' || c == '\t' || c == '\n' || c == '\r' || c == ']') && !feof(infile)) c = getc(infile);
-
-						}
-                    }  /* End of reading tree */
-
-                }
-            } /* end reading Phylip format trees */
-	fclose(infile); 
-	infile = NULL;
-	remainingtrees = Total_fund_trees;
-		if(sourcetreetag != NULL) free(sourcetreetag);
-		sourcetreetag = malloc(Total_fund_trees*sizeof(int));
-		for(i=0; i<Total_fund_trees; i++) sourcetreetag[i] = TRUE;		
-		if(presenceof_SPRtaxa) free(presenceof_SPRtaxa);
-		presenceof_SPRtaxa = malloc(number_of_taxa*sizeof(int));
-		for(i=0; i<number_of_taxa; i++) presenceof_SPRtaxa[i] = -1;
-		/* Initialise per-taxon weights for bipartition tree hashing (splitmix64 finaliser) */
-		taxon_hash_vals = realloc(taxon_hash_vals, number_of_taxa * sizeof(uint64_t));
-		{
-		uint64_t thv_x;
-		for(i=0; i<number_of_taxa; i++)
-			{
-			thv_x = (uint64_t)(i + 1);
-			thv_x += 0x9e3779b97f4a7c15ULL;
-			thv_x = (thv_x ^ (thv_x >> 30)) * 0xbf58476d1ce4e5b9ULL;
-			thv_x = (thv_x ^ (thv_x >> 27)) * 0x94d049bb133111ebULL;
-			taxon_hash_vals[i] = thv_x ^ (thv_x >> 31);
-			}
-		}
-	weighted_scores = malloc(number_of_taxa * sizeof(float*));
-	if(!weighted_scores) memory_error(94);
-	for(k=0; k<number_of_taxa; k++)
-		{
-		weighted_scores[k] = malloc(number_of_taxa*sizeof(float));
-		if(!weighted_scores[k]) memory_error(95);
-		for(j=0; j<number_of_taxa; j++)
-			weighted_scores[k][j] = 0;
-		}	
-	
-
-        input_file_summary(do_all);
-	
-
-		
-        if(sourcetree_scores) free(sourcetree_scores);
-		sourcetree_scores = malloc(Total_fund_trees*sizeof(float));
-		for(i=0; i<Total_fund_trees; i++) sourcetree_scores[i] = -1;
-
-        fund_scores = malloc(Total_fund_trees*sizeof(int**));
-        if(fund_scores == NULL) memory_error(35);
-            
-        for(i=0; i<Total_fund_trees; i++)
-            {
-            fund_scores[i] = malloc((number_of_taxa)*sizeof(int*));
-            if(fund_scores[i] == NULL) memory_error(36);
-            else
-                {
-                for(j=0; j<(number_of_taxa); j++)
-                    {
-                    fund_scores[i][j] = malloc((number_of_taxa)*sizeof(int));
-                    if(fund_scores[i][j] == NULL) memory_error(37);
-                    else
-                        {
-                        for(k=0; k<(number_of_taxa); k++)
-                            fund_scores[i][j][k] = 0;
-                        }
-                    }
-                }
-            }
-
-		calculated_fund_scores = FALSE;
-
-		/* Apply autoprunemono if requested */
-		if(do_autoprunemono && Total_fund_trees > 0)
-			{
-			autoprunemono_active = 1;
-			autoprunemono_apply();
-			}
-		
-		free(newbietree);
-
-        }
-    }
-#endif
 
     
 
 
-/* input_fund_tree: moved to tree_io.c */
-#if 0
-void input_fund_tree(char *intree, int fundnum)
-	{
-	int i=0,j=0, k=0, r=0, tree_length = 0, taxaposition = 0, tottaxaintree = 0;
-	char temp[NAME_LENGTH], **temp_tree_names = NULL;
-	float *temp_tree_weights = NULL;
-
-	/* count the number of commas in the tree string to figure out the number of taxa in the tree */
-	i=0;
-	while(intree[i] != ';' )
-		{
-		if(intree[i] == ',') tottaxaintree++;
-		i++;
-		}
-	tottaxaintree++;
-
-	fulltaxanames[fundnum] = malloc(tottaxaintree*sizeof(char *)); 
-	for(i=0; i<tottaxaintree; i++) fulltaxanames[fundnum][i] = NULL;
-	numtaxaintrees[fundnum]=tottaxaintree;
-	tree_length = strlen(intree);
-	fundamentals[Total_fund_trees] = malloc((tree_length+100)*sizeof(char));
-	if(!fundamentals[Total_fund_trees]) memory_error(119);
-	fundamentals[Total_fund_trees][0] = '\0';
-	i=0; r=0;
-	while(intree[r] != ';' )
-		{
-		switch(intree[r])
-			{
-			case ')':
-				fundamentals[Total_fund_trees][i] = intree[r];
-				r++;
-				i++;
-				while(intree[r] != ')' && intree[r] != '(' && intree[r] != ',' && intree[r] != ';' && intree[r] != ':')
-					{
-					fundamentals[Total_fund_trees][i] = intree[r];
-					r++; i++;
-					}
-				break;
-			case '(':
-			case ',':
-			case ';':
-				fundamentals[Total_fund_trees][i] = intree[r];
-				r++;
-				i++;
-				break;
-			case ' ':
-			case '\n':
-			case '\r':
-			case '\t':
-				r++;
-				break;    
-			case ':':
-				got_weights = TRUE;
-				while(intree[r] != ')' && intree[r] != '(' && intree[r] != ',' && intree[r] != ';')
-					{
-					fundamentals[Total_fund_trees][i] = intree[r]; 
-					r++;
-					i++; 
-					}
-				break;
-			case '\'': 
-				r++;
-				break;
-			default :
-				j=0;
-				while(intree[r]  !=  ')' && intree[r] != '(' && intree[r] != ',' && intree[r] != ';' && intree[r] != ':' && intree[r] != '\'') 
-					{
-					if(j<max_name_length) temp[j] = intree[r];
-					j++;
-					r++;
-					}
-				temp[j] = '\0'; 
-				fulltaxanames[fundnum][taxaposition] = malloc((strlen(temp)+10)*sizeof(char));
-				if(fulltaxanames[fundnum][taxaposition] == NULL) memory_error(444);
-				fulltaxanames[fundnum][taxaposition][0] = '\0';
-				strcpy(fulltaxanames[fundnum][taxaposition], temp);
-				taxaposition++;
-				k = assign_taxa_name(temp, TRUE);   /* this returns an int but we need it in a string format */
-				totext(k, temp);		/* This will give us the string euivalent */
-				j=0;
-				while(temp[j] != '\0')
-					{
-					fundamentals[Total_fund_trees][i] = temp[j]; /* copy the string equivalent into the tree in memory */
-					j++; i++;
-					}
-
-				break;
-			}
-
-		}
-	
-	fundamentals[Total_fund_trees][i] = ';';
-	fundamentals[Total_fund_trees][i+1] = '\0';
-	for(j=0; j<TAXA_NUM*name_assignments; j++)
-		{
-		if(same_tree[j] > 0)
-			{
-			number_of_comparisons[Total_fund_trees]++;  /* This will tell me how many taxa are in this tree  */
-			for(k=j+1; k<TAXA_NUM*name_assignments; k++)
-				{
-				if(same_tree[k] > 0)
-					{
-					Cooccurrance[j][k]++;
-					Cooccurrance[k][j]++;
-					}
-				}
-			}
-		same_tree[j] = 0;
-		}
-	k =number_of_comparisons[Total_fund_trees];
-	if(k>largest_tree) largest_tree = k;
-	if(k<smallest_tree) smallest_tree = k;
-	number_of_comparisons[Total_fund_trees] = 0;
-	for(j=0; j<k; j++)
-		number_of_comparisons[Total_fund_trees] +=j;    /* using the number of taxa in the tree, calculate the total number of comparisons in this tree */
-	
-	
-	Total_fund_trees++;
-	/**************************/
-	if(Total_fund_trees == (fundamental_assignments*FUNDAMENTAL_NUM)-2)  /* If we need to expand the size of the fundamentals array */
-		{
-		
-
-		fundamental_assignments++;
-		
-		temp_tree_names = malloc(((fundamental_assignments-1)*FUNDAMENTAL_NUM)*sizeof(char *));
-		for(i=0; i< ((fundamental_assignments-1)*FUNDAMENTAL_NUM); i++)
-			{
-			temp_tree_names[i] = malloc(1000*sizeof(char));
-			temp_tree_names[i][0] = '\0';
-			strcpy(temp_tree_names[i], tree_names[i]);
-			free(tree_names[i]);
-			}
-		
-		free(tree_names);
-		tree_names = NULL;
-		tree_names = malloc((fundamental_assignments*FUNDAMENTAL_NUM)*sizeof(char *));
-		if(!tree_names) memory_error(102);
-		temp_tree_weights = malloc(((fundamental_assignments-1)*FUNDAMENTAL_NUM)*sizeof(float));
-		for(i=0; i<((fundamental_assignments-1)*FUNDAMENTAL_NUM); i++)
-			temp_tree_weights[i] = tree_weights[i];
-		free(tree_weights);
-		tree_weights = NULL;
-		
-		tree_weights = malloc((fundamental_assignments*FUNDAMENTAL_NUM)*sizeof(float));
-		if(!tree_weights) memory_error(103);
-		for(i=0; i<(fundamental_assignments*FUNDAMENTAL_NUM); i++)
-			{
-			tree_names[i] = malloc(1000*sizeof(char));
-			if(!tree_names[i]) memory_error(104);
-			tree_names[i][0] = '\0';
-			tree_weights[i] = 1;
-			if(i<((fundamental_assignments-1)*FUNDAMENTAL_NUM))
-				{
-				strcpy(tree_names[i], temp_tree_names[i]);
-				free(temp_tree_names[i]);
-				tree_weights[i] = temp_tree_weights[i];
-				}
-			}
-		free(temp_tree_names);
-		temp_tree_names = NULL;
-		free(temp_tree_weights);
-		temp_tree_weights = NULL;
-		number_of_comparisons = realloc(number_of_comparisons, (fundamental_assignments*FUNDAMENTAL_NUM)*sizeof(int));
-		if(!number_of_comparisons) memory_error(105);
-		for(i=((fundamental_assignments-1)*FUNDAMENTAL_NUM); i<(fundamental_assignments*FUNDAMENTAL_NUM); i++)
-			number_of_comparisons[i] = 0;
-				
-		 /* store the contents of the fundamentals so far */
-		stored_funds = NULL;
-		stored_funds = malloc((((fundamental_assignments-1)*FUNDAMENTAL_NUM)-2)*sizeof(char *));
-		if(!stored_funds) memory_error(43);
-		for(i=0; i<((fundamental_assignments-1)*FUNDAMENTAL_NUM)-2; i++)
-			{
-			stored_funds[i] = NULL;
-			j = (int)strlen(fundamentals[i]);
-			stored_funds[i] = malloc(j+100*sizeof(char));
-			if(!stored_funds[i]) memory_error(44);
-			stored_funds[i][0] = '\0';
-			strcpy(stored_funds[i], fundamentals[i]);
-			}
-		
-		/***** free up the memory space taken by fundmaental ***/
-		for(i=0; i<((fundamental_assignments-1)*FUNDAMENTAL_NUM); i++)
-			{
-			
-			if(fundamentals[i] != NULL)free(fundamentals[i]);
-			}
-				free(fundamentals);
-		fundamentals = NULL;
-		
-		/***** allocate the new size of fundamentals ********/
-		fulltaxanames = realloc(fulltaxanames, (fundamental_assignments*FUNDAMENTAL_NUM)*sizeof(char **));
-		for(i=(fundamental_assignments-1)*FUNDAMENTAL_NUM; i<fundamental_assignments*FUNDAMENTAL_NUM; i++)
-			fulltaxanames[i] = NULL;
-		
-		numtaxaintrees =realloc(numtaxaintrees, (fundamental_assignments*FUNDAMENTAL_NUM)*sizeof(int));
-		fundamentals = malloc((fundamental_assignments*FUNDAMENTAL_NUM)*sizeof(char *));
-		if(!fundamentals) memory_error(12);
-		
-		for(i=0; i< fundamental_assignments*FUNDAMENTAL_NUM; i++)
-			{
-			fundamentals[i] = NULL;
-			if(i<((fundamental_assignments-1)*FUNDAMENTAL_NUM)-2)
-				fundamentals[i] = malloc((strlen(stored_funds[i])+100)*sizeof(char));
-			else
-				fundamentals[i] = malloc((tree_length_assignments*TREE_LENGTH)*sizeof(char));
-			if(!fundamentals[i]) memory_error(13);
-			fundamentals[i][0] = '\0';
-			if(i <((fundamental_assignments-1)*FUNDAMENTAL_NUM)-2)
-				{
-				strcpy(fundamentals[i], stored_funds[i]);  /**** copying the values already read back into the fundamental array **/
-				}
-			}
-		for(i=0; i<((fundamental_assignments-1)*FUNDAMENTAL_NUM)-2; i++)
-			free(stored_funds[i]);
-		free(stored_funds);
-		stored_funds = NULL;
-				/***** now do the same for presence_of_taxa *********/
-		/*** store the present settings for presence_of_taxa ******/
-		
-		stored_presence_of_taxa = malloc(((fundamental_assignments-1)*FUNDAMENTAL_NUM)*sizeof(int *));
-		for(i=0; i<((fundamental_assignments-1)*FUNDAMENTAL_NUM)-2; i++)
-			{
-			stored_presence_of_taxa[i] = NULL;
-			stored_presence_of_taxa[i] = malloc((TAXA_NUM*name_assignments)*sizeof(int));
-			for(j=0; j<TAXA_NUM*name_assignments; j++)
-				stored_presence_of_taxa[i][j] = presence_of_taxa[i][j];
-			}
-		
-		/****** free up presence of taxa ******/
-		for(i=0; i<((fundamental_assignments-1)*FUNDAMENTAL_NUM); i++)
-			free(presence_of_taxa[i]);
-		free(presence_of_taxa);
-		presence_of_taxa = NULL;
-		/*** create the new sized array for presence_of_taxa ******/
-		presence_of_taxa = malloc((fundamental_assignments*FUNDAMENTAL_NUM)*sizeof(int *));
-	   if(!presence_of_taxa) memory_error(14);
-		for(i=0; i<fundamental_assignments*FUNDAMENTAL_NUM; i++)
-			{
-			presence_of_taxa[i] = malloc((TAXA_NUM*name_assignments)*sizeof(int));
-			if(!presence_of_taxa[i]) memory_error(15);
-				
-			for(j=0; j<TAXA_NUM*name_assignments; j++)
-				{
-				if(i<((fundamental_assignments-1)*FUNDAMENTAL_NUM)-2)
-					presence_of_taxa[i][j] = stored_presence_of_taxa[i][j];
-				else
-					presence_of_taxa[i][j] = FALSE;
-				}
-				
-			}
-		for(i=0; i<((fundamental_assignments-1)*FUNDAMENTAL_NUM)-2; i++)
-			{
-			free(stored_presence_of_taxa[i]);
-			}
-		free(stored_presence_of_taxa);
-		stored_presence_of_taxa = NULL;
-				}
-	}
-#endif /* input_fund_tree: moved to tree_io.c */
-
-
-/* comment: moved to tree_io.c */
-
-
-
-/* nexusparser: moved to tree_io.c */
-#if 0
-int nexusparser(FILE *nexusfile)
-	{
-	char c, begin[6] = {'b', 'e', 'g', 'i', 'n', '\0'}, translate[10] = {'t','r','a','n','s','l','a','t','e','\0'}, tree[5] = {'t','r','e','e','\0'};
-	int error = FALSE, i, j, k, l, translated = FALSE, num_taxa = 1000, num_trees = 0, found = FALSE, numtranslatedtaxa = 0;
-	char *string = NULL, ***names = NULL, *newtree, single[1000];
-	
-	newtree = malloc(TREE_LENGTH*sizeof(char));
-	newtree[0] = '\0';
-	string = malloc(TREE_LENGTH*sizeof(char));
-	string[0] = '\0';
-	while(((c = getc(nexusfile)) == ' ' || c == '\t' || c == '\n' || c == '\r') && !feof(nexusfile));
-
-	while(!feof(nexusfile) && !error)
-		{
-		while(((c = getc(nexusfile)) == ' ' || c == '\t' || c == '\n' || c == '\r') && !feof(nexusfile));
-		switch(tolower(c))
-			{
-			case '[':
-				
-				comment(nexusfile);
-				break;
-			
-			case 'b':   /* this is the beginning of a block **/
-				for(i=1; i<5; i++)
-					if((c = tolower(getc(nexusfile))) != begin[i]) error = TRUE;
-				if(!error)
-					{
-					while(((c = getc(nexusfile)) == ' ' || c == '\t' || c == '\n' || c == '\r') && !feof(nexusfile));
-					i = 0;
-					do {	/* find the type of block it is **/
-						string[i] = tolower(c);
-						i++;
-						c = getc(nexusfile);
-						}while(c != ';' && c != ' ');
-					string[i] = '\0';
-					if(strcmp(string, "trees") == 0)
-						{
-						while(strcmp(string, "end;") != 0 && strcmp(string, "endblock;") != 0 && !feof(nexusfile) && !error)
-							{
-							/*** read in the trees ***/
-							while(((c = getc(nexusfile)) == ' ' || c == '\t' || c == '\n' || c == '\r') && !feof(nexusfile));
-							while(c == '[')
-								{
-								comment(nexusfile);
-								while(((c = getc(nexusfile)) == ' ' || c == '\t' || c == '\n' || c == '\r') && !feof(nexusfile));
-								}
-							strcpy(string, "");
-							i=1;
-							string[0] = tolower(c);
-							while(((c = getc(nexusfile)) != ' ' && c != '\n' && c != '\r') && !feof(nexusfile))
-								{
-								string[i] = tolower(c);
-								i++;
-								}
-							string[i] = '\0';
-							if(strcmp(string, tree) == 0)
-								{
-								/** read in trees **/
-								/** read in the name of the tree **/
-								while(((c = getc(nexusfile)) == ' ' || c == '\t' || c == '\n' || c == '\r') && !feof(nexusfile));
-								i=1;
-								string[0] = c;
-								while(((c = getc(nexusfile)) != ' ' && c != '\n' && c != '\r') && !feof(nexusfile))
-									{
-									string[i] = c;
-									i++;
-									}
-								string[i] = '\0';
-								strcpy(tree_names[Total_fund_trees], string);
-								
-								/*** look out for any weights **/
-								while(((c = getc(nexusfile)) == ' ' || c == '\t' || c == '=' || c == '\n' || c == '\r') && !feof(nexusfile));
-								while(c == '[')
-									{
-									if((c = getc(nexusfile)) == '&')
-										{
-										if((c = tolower(getc(nexusfile))) == 'w')
-											{
-											while(((c = getc(nexusfile)) == ' ' || c == '\t' || c == '\n' || c == '\r') && !feof(nexusfile));
-											i=1;
-											string[0] = c;
-											while((c = getc(nexusfile)) != ']' && c != '/' &&!feof(nexusfile))
-												{
-												string[i] = c;
-												if(string[i] != ' ') i++;
-												}
-											string[i] = '\0';
-											if(c == '/') /* if PAUP has saved tree weights as a fraction (i.e. 1/2 or 4/5 etc) */
-												{
-												tree_weights[Total_fund_trees] = tofloat(string);
-												i=0;
-												while((c = getc(nexusfile)) != ']' &&!feof(nexusfile))
-													{
-													string[i] = c;
-													if(string[i] != ' ') i++;
-													}
-												string[i] = '\0';
-												tree_weights[Total_fund_trees] = tree_weights[Total_fund_trees]/tofloat(string);
-												}												
-											
-											}
-										else
-											while((c = getc(nexusfile)) != ']' &&!feof(nexusfile));
-										}
-									else
-										while((c = getc(nexusfile)) != ']' &&!feof(nexusfile));
-									while(((c = getc(nexusfile)) == ' ' || c == '\t' || c == '\n' || c == '\r') && !feof(nexusfile));
-									}
-								
-								 
-								/*** read in the tree **/
-								if(!translated)
-									{
-									i=0;
-									strcpy(string, "");
-									while(c != ';')
-										{
-										if(string[i] != ' ' && string[i] != '\t' && string[i] != '\n' && string[i] !='\r') string[i] = c;
-										i++;		
-										c = getc(nexusfile);
-										}
-									string[i] = ';';
-									string[i+1] = '\0';
-									input_fund_tree(string, Total_fund_trees);
-									}
-								else
-									{
-									/*** If there was a translation table then we need to put the names into the tree **/
-									i=0;
-									while(c != ';' && !feof(nexusfile) && !error)
-										{
-										switch(c)
-											{
-											case '(':
-											case ',':
-												newtree[i] = c;
-												i++;
-												c = getc(nexusfile);
-												break;
-											case ')':
-											case ':':
-												do
-													{
-													newtree[i] = c;
-													i++;
-													c = getc(nexusfile);
-													}while(c != '(' && c != ')' && c != ',' && c != ';');
-												break;
-											default:
-												j=0;
-												while(c != '(' && c != ')' && c != ',' && c != ';' && c != ':' && !feof(nexusfile))
-													{
-													single[j] = c;
-													j++;
-													c = getc(nexusfile);
-													}
-												single[j] = '\0';
-												found = -1;
-												for(j=0; j<numtranslatedtaxa; j++)
-													{
-													if(strcmp(single, names[j][0])== 0)
-														found = j;
-													}
-												if(found == -1)
-													{
-													printf2("Error: taxa %s is not in the translation table\n", single);
-													error = TRUE;
-													}
-												else
-													{
-													j=0;
-													while(names[found][1][j] != '\0')
-														{
-														newtree[i] = names[found][1][j];
-														j++; i++;
-														}
-													}
-											}		
-										}
-									newtree[i] = ';';
-									input_fund_tree(newtree, Total_fund_trees);
-									}
-								}
-							if(strcmp(string, translate) == 0)
-								{
-								translated = TRUE;
-								/** handle translation **/
-								names = malloc(num_taxa*sizeof(char**));
-								for(i=0; i<num_taxa; i++)
-									{
-									names[i] = malloc(2*sizeof(char*));
-									for(j=0; j<2; j++)
-										{
-										names[i][j] = malloc(1000*sizeof(char));
-										names[i][j][0] = '\0';
-										}
-									}
-								i=0; j=0; c = getc(nexusfile);
-								while(c != ';' && !feof(nexusfile))
-									{
-									while(c == ' ' || c == '\n' || c == '\r' || c == '\t' || c == ',') c = getc(nexusfile);
-									if(j==2)
-										{
-										j = 0;
-										i++;
-										if(i+1 >= num_taxa)
-											{
-											names = realloc(names,(num_taxa+num_taxa)*sizeof(char**));
-											for(k=num_taxa; k<num_taxa+num_taxa; k++)
-												{
-												names[k] = malloc(2*sizeof(char*));
-												for(l=0; l<2; l++)
-													{
-													names[k][l] = malloc(1000*sizeof(char));
-													names[k][l][0] = '\0';
-													}
-												}
-											
-											num_taxa += num_taxa;
-											}
-										}
-									k=0;
-									while(c != ' ' && c != '\n' && c != '\r' && c != '\t' && c != ';' && c != ',' && !feof(nexusfile))
-										{
-										names[i][j][k] = c;
-										k++;
-										c = getc(nexusfile);
-										}
-									names[i][j][k] = '\0';
-									j++;
-									}
-								numtranslatedtaxa = i+1;
-								}
-							}
-						}
-					else
-						{
-						if(strcmp(string, "clann")==0)
-							{
-							strcpy(string, "");
-							while(strcmp(string, "end;") != 0 && strcmp(string, "endblock;") != 0 && !feof(nexusfile) && !error)
-								{
-								i=0;
-								while((c == ' ' || c == '\n' || c == '\r' || c == '\t' || c == ';') && !feof(nexusfile)) c = getc(nexusfile);
-								while(c != ';' && !feof(nexusfile))
-									{
-									string[i] = c;
-									i++;
-									c = getc(nexusfile);
-									}
-								string[i] = ';';
-								string[i+1] = '\0';
-								strcpy(stored_commands[parts], string);
-								parts++;
-								
-								
-								}
-							}
-						else
-							{
-							/*** skip to the end of the block -- it must contain sequences or something **/
-							strcpy(string, "");
-							while(strcmp(string, "end;") != 0 && strcmp(string, "endblock;") != 0 && !feof(nexusfile) && !error)
-								{
-								i=0;
-								while((c == ' ' || c == '\n' || c == '\r' || c == '\t' || c == ';') && !feof(nexusfile)) c = getc(nexusfile);
-								while(c != ';' && c != ' ' && c != '\n' && c != '\r' && c != '\t' && !feof(nexusfile))
-									{
-									string[i] = tolower(c);
-									if(i < 9997)i++;
-									c = tolower(getc(nexusfile));
-									}
-								string[i] = ';';
-								string[i+1] = '\0';
-								}
-							}
-						}	
-					}
-				else
-					{
-					/*** what to do if it doesn't say begin? ***/
-					error = TRUE;
-					}
-				break;
-				
-			default:
-				break;
-
-
-			}
-		}
-	free(newtree);
-/*	fclose(nexusfile); */
-	free(string);
-	if(translated)
-		{
-		for(i=0; i<num_taxa; i++)
-			{
-			for(j=0; j<2; j++)
-				free(names[i][j]);
-			free(names[i]);
-			}
-		free(names);
-		}
-	return(error);
-	}
-#endif /* nexusparser: moved to tree_io.c */
 
 
 
@@ -3210,1159 +321,37 @@ int nexusparser(FILE *nexusfile)
 
 
 
-/* input_file_summary: moved to tree_io.c */
-#if 0
-void input_file_summary(int do_all)
-    {
-    int i=0, j=0, k=0, l=0, limit, previous_limit, limit_reached, singlecopy=0;
-    float *size_of_trees = NULL;
-	
-	size_of_trees = malloc((Total_fund_trees-num_excluded_trees)*sizeof(float));
-	for(i=0; i<Total_fund_trees-num_excluded_trees; i++)
-		size_of_trees[i] = 0;
-	
-    sup=1;
-    printf2("\n\tSource tree summmary:\n\n");
-    printf2("\t----------------------------------------------------\n");
-    printf2("\t\tNumber of input trees: %d\n", Total_fund_trees-num_excluded_trees);
-    printf2("\t\tNumber of unique taxa: %d\n", number_of_taxa-num_excluded_taxa);
-    sup =1;
-    for(i=4; i<=number_of_taxa-num_excluded_taxa; i++) sup*=((2*i)-5);
-    printf2("\t\tTotal unrooted trees in Supertree space?\n\t\t\t%g\n\n", sup);
-    
-
-    printf2("\tOccurrence summary:\n\n");
-    
-    printf2("\t\tnumber\tTaxa name           \t\tOccurrence\n\n");
-    for(i=0; i<number_of_taxa; i++)
-        {
-        printf2("\t\t%-4d\t%-30s\t%d\n", i, taxa_names[i], taxa_incidence[i]);
-        }
-   
-	if(do_all)
-		{
-		printf2("\n\n\tCo-occurrence summary:\n\n");
-		printf2("\t\tTaxa Number\n      ");
-
-
-		limit_reached = FALSE;
-		previous_limit = 0;
-		limit = 12;
-		while(!limit_reached)
-			{
-			if(limit >= number_of_taxa)
-				{
-				limit_reached = TRUE;
-				limit = number_of_taxa;
-				}
-			if(previous_limit == 0)
-				printf2("\n\t\t      ");
-			else
-				printf2("\n\tCo-occurence summary continued:\n\t\t      ");
-			for(i=previous_limit; i<limit; i++)
-				printf2("%-5d ", i);
-			printf2("\n");
-			for(i=previous_limit; i<number_of_taxa; i++)
-				{
-				printf2("\t\t%-5d ", i);
-				for(j=previous_limit; j<=i; j++)
-					{
-					if(j<limit)
-						{
-						if(j== i)
-							printf2("-     ");
-						else
-							printf2("%-5d ", Cooccurrance[i][j]);
-						}
-					}
-				printf2("\n");
-				}
-			previous_limit = limit;
-			limit = limit+12;
-			if(limit > number_of_taxa) limit = number_of_taxa;
-			}
-		}
-
-	printf2("\n\n\tSource tree size summary:\n\n  num leaves\n");
-	l=0;
-	smallest_tree = -1;
-	largest_tree = -1;
-	for(i=0; i<Total_fund_trees; i++)
-		{
-		if(sourcetreetag[i])
-			{
-			k=0;
-			for(j=0; j<number_of_taxa; j++)
-				{
-				k+=presence_of_taxa[i][j];
-				}
-			if(k < smallest_tree || smallest_tree == -1) smallest_tree = k;
-			if(k > largest_tree || largest_tree == -1) largest_tree = k;
-			size_of_trees[l] = k;
-			l++;
-			}
-		}
-			
-	draw_histogram(NULL, (largest_tree-smallest_tree)+1, size_of_trees, Total_fund_trees-num_excluded_trees);
-	
-	
-	for(l=0; l<Total_fund_trees; l++)
-		{
-		i=0;
-		for(k=0; k<number_of_taxa; k++)
-			{
-			/* count how many taxa are present more than once in each tree */
-			if(presence_of_taxa[l][k] > 1) i++;
-			}
-		if(i==0) singlecopy++;
-		}	
-
-	printf2("\tNumber of single copy trees:\t%d\n", singlecopy);
-	printf2("\tnumber of multicopy trees:\t%d\n", Total_fund_trees-singlecopy);
-
-    printf2("\t----------------------------------------------------\n");
-	
-	free(size_of_trees);
-    }
-#endif /* input_file_summary: moved to tree_io.c */
 
 
 
-/* assign_taxa_name: moved to tree_io.c */
-#if 0
-int assign_taxa_name(char *inputname,int fund)
-	{
-	int i =0, j=0, k=0, answer = -1, taxa_on_tree = 0;
-	char *delim = NULL, name[NAME_LENGTH];
-	
-	delim = malloc(10*sizeof(char));
-	delim[0] = delimiter_char;
-	delim[1] = '\0';
-	name[0] = '\0';
-
-        /* Reallocate memory if the number of taxa exceeds that originally defined */
-        if(number_of_taxa+1 == TAXA_NUM*name_assignments)
-            {
-            name_assignments++;
-            taxa_names = realloc(taxa_names, (TAXA_NUM*name_assignments)*sizeof(char *));
-            if(!taxa_names) memory_error(16);
-                    
-            for(j=TAXA_NUM*(name_assignments-1); j<TAXA_NUM*name_assignments; j++)
-                    {
-                    taxa_names[j] = malloc(NAME_LENGTH*sizeof(char));
-                    if(!taxa_names[j]) memory_error(17);
-                            
-                    taxa_names[j][0] = '\0';
-                    }
-            
-            
-
-            for(j=0; j<fundamental_assignments*FUNDAMENTAL_NUM; j++)
-                {
-                presence_of_taxa[j] = realloc(presence_of_taxa[j], (TAXA_NUM*name_assignments)*sizeof(int));
-                if(!presence_of_taxa[j]) memory_error(19);
-                    
-                for(k=(TAXA_NUM*(name_assignments-1)); k<(TAXA_NUM*name_assignments); k++)
-                    presence_of_taxa[j][k] = FALSE;
-                }
-            
-            Cooccurrance = realloc(Cooccurrance, (TAXA_NUM*name_assignments)*sizeof(int *));
-            if(!Cooccurrance) memory_error(20);
-                    
-            for(j=0; j<TAXA_NUM*(name_assignments-1); j++)
-                    {
-                    Cooccurrance[j] = realloc(Cooccurrance[j], (TAXA_NUM*name_assignments)*sizeof(int));
-                    if(!Cooccurrance[j]) memory_error(21);
-                            
-                    for(k=TAXA_NUM*(name_assignments-1); k<TAXA_NUM*name_assignments; k++)
-                        Cooccurrance[j][k] = 0;
-                    }
-                    
-            for(j=TAXA_NUM*(name_assignments-1); j<TAXA_NUM*name_assignments; j++)
-                    {
-                    Cooccurrance[j] = malloc((TAXA_NUM*name_assignments)*sizeof(int));
-                    if(!Cooccurrance[j]) memory_error(22);
-                            
-                    for(k=0; k<TAXA_NUM*name_assignments; k++)
-                        Cooccurrance[j][k] = 0;
-                    }
-
-            for(j=TAXA_NUM*(name_assignments-1); j<TAXA_NUM*name_assignments; j++)
-
-            taxa_incidence = realloc(taxa_incidence, (TAXA_NUM*name_assignments)*sizeof(int));
-            if(!taxa_incidence) memory_error(23);
-                    
-            for(j=TAXA_NUM*(name_assignments-1); j<TAXA_NUM*name_assignments; j++)
-                {
-                taxa_incidence[j] = 0;
-                }
-
-            same_tree = realloc(same_tree, (TAXA_NUM*name_assignments)*sizeof(int));
-            if(!same_tree)  memory_error(24);
-                    
-            for(j=TAXA_NUM*(name_assignments-1); j<TAXA_NUM*name_assignments; j++)
-                {
-                same_tree[j] = 0;
-                }
-            }
-
-
-
-
-
-        i=0;
-	if(delimiter)
-		{
-		while(inputname[i] != delimiter_char && inputname[i] != '\0')
-			{
-			name[i]=inputname[i];
-			i++;
-			}
-		name[i] = '\0';
-		}
-	else
-		{
-		strcpy(name, inputname);
-		}
-	i=0;
-	while(answer == -1)
-            {
-			
-            if(i != number_of_taxa)
-                {
-                if(strncmp(name, taxa_names[i], max_name_length) == 0)
-                    {
-                    answer = i;
-                    taxa_incidence[i]++;
-                    same_tree[i]++;
-                    taxa_on_tree++;
-                    if(fund == TRUE)
-                        {
-                        presence_of_taxa[Total_fund_trees][i]++;
-                        }
-                    }
-                }
-            else
-                {
-                strncpy(taxa_names[i], name, max_name_length);
-                answer = i;
-                taxa_incidence[i] = 1;
-                same_tree[i]++;
-                taxa_on_tree++;
-                number_of_taxa++;
-                if(fund == TRUE)
-                    {
-                    presence_of_taxa[Total_fund_trees][i]++;
-                    }
-                }
-            i++;
-            }
-	free(delim);
-	return(answer);
-	}
-#endif /* assign_taxa_name: moved to tree_io.c */
-
-/* xgets: moved to utils.c */
-
-
-
-/* clean_exit: moved to main.c */
-#if 0
-void clean_exit(int error)
-    {
-    int i=0, j=0;
-	if(weighted_scores != NULL)
-		{
-		for(i=0; i<number_of_taxa; i++)
-			free(weighted_scores[i]);
-		free(weighted_scores);
-		}
-	weighted_scores = NULL;
-	if(yaptp_results != NULL) free(yaptp_results);
-    if(stored_commands[i] != NULL)
-		{
-		for(i=0; i<100; i++) free(stored_commands[i]);
-		free(stored_commands);
-		}
-	if(parsed_command != NULL)
-        {
-        for(i=0; i<1000; i++)
-			{
-			free(parsed_command[i]);
-			}
-        free(parsed_command);
-        }
-    if(retained_supers != NULL)
-        {
-        for(i=0; i<number_retained_supers; i++)
-            free(retained_supers[i]);
-        free(retained_supers);
-        }
-	if(fulltaxanames != NULL)
-		{
-		for(i=0; i<fundamental_assignments*FUNDAMENTAL_NUM; i++)
-			{
-			if(fulltaxanames[i] != NULL)
-				{
-				for(j=0; j<numtaxaintrees[i]; j++)
-					{
-					if(fulltaxanames[i][j] != NULL)
-						free(fulltaxanames[i][j]);
-					}
-				free(fulltaxanames[i]);
-				}
-			}
-		free(fulltaxanames);
-		fulltaxanames = NULL;
-		}
-	if(numtaxaintrees != NULL)
-		free(numtaxaintrees);		
-
-    if(fundamentals != NULL)  /* if we have assigned the fundamental array earlier */ 
-        {
-        for(i=0; i<fundamental_assignments*FUNDAMENTAL_NUM; i++)
-            {
-            free(fundamentals[i]);
-            }
-        free(fundamentals);
-        fundamentals = NULL;
-        }
-    if(presence_of_taxa != NULL)  /* if we have already assigned presence_of_taxa */
-        {
-        for(i=0; i<fundamental_assignments*FUNDAMENTAL_NUM; i++)
-            {
-            free(presence_of_taxa[i]);
-            }
-        free(presence_of_taxa);
-        presence_of_taxa = NULL;
-        }
-    if(fund_scores != NULL)  /* if we have already assigned fund_scores */
-        {
-        for(i=0; i<Total_fund_trees; i++)
-            {
-            for(j=0; j<number_of_taxa; j++)
-                {
-                free(fund_scores[i][j]);
-                }
-            free(fund_scores[i]);
-            }
-        free(fund_scores);
-        fund_scores = NULL;
-        }
-    if(taxa_names != NULL) /* if we have assigned taxa names earlier */
-        {
-        for(i=0; i<TAXA_NUM*name_assignments; i++)
-            {
-            free(taxa_names[i]);
-            }
-        free(taxa_names);
-        free(taxa_incidence);
-        taxa_names = NULL;
-        }
-    if(Cooccurrance != NULL) /* if we have assigned taxa names earlier */
-        {
-        for(i=0; i<TAXA_NUM*name_assignments; i++)
-            {
-            free(Cooccurrance[i]);
-            }
-        free(Cooccurrance);
-        free(same_tree);
-        Cooccurrance = NULL;
-        same_tree = NULL;
-        }
-    if(number_of_comparisons != NULL)
-        {
-        free(number_of_comparisons);
-        number_of_comparisons = NULL;
-        }
-    if(tree_top != NULL)
-        {
-        dismantle_tree(tree_top);
-        tree_top = NULL;
-        }
-    temp_top = NULL;
-    if(coding_from_tree != NULL) 
-		{
-		free(coding_from_tree);
-		coding_from_tree=NULL;
-		}
-    if(total_coding != NULL)
-        {
-        for(i=0; i<total_nodes; i++)
-            free(total_coding[i]);
-        free(total_coding);
-        total_coding = NULL;
-        }
-    if(partition_number != NULL) free(partition_number);
-    if(from_tree != NULL) free(from_tree);
-
-    if(sourcetree_scores != NULL) free(sourcetree_scores);
-	if(presenceof_SPRtaxa) free(presenceof_SPRtaxa);
-	
-	if(sourcetreetag != NULL) free(sourcetreetag);
-    /* Flush all stdio buffers before _exit so no output is lost.
-     * We use _exit() rather than exit() to bypass libgomp's atexit cleanup
-     * handler, which calls pthread_join on idle worker threads parked in
-     * Mach semaphore_wait() (an uninterruptible kernel wait on macOS).
-     * If the wake signal races past the thread, the join blocks indefinitely,
-     * leaving the process in the UE (uninterruptible+exiting) state.
-     * _exit() lets the OS tear down all threads atomically on process exit. */
-    fflush(NULL);
-    _exit(error ? 1 : 0);
-
-	if(logfile!= NULL)
-		fclose(logfile);
-    }
-#endif
-
-    
-
-/* calculate the path metric for each of the fundamental trees */
-/* cal_fund_scores: moved to scoring.c */
-#if 0
-void cal_fund_scores(int printfundscores)
-    {
-    int i =0, j=0, k=0;
-    FILE *dists = NULL;
-        
-	calculated_fund_scores = TRUE;
-    if(printfundscores)
-            {
-            dists = fopen("source_matrices.txt", "w");
-            for(i=0; i<number_of_taxa; i++)
-                fprintf(dists, "%s\t", taxa_names[i]);
-            fprintf(dists, "\n\n");
-            }
-    for(i=0; i<Total_fund_trees; i++)
-        {
-        pathmetric(fundamentals[i], fund_scores[i]);
-        if(printfundscores)  /* print the distance matrices for each fundamental tree */
-            {
-            
-            for(j=0; j<number_of_taxa; j++)
-                {
-                fprintf(dists, "%s\t", taxa_names[j]);
-                if(presence_of_taxa[i][j] > 0)
-                    {
-                    for(k=0; k<number_of_taxa; k++)
-                        {
-                        if(presence_of_taxa[i][k] > 0)
-                            {
-                            /** print out the distances **/
-                            fprintf(dists, "%d\t", fund_scores[i][j][k]);
-                            }
-                        else
-                            fprintf(dists, "\t");
-                        }
-                    fprintf(dists, "\n");
-                    }
-                else
-                    {
-                    fprintf(dists, "\n");
-                    }
-                }
-            fprintf(dists, "\n\n\n");
-            }
-        
-        
-        }
-    if(dists != NULL) fclose(dists);
-    }
-#endif
 
 
 
 
     
-/* pathmetric: moved to scoring.c */
-#if 0
-void pathmetric(char *string, int **scores)
-    {
-    int i=0, j=0, charactercount = -1, **closeP = NULL, variable = 0; 
-    char number[30];
 
-
-     
-    /* The array characters is used to keep track, for each taxa, the open and closed brackets that has followed each */
-    closeP = malloc((number_of_taxa)*(sizeof(int*)));
-    for(i=0; i<number_of_taxa; i++)
-        {
-        closeP[i] = malloc(3*sizeof(int));
-        closeP[i][0] = 0;  /* the number of open parentheses */
-        closeP[i][1] = 0;  /* the number of close parentheses */
-        closeP[i][2] = FALSE;  /* whether this taxa has been found yet */
-        }
-
-    unroottree(string);
-    i=0;
-    while(string[i] != ';')  /* until the end of the string */
-        {
-        switch(string[i])
-            {
-            case '(':	
-                        for(j=0; j<number_of_taxa; j++)
-                            {
-                            if(closeP[j][2] == TRUE)
-                                {
-                                closeP[j][0] ++;
-                                }
-                            }
-                        i++;
-                        break;
-            case ')':
-                        for(j=0; j<number_of_taxa; j++)
-                            {
-                            if(closeP[j][2] == TRUE)
-                                {
-                                if(closeP[j][0] > 0)
-                                    closeP[j][0]--;  /* if this close parenthesis cancels out a previously counted openparentheis */
-                                else
-                                    closeP[j][1]++;  
-                                }
-                            }
-						i++;
-						while(string[i] != ')' && string[i] != '(' && string[i] != ',' && string[i] != ';' && string[i] != ':')  /* skip the labels (if they are there) */
-							i++;
-                        break;
-            case ',':
-                        i++;
-                        break;
-            case ':':
-                        while(string[i] != ')' && string[i] != '(' && string[i] != ',' && string[i] != ';')  /* skip the weights (if they are there) */
-                            i++;
-                        break;
-            default:
-                        /* this has to be a taxa number */
-                        for(j=0; j<30; j++) number[j] = '\0';  /* initialise the array to hold the number in text form */
-                        j=0;
-                        while(string[i] != '(' && string[i] != ')' && string[i] != ',' && string[i] != ':')
-                            {
-                            number[j] = string[i];
-                            i++; j++;
-                            }
-                        /* now need to change the string to an integer number */
-                        charactercount = j;
-                        variable = 0;
-                        for(j=charactercount; j>0; j--)
-                            {
-                            variable += ( pow(10, (charactercount-j)) * (texttoint(number[j-1])));
-                            }
-                        closeP[variable][2] = TRUE;  /* tell the program that this caracter has now been passed and is to be counted from now on */
-                        /* now need to assign the distance from any taxa we passed previously to this taxa */
-                        for(j=0; j<number_of_taxa; j++)
-                            {
-                            if(closeP[j][2] == TRUE && j != variable) /* we have passed this taxa earlier */
-                                {
-                                scores[j][variable] = closeP[j][0]+closeP[j][1]+1;  /* the score is equal to the number of open parentheses not cancelled out plus the number of close parentheses not cancelled out + 1 */
-                                scores[variable][j] = scores[j][variable];
-                                }
-                            }
-           
-                        break;
-            }
-            
-        }
-    for(i=0; i<number_of_taxa; i++)
-        free(closeP[i]);
-    free(closeP);
-    closeP = NULL;
-    }
-#endif
-    
-/* pathmetric_internals: moved to scoring.c */
-#if 0
-void pathmetric_internals(char *string, struct taxon * species_tree, int **scores)
-    {
-    int i=0, j=0, charactercount = -1, **closeP = NULL, variable = 0, **within = NULL, *presence = NULL; 
-    char number[30];
-
-	/* WE need a matrix telling us which taxa anf branches are within other branches */
-	within = malloc((2*number_of_taxa)*sizeof(int *));
-	presence = malloc((2*number_of_taxa)*sizeof(int));
-	for(i=0; i<(2*number_of_taxa); i++)
-		{
-		within[i] = malloc((2*number_of_taxa)*sizeof(int));
-		presence[i] = FALSE;
-		for(j=0; j<(2*number_of_taxa); j++)
-			within[i][j] = 0;
-		}
-     i=0;
-	 
-	 calculate_withins(species_tree, within, presence);
-	
-	 
-    /* The array characters is used to keep track, for each taxa, the open and closed brackets that has followed each */
-    closeP = malloc((2*number_of_taxa)*(sizeof(int*)));
-    for(i=0; i<2*number_of_taxa; i++)
-        {
-        closeP[i] = malloc(3*sizeof(int));
-        closeP[i][0] = 0;  /* the number of open parentheses */
-        closeP[i][1] = 0;  /* the number of close parentheses */
-        closeP[i][2] = FALSE;  /* whether this taxa has been found yet */
-        }
-
-    unroottree(string);
-    i=0;
-    while(string[i] != ';')  /* until the end of the string */
-        {
-        switch(string[i])
-            {
-            case '(':	
-                        for(j=0; j<2*number_of_taxa; j++)
-                            {
-                            if(closeP[j][2] == TRUE)
-                                {
-                                closeP[j][0] ++;
-                                }
-                            }
-                        i++;
-                        break;
-            case ')':
-                        for(j=0; j<2*number_of_taxa; j++)
-                            {
-                            if(closeP[j][2] == TRUE)
-                                {
-                                if(closeP[j][0] > 0)
-                                    closeP[j][0]--;  /* if this close parenthesis cancels out a previously counted openparentheis */
-                                else
-                                    closeP[j][1]++;  
-                                }
-                            }
-						i++;
-						
-						/* read the label on the internal branch */
-                        for(j=0; j<30; j++) number[j] = '\0';  /* initialise the array to hold the number in text form */
-                        j=0;
-                        while(string[i] != '(' && string[i] != ')' && string[i] != ',' && string[i] != ':' && string[i] != ';')
-                            {
-                            number[j] = string[i];
-                            i++; j++;
-                            }
-                        /* now need to change the string to an integer number */
-                        charactercount = j;
-                        variable = 0;
-                        for(j=charactercount; j>0; j--)
-                            {
-                            variable += ( pow(10, (charactercount-j)) * (texttoint(number[j-1])));
-                            }
-                        closeP[variable][2] = TRUE;  /* tell the program that this caracter has now been passed and is to be counted from now on */
-                        /* now need to assign the distance from any taxa we passed previously to this taxa */
-                        for(j=0; j<2*number_of_taxa; j++)
-                            {
-                            if(closeP[j][2] == TRUE && j != variable) /* we have passed this taxa earlier */
-                                {
-								if(within[j][variable])
-									scores[j][variable] = closeP[j][0]+closeP[j][1];
-								else
-									scores[j][variable] = closeP[j][0]+closeP[j][1]+1;  /* the score is equal to the number of open parentheses not cancelled out plus the number of close parentheses not cancelled out + 1 */
-                                scores[variable][j] = scores[j][variable];
-                                }
-                            }
-						
-                        break;
-            case ',':
-                        i++;
-                        break;
-            case ':':
-                        while(string[i] != ')' && string[i] != '(' && string[i] != ',' && string[i] != ';')  /* skip the weights (if they are there) */
-                            i++;
-                        break;
-            default:
-                        /* this has to be a taxa number */
-                        for(j=0; j<30; j++) number[j] = '\0';  /* initialise the array to hold the number in text form */
-                        j=0;
-                        while(string[i] != '(' && string[i] != ')' && string[i] != ',' && string[i] != ':')
-                            {
-                            number[j] = string[i];
-                            i++; j++;
-                            }
-                        /* now need to change the string to an integer number */
-                        charactercount = j;
-                        variable = 0;
-                        for(j=charactercount; j>0; j--)
-                            {
-                            variable += ( pow(10, (charactercount-j)) * (texttoint(number[j-1])));
-                            }
-                        closeP[variable][2] = TRUE;  /* tell the program that this caracter has now been passed and is to be counted from now on */
-                        /* now need to assign the distance from any taxa we passed previously to this taxa */
-                        for(j=0; j<2*number_of_taxa; j++)
-                            {
-                            if(closeP[j][2] == TRUE && j != variable) /* we have passed this taxa earlier */
-                                {
-								if(within[j][variable])
-									scores[j][variable] = closeP[j][0]+closeP[j][1];
-								else
-									scores[j][variable] = closeP[j][0]+closeP[j][1]+1;  /* the score is equal to the number of open parentheses not cancelled out plus the number of close parentheses not cancelled out + 1 */
-                                scores[variable][j] = scores[j][variable];
-                                }
-                            }
-           
-                        break;
-            }
-            
-        }
-    for(i=0; i<2*number_of_taxa; i++)
-		{
-        free(closeP[i]);
-		free(within[i]);
-		}
-	free(within);
-	free(presence);
-	free(closeP);
-    closeP = NULL;
-    }
-#endif
-
-
-/* calculate_withins: moved to scoring.c */
-#if 0
-void calculate_withins(struct taxon *position, int **within, int *presence)
-	{
-	int i=0;
-	while(position != NULL)
-		{
-		for(i=0; i<2*number_of_taxa; i++)
-			{
-			if(presence[i] == TRUE)
-				{
-				within[i][position->tag] = TRUE;
-				within[position->tag][i] = TRUE;
-				}
-			}
-		if(position->daughter != NULL)
-			{
-			presence[position->tag] = TRUE;
-			calculate_withins(position->daughter, within, presence);
-			presence[position->tag] = FALSE;
-			}
-		position = position->next_sibling;
-		}
-	}
-#endif
-
-/* weighted_pathmetric: moved to scoring.c */
-#if 0
-void weighted_pathmetric(char *string, float **scores, int fund_num)
-    {
-    int i=0, j=0, k=0, charactercount = -1, variable = 0, node_number = -1, open = 0; 
-    char number[30];
-    float *taxa_weights = NULL, *node_weights = NULL,  **closeP = NULL;
-
-     
-    /* The array characters is used to keep track, for each taxa, the open and closed brackets that has followed each */
-    
-	closeP = malloc((number_of_taxa)*(sizeof(float*)));
-    if(!closeP) memory_error(90);
-    for(i=0; i<number_of_taxa; i++)
-        {
-        closeP[i] = malloc(3*sizeof(float));
-        if(!closeP[i]) memory_error(91);
-        closeP[i][0] = 0;  /* the number of open parentheses */
-        closeP[i][1] = 0;  /* the number of close parentheses */
-        closeP[i][2] = FALSE;  /* whether this taxa has been found yet */
-        }
-
-    taxa_weights = malloc(number_of_taxa * sizeof(float));
-        if(!taxa_weights) memory_error(92);
-    node_weights = malloc(number_of_taxa * sizeof(float));
-        if(!node_weights) memory_error(93);
-    for(i=0; i<number_of_taxa; i++)
-        {
-        taxa_weights[i] = 1;
-        node_weights[i] = 1;
-        }
-    unroottree(string);
-    i=0;
-    while(string[i] != ';')  /* until the end of the string */
-        {
-        switch(string[i])
-            {
-            case '(':	
-                        if(i != 0)
-                            {
-                            k=i;
-                            open = 1;
-                            do
-                                {
-                                k++;
-                                if(string[k] == '(') open++;
-                                if(string[k] == ')') open--;
-                                
-                                }while(string[k] != ')' || open != 0);
-							 node_number++;
-							if(string[k+1] == ':')
-								{
-								k = k+2;  /* skip over the ':' to the start of the number */
-								for(j=0; j<30; j++) number[j] = '\0';  /* initialise the array to hold the number in text form */
-								j=0;
-								while(string[k] != ')' && string[k] != ',' && string[k] != '(' && string[k] != ';')
-									{
-									number[j] = string[k];
-									k++; j++;
-									}  /* read in the weight */
-								 node_weights[node_number] = tofloat(number);
-								} /* otherwise the software will assume branch lengths of 1 for all */
-                           
-                           
-                            for(j=0; j<number_of_taxa; j++)
-                                {
-                                if(closeP[j][2] == TRUE)
-                                    {
-                                    closeP[j][0] += node_weights[node_number];
-                                    }
-                                }
-                            }
-                        i++;
-                        break;
-            case ')':	
-                        if(string[i+1] != ';')
-                            {
-                            i++;
-                            while(string[i] != ')' && string[i] != '(' && string[i] != ',' && string[i] != ';')
-                                i++;
-                            for(j=0; j<number_of_taxa; j++)
-                                {
-                                if(closeP[j][2] == TRUE)
-                                    {
-                                    if(closeP[j][0] > 0)
-                                        closeP[j][0] -= node_weights[node_number];  /* if this close parenthesis cancels out a previously counted openparentheis */
-                                    else
-                                        closeP[j][1] += node_weights[node_number];  
-                                    }
-                                }
-                            node_weights[node_number] = 0;
-                            node_number = 0;
-                            }
-                        else
-                            i++;
-                        break;
-            case ',':
-                        i++;
-                        break;
-            default:
-                        /* this has to be a taxa number */
-                        for(j=0; j<30; j++) number[j] = '\0';  /* initialise the array to hold the number in text form */ 
-                        j=0;
-                        while(string[i] != ':' && string[i] != ')' && string[i] != '(' && string[i] != ',')
-                            {
-                            number[j] = string[i];
-                            i++; j++;
-                            }
-
-                        /* now need to change the string to an integer number */
-                        charactercount = j;
-                        variable = 0;
-                        for(j=charactercount; j>0; j--)
-                            {
-                            variable += ( pow(10, (charactercount-j)) * (texttoint(number[j-1])));
-                            }
-                        closeP[variable][2] = TRUE;  /* tell the program that this caracter has now been passed and is to be counted from now on */
-                        /* Now read in the weight for this taxa */
-						if(string[i] == ':')
-							{
-							for(j=0; j<30; j++) number[j] = '\0';  /* initialise the array to hold the number in text form */
-							j=0; i++;
-							while(string[i] != ')' && string[i] != ',' && string[i] != '(' && string[i] != ';')
-								{
-								number[j] = string[i];
-								i++; j++;
-								}
-							taxa_weights[variable] = tofloat(number);
-							}
-						
-                        /* now need to assign the distance from any taxa we passed previously to this taxa */
-                        
-                        for(j=0; j<number_of_taxa; j++)
-                            {
-                            if(closeP[j][2] == TRUE && j != variable) /* we have passed this taxa earlier */
-                                {
-                                scores[j][variable] += (closeP[j][0]+closeP[j][1]+taxa_weights[variable]+taxa_weights[j])*tree_weights[fund_num];  /* the score is equal to the number of open parentheses not cancelled out plus the number of close parentheses not cancelled out + 1 */
-                                scores[variable][j] = scores[j][variable];
-                                }
-                            }
-           
-                        break;
-            }
-            
-    
-        }
-		
-    for(i=0; i<number_of_taxa; i++)
-        free(closeP[i]);
-    free(closeP);
-    closeP = NULL;
-	free(taxa_weights);
-	free(node_weights);
-
-    }
-#endif
+/* calculate the path metric for each of the fundamental trees */
 
 
 
-
-
-
-
-
-
-
-/* unroottree: moved to tree_ops.c */
-#if 0
-int unroottree(char * tree)
-    {
-    int i=0, j=0, k=0, l=0, m=0, basecount = 0, parentheses=0, did_unrooting=FALSE;
-    int foundopen = FALSE, foundclose = FALSE;
-	float del_nodelen = 0;
-	char length[100], *restof = malloc(TREE_LENGTH * sizeof(char));
-
-	restof[0] = '\0';
-	length[0] = '\0';
-	/* scan through the tree counting the number of taxa/nodes at the base (for it to be unrooted there should be at least three) */
-    while(tree[i] != ';')
-        {
-        switch(tree[i])
-            {
-            case '(':
-                    parentheses++;
-                    i++;
-                    break;
-            case ')':
-                    parentheses--;
-                    i++;
-                    break;
-            case ',':
-                    if(parentheses == 1)
-                        {
-                        basecount++;
-                        }
-                    i++;
-                    break;
-            default:
-                    i++;
-                    break;
-            }
-        }
-        
-    if(basecount <2)  /* if the base of the tree is rooted */
-        {
-        did_unrooting=TRUE;
-        i=0;
-        parentheses = 0;
-        while(tree[i] != ';')  /* delete the two parentheses to make the tree unrooted */
-            {
-            switch(tree[i])
-                {
-                case '(':
-                        parentheses++;
-                        if(parentheses == 2 && !foundopen)
-                            {
-                            tree[i] = '^';
-                            foundopen = TRUE;
-                            }
-                        i++;
-                        break;
-                case ')':
-                        if(parentheses == 2 && !foundclose)
-                            {
-                            tree[i] = '^';
-							i++;
-							while(tree[i] != ')' && tree[i] != '(' && tree[i] != ',' && tree[i] != ';' && tree[i] != ':')
-								{
-								tree[i] = '^';
-								i++;
-								}
-                            if(tree[i] == ':')
-                                {
-								k=0;
-								length[0] = '\0';
-                                while(tree[i] != ')' && tree[i] != '(' && tree[i] != ',' && tree[i] != ';')
-                                    {
-									if(tree[i] != ':')
-										{
-										length[k] = tree[i];
-										k++;
-										}
-									tree[i] = '^';
-                                    i++; 
-                                    }
-								length[k] = '\0';
-                                }
-							if(length[0] != '\0') /* we have a branch length on the internal branch, so we need to add it to the branch length of the component that is to the direct right of this closing parenthesis */
-								{
-								del_nodelen = atof(length);
-								k=i+1; /* This should be whatever is after the ',' which should be the next compoonent */
-								if(tree[k] == '(') /* we need to find the end of this clade and add the value there */
-									{
-									l=1; k++;
-									while((l != 0 || tree[k-1] != ')') && tree[k] != ';' )   /* CHANGED RECENTLY FROM while(l != 0 && tree[k-1] != ')' && tree[k] != ';' ) */
-										{
-										switch(tree[k])
-											{
-											case '(':
-												l++;
-												k++;
-												break;
-											case ')':
-												l--;
-												k++;
-												break;
-											default:
-												k++;
-												break;
-											}
-										}
-									k--; /* k now points to the closing bracket */
-									/* read in the length attached to this partenthsis */
-									k++;
-									while(tree[k] != ')' && tree[k] != '(' && tree[k] != ',' && tree[k] != ';' && tree[k] != ':') k++; /* k now points to the ":" at the start of the length (if there is a length) */
-									}
-								else
-									{
-									while(tree[k] != ')' && tree[k] != '(' && tree[k] != ',' && tree[k] != ';' && tree[k] != ':') k++; /* k now points to the ":" at the start of the length (if there is a length) */
-									}
-								if(tree[k] == ':') /* there is length attached to this */
-									{
-									m=k+1;
-									length[0] = '\0'; l=0;
-									while(tree[m] != ')' && tree[m] != '(' && tree[m] != ',' && tree[m] != ';')
-										{
-										length[l] = tree[m];
-										l++; m++;
-										}
-									length[l] = '\0';
-									del_nodelen += atof(length);
-									
-									}
-								else
-									m=k;
-								/* now add del_nodelen to this point in the tree */
-								 l=0;
-								while(tree[m] != ';' && tree[m] != '\0')
-									{
-									restof[l] = tree[m];
-									m++; l++;
-									}
-								restof[l] = ';';
-								restof[l+1] = '\0';
-								if(tree[k] == ':')
-									tree[k] = '\0';
-								else
-									{
-									tree[k] = '\0';
-									}
-								length[0] = '\0';
-								sprintf(length, ":%f", del_nodelen);
-								strcat(tree, length);
-								strcat(tree, restof);
-								}
-                            foundclose = TRUE;
-                            }
-                        i++;
-                        parentheses--;
-                        break;
-                default:
-                        i++;
-                        break;
-                }
-            }
-                        
-        /* scan through the string shifting up the characters to take into account those parentheses that have been deleted */
-        i=0; j=0;
-        while(tree[j] != ';')
-            {
-            if(tree[j] == '^')
-                {
-                while(tree[j] == '^')
-                    j++;
-                if(i!= j)tree[i] = tree[j];
-                i++; j++;
-                }
-            else
-                {
-                if(i!=j)tree[i] = tree[j];
-                i++;j++;
-                }
-            }
-        tree[i] = tree[j];
-        tree[i+1] = '\0';
-        
-        }
-    free(restof);
-    return(did_unrooting);
-    }
-#endif
-
-
-/* texttoint: moved to utils.c */
 
     
-    /* This function returns the number that represents the given tree */
-/* treeToInt: moved to tree_ops.c */
-#if 0
-int treeToInt(char *tree)
-    {
-    int i;
-    struct taxon *sorted_tree = NULL;
-
-    /* The first part is to order the taxa in the tree so that they are in the order that they would if the tree was produced by "intTOtree"
-       This is done by starting at the the highest-level componenets of the tree and  find the lowest taxon in each, and reorder the compoentes so the taxa IDs are in order.
-       Then go to each of the sub-components and continue the process.
-
-       for example:
-       (1,(3,0),(4,2));
-       As usual, each component is eiather a taxon or a set of parired parentheses. 
-       To re-order this tree, start with the first component, which is the outer-most pair of parentheses. 
-       This has 3 components:
-       		1
-       		(3,0)
-       		(4,2)
-		These components ordered by the lowest taxon ID in each, would be:
-			(3,2) - because it hosts taxon 0.
-			1	  - because it has taxon 1.
-			(4,2) - because it has taxon 2.
-		This results in: ((3,0), 1, (4,2));
-
-		Next take the next component (3,0). The two sub-components are 3 and 0 (obviously).
-		These ordered result in (0,3) (obviuosly:)
-		The tree now looks like: ((0,3),1,(4,2));
-
-		Do this to the final component with more than one taxa (4,2) and you finally end up with the tree:
-
-		((0,3),1,(2,4));
-
-	*/
-
-
-    /* The first part is to calculate the path of the tree, given the tree in nested parenthesis format */
-    /*  this part of the code assumes that the tree being tested has been created using the intToTree function. The reason for this
-        is that that function always puts the position of a new taxon after the parenthesis or taxon it is to be paired with.
-        If a tree to be tested is made in any other way, it will lead to these assumptions to be violated and the function may crash or
-        the wrong number may be calculated. cc 16/06/2003    */
-
-    /* Step 1 Buid the tree in memory */
-
-    temp_top = NULL;
-    tree_build(1, tree, sorted_tree, FALSE, -1, 0);
-    sorted_tree = temp_top;
-    temp_top = NULL;
-
-
-    /* Step 2: carry out a recursive depth-first search of the tree, finding and labelling each clade with the lowest taxon ID */
-
-    sort_tree (sorted_tree);
     
 
-    /* Step 3: reverse the tree build, noting the path taken */
-    
-    
-    
-    
-    
-    
-    
-    return(1);
-    }
-#endif
+
+
+
+
+
+
+
+
+
+
+
+
+
+
  
  int sort_tree(struct taxon *position)   
  	{
@@ -4397,184 +386,6 @@ int treeToInt(char *tree)
     
     
     /* this function builds a tree given its number and the number of taxa */
-/* intTotree: moved to tree_ops.c */
-#if 0
-void intTotree(int tree_num, char *array, int num_taxa)
-    {
-    int  i = 0, j=0, k=0, l=0, exit = 0, bracket_count = 0;
-    char *tmparray = malloc(TREE_LENGTH * sizeof(char));
-    char *string= NULL;
-	double supers = 1, max = 1, min = 0, oldmin = 0, *path = NULL;
-
-	if(!tmparray) { printf2("Error: out of memory in intTotree\n"); return; }
-	
-	for(i=4; i<=num_taxa; i++) supers*=((2*i)-5);
-
-    path = malloc((num_taxa-3)*sizeof(double));  /* this will store the path of the tree */
-    string = malloc(30*sizeof(char));
-    
-    /************* calculate the path of the tree from a triplet to the full size of the tree ***************/
-    
-    min = 1;
-    max = supers; /* max is now the number of possible trees in this tree space */
-   /* printf2("path of tree number %d with %d taxa is:\n", tree_num, number_of_taxa);
-   */
-     for(i=4; i<=num_taxa; i++)  /* from a triplet to the full complement of taxa, we figure out the placement of each new taxa at each stage */
-        {
-        
-        path[i-4] = div((tree_num - min), ((max - (min - 1))/((2 * i)- 5))).quot + 1;
-
-   /*     printf2("min = %d, max = %d path = %d\n",min, max, path[i-4]);
-     */  
-        if(i != num_taxa)
-            {
-            oldmin = min;
-            min = ((path[i-4]-1)*((max - (oldmin - 1))/((2 * i)- 5))) + oldmin;   /* we have to recalculate the min and max values depending on the path previously */
-        
-            max = ((path[i-4])*((max - (oldmin - 1))/((2 * i)- 5))) + (oldmin -1);
-            }
-        
-        }
-    
-    /**************** next build the tree using the path calculated in the previous section ***************/
-    
-    /* we start with a triplet */
-    strcpy(array, "(0,1,2);");
-    
-    for(i=3; i<num_taxa; i++)  /* for each taxa to be added */
-        {
-        /* the path array calculated previously, tells us which object the new taxa is to be paired with. an object can be a set of parenthesis or a taxa */
-        j=0; k=0;
-        while(j!= path[i-3])
-            {
-        /*    printf2("%s\n", array);  */
-            exit = 0;
-            while(exit == 0)
-                {
-                switch(array[k])
-                    {
-                    case '(':
-                        break;
-                    case ',':
-                        break;
-                    case ')':
-                        j++;
-                        exit = 1;
-                        break;
-                    default:
-                        while(array[k+1] != ',' && array[k+1] != '(' && array[k+1] != ')' )
-                            {
-                            k++;
-                            }
-                        j++;
-                        exit = 1;
-                        break;
-                    }
-                k++;
-                }
-            } /* the element at position k-1 is the last character of the object the new taxa is to be paired with */
-        
-        for(j=0; j<k; j++)
-            {
-            tmparray[j] = array[j]; /* copy in all the elements up to this point into the tmp array */
-            }
-        
-        /* insert the new taxa name preceeded by a comma */
-        tmparray[j] = ',';
-        tmparray[j+1] = '\0';
-        
-        string[0] = '\0'; /*initialise the string to hold the name of the taxa */
-        totext(i, string);  /* turn the integer name of the taxa into its character equivalent */
-        strcat(tmparray, string); /* append the name onto the tree */
-        strcat(tmparray, ")" );  /* append on the closing bracket to hold the new pairing */
-        
-        if(array[j-1] == ')')  /* if we are appending the new taxa to an internal node */
-            {
-            /* find the end of the string in tmparray */
-            k=j;
-            while(tmparray[k] != '\0')
-                {
-                k++;
-                }
-                
-            /* find the position we need to add an open bracket in tmparray */
-            l=j;
-            bracket_count = 1;
-            do
-                {
-                l--;
-                if(tmparray[l] == '(') bracket_count--;
-                if(tmparray[l] == ')') bracket_count++;
-                }while(bracket_count != 1);
-
-            /* l now is the element in the tmparray we need to add the open bracket */
-            /* k is now the last element in the tmparray */
-            
-            /* move every thing from the end of the string to where we need to add a open bracket forward one space */
-            
-            for(k=k; k>=l; k--)
-                {
-                tmparray[k+1] = tmparray[k];
-                }
-            /* now place the new open bracket in the position of l */
-            tmparray[l] = '(';
-            }
-        else  /* else if we are appending the new taxa to another taxa */
-            {
-             /* find the end of the string in tmparray */
-            k=j;
-            while(tmparray[k] != '\0')
-                {
-                k++;
-                }
-                
-            /* find the position we need to add an open bracket in tmparray */
-            l=j;
-            while(tmparray[l-1] != ',' && tmparray[l-1] != ')' && tmparray[l-1] != '(')
-                {
-                l--;
-                }
-            /* l now is the element in the tmparray we need to add the open bracket */
-            /* k is now the last element in the tmparray */
-            
-            /* move every thing from the end of the string to where we need to add a open bracket forward one space */
-            
-            for(k=k; k>=l; k--)
-                {
-                tmparray[k+1] = tmparray[k];
-                }
-            /* now place the new open bracket in the position of l */
-            tmparray[l] = '(';
-            
-            
-            }
-        /* now append the rest of the tree onto tmparray */
-        /* travel to the end of the tmparray */
-        k = j;
-        while(tmparray[k] != '\0')
-            {
-            k++;
-            }
-        while(array[j] != '\0')
-            {
-            tmparray[k] = array[j];
-            j++;k++;
-            }
-        tmparray[k] = '\0';
-        
-        /* copy the new tree onto the main array */
-        strcpy(array, tmparray);
-            
-            
-        }
-    
-    
-    
-    free(tmparray);
-    free(path);
-    free(string);
-    }
-#endif
 
 /* toint: moved to utils.c */
 
@@ -4849,7 +660,7 @@ void alltrees_search(int user)
             interval2 = time(NULL);
             if(difftime(interval2, interval1) > 5) /* every 10 seconds print a dot to the screen */
                 {
-                printf2("=");
+              /*  printf2("="); */
                 fflush(stdout);
                 interval1 = time(NULL);
                 }
@@ -5016,114 +827,6 @@ void alltrees_search(int user)
     
 /* This function does the checking of every fundamental tree to the supertree at hand. It returns a float 
 	This function also bootstraps the values for the fundamental trees, if the do_bootstrap value is greater than 0 these values are printed to bootstrap.txt*/
-/* compare_trees: moved to scoring.c */
-#if 0
-float compare_trees(int spr)
-    {
-    int i=0, j=0, k=0, found = FALSE, here1 = FALSE, here2 = FALSE;
-    float total =0, temp = 0;
-    char *pruned_tree, *tmp;
-    /********** allocate dynamic arrays **************/
-    pruned_tree = malloc(TREE_LENGTH*sizeof(char));
-    if(!pruned_tree)  memory_error(29);
-        
-    pruned_tree[0] = '\0';
-    
-    tmp = malloc(TREE_LENGTH*sizeof(char));
-    if(!tmp)  memory_error(30);
-    
-    tmp[0] = '\0';
-    
-    
-    
-    /******* Next score this supertree against every fundamental tree in memory *********/
-    for(i=0; i< Total_fund_trees; i++)
-        {
-		if(sourcetreetag[i]) /* if this sourcetree is to be used in the analysis ---- defined by the exclude command */
-			{
-			
-			found = FALSE; here1 = TRUE; here2 = TRUE;
-			
-			/*** Next check to see if the pruning used affected this fundamental tree ***/
-			if(sourcetree_scores[i] != -1 && spr)
-				{
-				
-				/** check to see if any of the taxa from this source tree were in the subtree that was pruned **/
-				for(j=0; j<number_of_taxa; j++)
-					{
-					if(presence_of_taxa[i][j] > 0  && presenceof_SPRtaxa[j] == TRUE) here1 = FALSE;
-					if(presence_of_taxa[i][j] > 0 && presenceof_SPRtaxa[j] == FALSE) here2 = FALSE;
-					}
-				if(here1 || here2) found = TRUE;   /* This means that all the taxa from this source tree are all either in the main part of the supertree or all in the pruned subtree */
-				}
-			if(!found || !spr)
-				{
-				prune_tree(tree_top, i);  /* Prune the supertree so that it has the same taxa as the fundamental tree i */
-				shrink_tree(tree_top);    /* Shrink the pruned tree by switching off any internal nodes that are not needed */
-				
-				pruned_tree[0] = '\0'; /* initialise the string */
-				if(print_pruned_tree(tree_top, 0, pruned_tree, FALSE, 0) >1)
-					{
-					tmp[0] = '\0';
-					strcpy(tmp, "(");
-					strcat(tmp, pruned_tree);
-					strcat(tmp, ")");
-					strcpy(pruned_tree, tmp);
-					}
-				strcat(pruned_tree, ";");
-				while(unroottree(pruned_tree));  /* remove bifurcating root from SPR-at-root grafts */
-			
-				/* initialise the super_scores array */
-				for(j=0; j<number_of_taxa; j++)
-					{
-					for(k=j; k<number_of_taxa; k++)
-						{
-						super_scores[j][k] = 0;
-						super_scores[k][j] = 0;
-						}
-					}
-
-				pathmetric(pruned_tree, super_scores);  /*calculate the pathmetric for the pruned supertree */
-				reset_tree(tree_top);  /* reset the supertree for the next comparison */
-			
-				temp = 0;
-				/* score the differences between the two trees */
-				for(j=0; j<number_of_taxa; j++)
-					{
-					for(k=(j+1); k<number_of_taxa; k++)
-						{
-						if(super_scores[j][k] != fund_scores[i][j][k])
-							{
-							if(super_scores[j][k] > fund_scores[i][j][k]) 
-								{
-								temp += super_scores[j][k] - fund_scores[i][j][k];
-								}
-							else
-								{
-								temp += fund_scores[i][j][k] - super_scores[j][k];
-								}
-							}
-						}
-					}
-				if(dweight == 1) temp = temp/number_of_comparisons[i];  /* normalise the scores */
-				
-				/*** multiply the weight the tree has by the score */
-				temp = temp*tree_weights[i];
-				sourcetree_scores[i] = temp;
-				
-				total += temp;
-				}
-			else
-				{
-				total += sourcetree_scores[i];
-				}
-			}
-        }
-    free(tmp);
-    free(pruned_tree);	
-    return(total);
-    }
-#endif
 
 
 
@@ -5133,311 +836,16 @@ float compare_trees(int spr)
 /* Tree_build:
 	This function reads in a file and from it builds the tree in memory using the taxon_type definition */
 	
-/* tree_build: moved to tree_ops.c */
-#if 0
-int tree_build (int c, char *treestring, struct taxon *parent, int fromfile, int fundnum, int taxaorder)
-	{
-	
-	char temp[NAME_LENGTH], tmptag[100];
-	struct taxon *position = NULL, *extra = NULL;
-	int i = 0, j =0, end = FALSE, out = FALSE, onlylength = FALSE;
-	position = make_taxon();  /* make a new instance of the taxon for this level */
-
-	tmptag[0] = '\0';
-	for(i=0; i<NAME_LENGTH; i++)
-		temp[i] = '\0';
-	
-	if(parent == NULL) temp_top = position;  /* assign the pointer in the array to the top of this tree */
-	else
-		{
-		position->parent = parent;
-		(position->parent)->daughter = position;
-		}
-		
-	out = FALSE;
-	while(!out && treestring[c] != ';')
-		{
-		switch (treestring[c])
-			{
-			case '(':
-				/* If we assigned this taxon before */
-				if(position->daughter != NULL || position->name != -1)
-					{
-					/* make a new taxon */
-					extra = make_taxon();
-					position->next_sibling = extra;
-					extra->prev_sibling = position;
-					position = extra;
-					}
-                                c++;
-				c = tree_build(c, treestring, position, fromfile, fundnum, taxaorder);
-				i=0;
-				onlylength = FALSE;
-				if(treestring[c] == ':') onlylength=TRUE;
-				while(treestring[c+i] != ')' && treestring[c+i] != ',' && treestring[c+i] != ';')
-					{
-					position->weight[i] = treestring[c+i];
-					i++;
-					}
-				c += i;
-				position->weight[i] = '\0';
-				break;
-				
-			case ',':
-				c++;
-				break;
-				
-			case ')':
-				out = TRUE;
-				break;
-			
-			case ':':
-				i=0;
-				while(treestring[c] != ')' && treestring[c] != '(' && treestring[c] != ',' && treestring[c] != ';')
-					{
-					position->weight[i] = treestring[c];
-					i++;
-					c++;
-					}
-				position->weight[i] = '\0';
-				break;
-			case ';':
-				break;
-				
-			default:
-					
-				/* If we assigned this taxon before */
-				if(position->daughter != NULL || position->name != -1)
-					{
-					/* make a new taxon */
-					extra = make_taxon();
-					position->next_sibling = extra;
-					extra->prev_sibling = position;
-					position = extra;
-					}
-                                        
-				for(i=0; i<NAME_LENGTH; i++) temp[i] = '\0';
-				i=0;
-				end = FALSE;
-				do{
-					temp[i] = treestring[c];
-						i++;
-						c++;
-					}while(treestring[c] != ')' && treestring[c] != ',' && treestring[c] != '(' && treestring[c] != ':');
-				temp[i] = '\0';
-
-
-				if(fromfile)  /* if the tree has come from a file, then the tree will contain the actual taxa names, unlike if it was created by all_trees, where the tree will contain taxa numbers */
-					{
-					/* assign the name to the taxon */
-					j = number_of_taxa;
-					position->name = assign_taxa_name(temp, FALSE);
-					if(j != number_of_taxa)
-						{
-						printf2("Error, Taxa name %s is not contained in the source trees\n", temp);
-						}
-					}
-				else  /* if the tree has been created internally by an alltrees search */
-					{
-					/* now need to change the string to an integer number */
-					position->name = 0;
-					for(j=i; j>0; j--)
-						{
-						position->name += ( pow(10, (i-j)) * (texttoint(temp[j-1])));
-						}
-					}
-				if(fundnum != -1)
-					{
-					position->fullname = malloc((strlen(fulltaxanames[fundnum][taxaorder])+10)*sizeof(char));
-					position->fullname[0] = '\0';
-					strcpy(position->fullname, fulltaxanames[fundnum][taxaorder]);
-					}
-				taxaorder++;
-				break;		
-			}
-		}
-        c++;
-        return(c);
-	}
-#endif
 
 /* Basic_Tree_build:
 	This function builds a tree in memory withouth incrementing the number of taxa etc in, bascially this is for building a tree where do don;t needall the bells and whistles. This gets used in Exclude taxa to help deal with gene names */
 
-/* basic_tree_build: moved to tree_ops.c */
-#if 0
-int basic_tree_build (int c, char *treestring, struct taxon *parent, int fullnames)
-	{
-	
-	char temp[NAME_LENGTH], tmptag[100];
-	struct taxon *position = NULL, *extra = NULL;
-	int i = 0, j =0, end = FALSE, out = FALSE, onlylength = FALSE;
-	position = make_taxon();  /* make a new instance of the taxon for this level */
-
-	tmptag[0] = '\0';
-	for(i=0; i<NAME_LENGTH; i++)
-		temp[i] = '\0';
-	
-	if(parent == NULL) temp_top = position;  /* assign the pointer in the array to the top of this tree */
-	else
-		{
-		position->parent = parent;
-		(position->parent)->daughter = position;
-		}
-		
-	out = FALSE;
-	while(!out && treestring[c] != ';')
-		{
-		switch (treestring[c])
-			{
-			case '(':
-				/* If we assigned this taxon before */
-				if(position->daughter != NULL || position->name != -1)
-					{
-					/* make a new taxon */
-					extra = make_taxon();
-					position->next_sibling = extra;
-					extra->prev_sibling = position;
-					position = extra;
-					}
-                                c++;
-				c = basic_tree_build(c, treestring, position, fullnames);
-				i=0;
-				onlylength = FALSE;
-				if(treestring[c] == ':') onlylength=TRUE;
-				while(treestring[c+i] != ')' && treestring[c+i] != ',' && treestring[c+i] != ';')
-					{
-					position->weight[i] = treestring[c+i];
-					i++;
-					}
-				c += i;
-				position->weight[i] = '\0';
-				break;
-				
-			case ',':
-				c++;
-				break;
-				
-			case ')':
-				out = TRUE;
-				break;
-			
-			case ':':
-				i=0;
-				while(treestring[c] != ')' && treestring[c] != '(' && treestring[c] != ',' && treestring[c] != ';')
-					{
-					position->weight[i] = treestring[c];
-					i++;
-					c++;
-					}
-				position->weight[i] = '\0';
-				break;
-			case ';':
-				break;
-				
-			default:
-					
-				/* If we assigned this taxon before */
-				if(position->daughter != NULL || position->name != -1)
-					{
-					/* make a new taxon */
-					extra = make_taxon();
-					position->next_sibling = extra;
-					extra->prev_sibling = position;
-					position = extra;
-					}
-                                        
-				for(i=0; i<NAME_LENGTH; i++) temp[i] = '\0';
-				i=0;
-				end = FALSE;
-				do{
-					temp[i] = treestring[c];
-						i++;
-						c++;
-					}while(treestring[c] != ')' && treestring[c] != ',' && treestring[c] != '(' && treestring[c] != ':');
-				temp[i] = '\0';
-
-
-				if(fullnames == TRUE)  /* if the tree has come from a file, then the tree will contain the actual taxa names, unlike if it was created by all_trees, where the tree will contain taxa numbers */
-					{
-					/* assign the name to the taxon */
-					position->name = assign_taxa_name(temp, FALSE);
-					position->fullname = malloc((strlen(temp)+10)*sizeof(char));
-					position->fullname[0] = '\0';
-					strcpy(position->fullname,temp);
-					}
-				else  /* if the neame is a taxon ID (i.e. a number) */
-					{
-					/* now need to change the string to an integer number */
-					position->name = 0;
-					for(j=i; j>0; j--)
-						{
-						position->name += ( pow(10, (i-j)) * (texttoint(temp[j-1])));
-						}
-					}
-				break;		
-			}
-		}
-        c++;
-        return(c);
-	}
-#endif
 
 
 
 
 /* This makes the taxon structure when we need it so I don't have to keep typing the assignments all the time */
-/* make_taxon: moved to tree_ops.c */
-#if 0
-struct taxon * make_taxon(void)
-	{
-	struct taxon *position = NULL;
-	
-	if(count_now)malloc_check++;
-	
-	position = malloc(sizeof(struct taxon));
-	if(!position)  memory_error(34);
-		
-	position->name = -1;
-	position->fullname = NULL;
-	position->daughter = NULL;
-	position->parent = NULL;
-	position->prev_sibling = NULL;
-	position->next_sibling = NULL;
-	position->tag = TRUE;
-	position->tag2 = FALSE;
-        position->xpos = 0;
-        position->ypos = 0;
-        position->spr = FALSE;
-		position->weight[0] = '\0';
-	position->loss = 0;
-	position->length = 0;
-	position->donor = NULL;
-	return(position);
-	}
-#endif
 
-/* gene_content_parsimony: moved to reconcile.c */
-#if 0
-void gene_content_parsimony(struct taxon * position, int * array)
-	{
-	/* Go to the last internal nodes on the tree that are still tagged, then calculate the possible number of copies for this node */
-	struct taxon *start = position;
-	
-	while(position != NULL)
-		{
-		if(position->daughter != NULL && position->tag > 0) gene_content_parsimony(position->daughter, array);
-		position = position->next_sibling;		
-		}
-	position = start;
-	while(position != NULL)
-		{
-		
-		
-		position = position->next_sibling;
-		}
-	}
-#endif
 
 void prune_tree_from_array(struct taxon * super_pos, int * array)
 	{
@@ -5494,35 +902,6 @@ void add_internals_from_array(struct taxon * super_pos, int *array)
 	it then checks to see if any of the siblings on this node are not contained in the fundamental tree, these siblings are then turned off.
 	This only turns off taxa, pointer siblings will have to be turned off using a separate program */
 
-/* prune_tree: moved to tree_ops.c */
-#if 0
-void prune_tree(struct taxon * super_pos, int fund_num)
-	{
-
-	
-	/* Traverse the supertree, visiting every taxa and checking if that taxa is on the fundamental tree */
-	
-	while(super_pos != NULL)
-		{
-		
-		if(super_pos->daughter != NULL) prune_tree(super_pos->daughter, fund_num);  /* If this is pointer sibling, move down the tree */
-	
-		if(super_pos->name != -1) /* If there is an actual taxa on this sibling */
-			{	
-			/* Check to see if that taxa is on the fundamental tree */
-			
-			if(presence_of_taxa[fund_num][super_pos->name] == FALSE)  /* presence of taxa is an array that is filled in as the fundamental trees are inputted */		
-				{  /* if its not there */
-				super_pos->tag = FALSE;
-				}
-			}
-		
-		super_pos = super_pos->next_sibling;
-		
-		}	
-	
-	}
-#endif
 	
 
 
@@ -5533,412 +912,27 @@ void prune_tree(struct taxon * super_pos, int fund_num)
 /* This function travels through the tree recursively untagging any pointer siblings that are not being used. 
 	this effectively shrinks the tree to the size of the fundamental tree that it is being compared to 
 	this recursive function is called by shrink_tree to count how many active taxa there are below any given pointer sibling */
-/* shrink_tree: moved to tree_ops.c */
-#if 0
-int shrink_tree (struct taxon * position)
-	{
-	int count = 0, tot = 0, i, j, k, l, havelabel = FALSE;
-	float one, two;
-	char tempstr[1000] , tmplabel[1000];
-	struct taxon *tmppos = NULL;
-	
-	tmplabel[0] = '\0';
-	
-	while(position != NULL)
-		{
-		if(position->daughter != NULL) 
-			{
-			tot = shrink_tree(position->daughter);  /* tot will be equal to the number of daughters that this pointer has */
-		
-			if(tot < 2)
-				{
-				position->tag = FALSE; /* if the number of daughters is less than 2, then we need to switch off this pointer sibling */
-				if(tot == 1 && strcmp(position->weight, "") != 0)
-					{
-					k=0;
-					while( k < strlen(position->weight) && position->weight[k] != ':') k++;
-					if(k < strlen(position->weight) && position->weight[k] == ':')  /* we only want to add the branch lengths if they are branchlengths */
-						{
-							
-						k++;
-						tempstr[0] = '\0'; i=1; j=0;
-						while(position->weight[k] != '\0')
-							{
-							tempstr[j] = position->weight[k];
-							j++; k++;
-							}
-						tempstr[j] = '\0';
-						one = atof(tempstr);
-						tempstr[0] = '\0'; i=1; j=0;
-						tmppos = find_remaining(position->daughter);
-						if(tmppos != NULL)  /* if we haven't deleted everything in this clade */
-							{
-							k=0;
-							while( k < strlen(tmppos->weight) && tmppos->weight[k] != ':') k++;
-							havelabel = FALSE;
-							if(k != 0)
-								{
-								for(l=0; l<k; l++)
-									tmplabel[l] = tmppos->weight[l];
-								tmplabel[l] = '\0';
-								havelabel = TRUE;
-								}
-
-							k++;
-							while(tmppos->weight[k] != '\0')
-								{
-								tempstr[j] = tmppos->weight[k];
-								j++; k++;
-								}
-							tempstr[j] = '\0';
-							two = atof(tempstr) + one;
-							if(!havelabel)
-								sprintf(tmppos->weight, ":%f", two);
-							else
-								sprintf(tmppos->weight, "%s:%f", tmplabel, two);
-							}
-						}
-					}
-				count += tot;
-				}
-			else
-				count++;
-			}
-		else  /* else this is a taxa node */
-			{
-			if(position->tag) count++;  /* if this taxa is not switched off then increment count */
-			}				
-		position = position->next_sibling;
-		}
-	return(count);
-	
-	}
-#endif
 	
 	
 
 /* This function is only used to print the pruned supertree */
-/* print_pruned_tree: moved to tree_ops.c */
-#if 0
-int print_pruned_tree(struct taxon * position, int count, char *pruned_tree, int fullname, int treenum)
-    {
-    char *name =NULL, temper[100];
-    int i=0;
-    
-    name = malloc(1000000*sizeof(char));
-    if(!name) memory_error(33);
-    name[0] = '\0';
-    
-    while(position != NULL)
-        {
-        if(position->daughter != NULL)
-            {
-            if(position->tag != FALSE)
-                {
-                if(count > 0)
-                    {
-                    strcat(pruned_tree, ",");
-                    } 
-                strcat(pruned_tree, "(");
-                count++;
-                print_pruned_tree(position->daughter, 0, pruned_tree, fullname, treenum);
-                strcat(pruned_tree, ")");
-				}
-            else
-                {
-                count = print_pruned_tree(position->daughter, count, pruned_tree, fullname, treenum);
-                }
-            }
-        else
-            {
-            if(position->tag != FALSE)
-                {
-                if(count > 0)
-                    {
-                    strcat(pruned_tree, ",");
-                    }
-
-                name[0] = '\0';
-               /* totext(position->name, name); */ /* depreciated CC - June 2016*/ 
-
-                if(fullname == FALSE)
-                    {
-                    sprintf(name, "%d", position->name);
-                    }
-                else
-                    {
-                    strcpy(name, position->fullname);
-                    }  
-                strcat(pruned_tree, name);
-                count++;
-                }
-            }
-		if(position->tag != FALSE && strcmp(position->weight, "") != 0)
-			{
-			strcat(pruned_tree, position->weight);
-			}
-        position = position->next_sibling;
-        }
-    free(name);
-    return(count);
-    }
-#endif
 
 
-
-
-/* totext: moved to tree_ops.c */
-#if 0
-void totext(int c, char *array)
-    {
-    int count = 0, i =0;
-    char tmp[30];
-    
-    if(c != 0)
-        {
-        while(pow(10, count) <= c)
-            {
-            tmp[count] = inttotext(fmod(c/pow(10, count), 10));
-            count++;
-            }
-        tmp[count] = '\0';
-        array[count] = '\0';
-        for(i= count-1; i>=0; i--)
-            array[(count-1)- i] = tmp[i];
-	}
-    else
-        {
-        array[0] = '0';
-        array[1] = '\0';
-        }
-    }
-#endif
-
-/* inttotext: moved to utils.c */
 
 
 
 				
-/* reset_tree: moved to tree_ops.c */
-#if 0
-void reset_tree(struct	taxon * position)
-	{
-	
-	while(position != NULL)
-		{
-		position->tag = TRUE;
-		if(position->daughter != NULL) reset_tree(position->daughter);
-		position = position->next_sibling;
-		}
-	
-	}		
-#endif
-				
-/* count_taxa: moved to tree_ops.c */
-#if 0
-int count_taxa(struct taxon * position, int count)
-	{
-	struct taxon * start = position;
-	int i =0;
-	
-	while(position != NULL)
-		{
-		if(position->daughter != NULL)
-			{
-			count = count_taxa(position->daughter, count);
-			}
-		else
-			{
-			if(position->name != -1) count++;
-			}
-		position = position->next_sibling;
-		}
-	return(count);
-	}
-#endif
-
-/* find_taxa: moved to tree_ops.c */
-#if 0
-int find_taxa(struct taxon * position, char *query)
-	{
-	struct taxon * start = position;
-	int i =0, found = FALSE;
-	
-	while(position != NULL)
-		{
-		if(position->daughter != NULL)
-                    {
-					if(found == FALSE)
-						found = find_taxa(position->daughter, query);
-                    }
-                else
-                    {
-                    if(position->name != -1)
-						{
-						if(strstr(taxa_names[position->name], query) != NULL)
-							found = TRUE;
-						}
-                    }
-                position = position->next_sibling;
-		}
-	return(found);
-	}
-#endif
-
-/* number_tree: moved to tree_ops.c */
-#if 0
-int number_tree(struct taxon * position, int num)
-	{
-	struct taxon * start = position;
-	int i =0;
-	
-	while(position != NULL)
-		{
-		if(position->daughter != NULL)
-			num = number_tree(position->daughter, num);
-		position = position->next_sibling;
-		}
-	position = start;
-	while(position != NULL)
-		{
-		position->tag = num;
-		num++;
-		position = position->next_sibling;
-		}
-	return(num);
-	}
-#endif
 
 
-/* check_tree: moved to tree_ops.c */
-#if 0
-void check_tree(struct taxon * position, int tag_id, FILE *reconstructionfile)
-	{
-	struct taxon * start = position;
-	int i =0, found = FALSE;
-	
-	
-	while(position != NULL && !found)
-		{
-		if(position->daughter != NULL)
-			{
-			if(!found)check_tree(position->daughter, tag_id, reconstructionfile);
-			if(tag_id == position->tag)
-				{
-				found = TRUE;
-				fprintf(reconstructionfile, "%d %s\t",position->tag, position->weight);
-				}
-			}
-		else
-			{
-			if(position->name != -1) 
-				{
-				if(tag_id == position->tag)
-					{
-					found = TRUE;
-					fprintf(reconstructionfile, "%d %s\t",position->tag, taxa_names[position->name]);
-					}				
-				}
-			}
-		position = position->next_sibling;
-		}
 
-	}
-#endif
+
 	
-/* count_internal_branches: moved to tree_ops.c */
-#if 0
-int count_internal_branches(struct taxon *position, int count)
-	{
-	
-	while(position != NULL)
-		{
-		if(position->daughter != NULL)
-			{
-			count++;
-			count = count_internal_branches(position->daughter, count);
-			}
-		position = position->next_sibling;
-		}
-	return(count);
-	}
-#endif
 	
 /* this identifies the taxa in a subtree passed to it */
-/* identify_taxa: moved to tree_ops.c */
-#if 0
-void identify_taxa(struct taxon * position, int *name_array)
-	{
-	while(position != NULL)
-		{
-		if(position->daughter != NULL)
-			{
-			identify_taxa(position->daughter, name_array);
-			}
-		else
-			{
-			name_array[position->name] = TRUE;
-			}
-		position = position->next_sibling;
-		}
-	}
-#endif
 
 	
-/* check_taxa: moved to tree_ops.c */
-#if 0
-int check_taxa(struct taxon * position)
-	{
-	struct taxon * start = position;
-	int i =0, number = 0;
-
-	while(position != NULL)
-		{
-		if(position->daughter != NULL)
-                    {
-                    number += check_taxa(position->daughter);
-                    }
-                else
-                    {
-                    if(position->name != -1) number++;
-                    }
-                position = position->next_sibling;
-		}
-        return(number);
-	} 
-#endif
 
 
-/* dismantle_tree: moved to tree_ops.c */
-#if 0
-void dismantle_tree(struct taxon * position)
-	{
-	struct taxon * start = position;
-	
-	/* first scan through this level and go down any pointer there are here */
-	while(position != NULL)
-		{
-		if(position->daughter != NULL)
-			dismantle_tree(position->daughter);
-			
-		position = position->next_sibling;
-		}
-	position = start;
-	while(position->next_sibling != NULL) position= position->next_sibling;
-	
-	/* now remove every thing at this level */
-	while(position != NULL)
-		{
-		
-		if(count_now)malloc_check--;
-		start = position;
-		position = position->prev_sibling;
-		if(start->donor != NULL) free(start->donor);
-		if(start->fullname != NULL) free(start->fullname);
-		free(start);
-		}	
-	}		
-#endif
 
 
 #ifdef _OPENMP
@@ -6759,191 +1753,14 @@ void memory_error(int error_num)  /*123 so far*/
 
 
 
-/* print_named_tree: moved to tree_ops.c */
-#if 0
-void print_named_tree(struct taxon * position, char *tree)
-	{
-	struct taxon *place = position;
-	int count = 0, j=0;
-        char *name = NULL;
-	strcat(tree, "(");
-        
-	name = malloc(30*sizeof(char));
-	name[0] = '\0';
-	while(position != NULL)
-		{
-		if(count >0) strcat(tree, ",");
-		if(position->daughter != NULL)
-			{
-			print_named_tree(position->daughter, tree);
-		/*	sprintf(name, "%d", position->tag);
-			strcat(tree, name);  */ /* This is here for the development of the gene tree mapping */
-
-			}
-		else
-			{
-			strcat(tree, taxa_names[position->name]);
-			}
-		count++;
-		position = position->next_sibling;
-
-		}
-	strcat(tree, ")");
-	free(name);
-	}
-#endif
-
-/* print_fullnamed_tree: moved to tree_ops.c */
-#if 0
-void print_fullnamed_tree(struct taxon * position, char *tree, int fundtreenum)
-	{
-	struct taxon *place = position;
-	int count = 0, j=0;
-        char *name = NULL;
-	strcat(tree, "(");
-        
-	name = malloc(30*sizeof(char));
-	name[0] = '\0';
-	while(position != NULL)
-		{
-		if(count >0) strcat(tree, ",");
-		if(position->daughter != NULL)
-			{
-			print_fullnamed_tree(position->daughter, tree, fundtreenum);
-		/*	sprintf(name, "%d", position->tag);
-			strcat(tree, name);  */ /* This is here for the development of the gene tree mapping */
-
-			}
-		else
-			{
-			if(position -> fullname != NULL)
-			{	
-				strcat(tree, position -> fullname);
-			}
-			else
-			{
-				strcat(tree, taxa_names[position->name]);
-			}
-			/*strcat(tree, fulltaxanames[fundtreenum][position->name]);*/
-			}
-		count++;
-		position = position->next_sibling;
-
-		}
-	strcat(tree, ")");
-	free(name);
-	}
-#endif
 
 
 
 
-/* print_tree: moved to tree_ops.c */
-#if 0
-void print_tree(struct taxon * position, char *tree)
-	{
-	struct taxon *place = position;
-	int count = 0, j=0;
-        char *name = NULL;
-	strcat(tree, "(");
-        
-	name = malloc(30*sizeof(char));
-	name[0] = '\0';
-	while(position != NULL)
-		{
-		if(count >0) strcat(tree, ",");
-		if(position->daughter != NULL)
-			{
-			print_tree(position->daughter, tree);
-			}
-		else
-			{
-			strcpy(name, "");
-			totext(position->name, name);
-			strcat(tree, name);
-			}
-		count++;
-		position = position->next_sibling;
-
-		}
-	strcat(tree, ")");
-	free(name);
-	}
-#endif
-
-/* print_tree_withinternals: moved to tree_ops.c */
-#if 0
-void print_tree_withinternals(struct taxon * position, char *tree)
-	{
-	struct taxon *place = position;
-	int count = 0, j=0;
-        char *name = NULL;
-	strcat(tree, "(");
-	/*printf("(\n");*/
-        
-	name = malloc(30*sizeof(char));
-	name[0] = '\0';
-	while(position != NULL)
-		{
-		if(count >0) strcat(tree, ",");
-		if(position->daughter != NULL)
-			{
-			print_tree_withinternals(position->daughter, tree);
-			}
-		else
-			{
-			strcpy(name, "");
-			totext(position->name, name);
-			strcat(tree, name);
-		/*	printf2("%d\n", name);*/
-			}
-		count++;
-		position = position->next_sibling;
-		}
-	strcat(tree, ")");	
-	/*printf(")\n");*/
-	if(place->parent != NULL)
-		{
-		strcpy(name, "");
-		totext((place->parent)->tag, name);
-		strcat(tree, name);
-		}
-	
-	free(name);
-	}
-#endif
 
 
-/* reallocate_retained_supers: moved to tree_ops.c */
-#if 0
-void reallocate_retained_supers(void)
-    {
 
-    int i=0;
-    number_retained_supers = number_retained_supers+10;
-    
-    retained_supers = realloc(retained_supers, number_retained_supers*sizeof(char*));
-    if(!retained_supers) memory_error(48);
-    best_topology = realloc(best_topology, number_retained_supers*sizeof(char*));
-    if(!best_topology) memory_error(87);
-    scores_retained_supers = realloc(scores_retained_supers, number_retained_supers*sizeof(float));
-    if(!scores_retained_supers) memory_error(50);
-    best_topology_scores = realloc(best_topology_scores, number_retained_supers*sizeof(float));
-    if(!best_topology_scores) memory_error(88);
 
-    for(i=number_retained_supers - 10; i<number_retained_supers; i++)
-        {
-        retained_supers[i] = malloc(TREE_LENGTH*sizeof(char));
-        if(!retained_supers[i]) memory_error(49);
-        best_topology[i] = malloc(TREE_LENGTH*sizeof(char));
-        if(!best_topology[i]) memory_error(89);
-        best_topology[i][0] = '\0';
-        best_topology_scores[i] = -1;
-        retained_supers[i][0] = '\0';
-        scores_retained_supers[i] = -1;
-        }
-    }
-#endif
 
 
 
@@ -7614,138 +2431,6 @@ void usertrees_search(void)
 	free(best_tree);
     }
 
-/* controlc1-5: moved to main.c */
-#if 0
-void controlc1(int signal)
-	{
-	char *c = NULL;
-	
-	printf2("\n\nCompleted %d random samples before CTRL-C was caught\nDo you want to stop the random sampling and start the heuristuc searches now? (Y/N): \n", GC);
-	c = malloc(10000*sizeof(char));
-	xgets(c);
-	while(strcmp(c, "Y") != 0 && strcmp(c, "y") != 0 && strcmp(c, "N") != 0 && strcmp(c, "n") != 0)
-		{
-		printf2("Error '%s' is not a valid response, please respond Y or N\n", c);
-		xgets(c);
-		}
-	
-	if(strcmp(c, "Y") == 0 || strcmp(c, "y") == 0)
-		{
-		GC = 100000000;
-		printf2("Starting Heuristic searches\n");
-		}
-
-	if(strcmp(c, "N") == 0 || strcmp(c, "n") == 0)
-			printf2("Continuing random samples.....\n");
-	
-	free(c);
-
-	}
-
-void controlc2(int signal)
-	{
-	char *c = NULL;
-	
-	c = malloc(10000*sizeof(char));
-	
-	printf2("\n\n\n\nCompleted the assessment of %d trees...best tree found so far has a score of %f\nDo you want to stop the heuristic searches now? (Y/N): \n", NUMSWAPS, BESTSCORE);
-	xgets(c);
-	while(strcmp(c, "Y") != 0 && strcmp(c, "y") != 0 && strcmp(c, "N") != 0 && strcmp(c, "n") != 0)
-		{
-		printf2("Error '%s' is not a valid response, please respond Y or N\n", c);
-		xgets(c);
-		}
-	
-	if(strcmp(c, "Y") == 0 || strcmp(c, "y") == 0)
-		{
-		user_break = TRUE;
-		printf2("Stopping heuristic search. The resulting tree may be sub-optimal\n\n");
-		}
-
-
-	if(strcmp(c, "N") == 0 || strcmp(c, "n") == 0)
-			printf2("Continuing heuristic searches.....\n");
-	
-	free(c);
-	}
-
-void controlc3(int signal)
-	{
-	char *c = NULL;
-	
-	c = malloc(10000*sizeof(char));
-	
-	printf2("\n\nDo you want to stop the generation of trees now? (Y/N): ");
-	xgets(c);
-	while(strcmp(c, "Y") != 0 && strcmp(c, "y") != 0 && strcmp(c, "N") != 0 && strcmp(c, "n") != 0)
-		{
-		printf2("Error '%s' is not a valid response, please respond Y or N\n", c);
-		xgets(c);
-		}
-	
-	if(strcmp(c, "Y") == 0 || strcmp(c, "y") == 0)
-		{
-		user_break = TRUE;
-		printf2("Stopping the generation of treesn\n");
-		}
-
-
-	if(strcmp(c, "N") == 0 || strcmp(c, "n") == 0)
-			printf2("Continuing the generation of trees.....\n");
-	
-	free(c);
-	}
-
-void controlc4(int signal)
-	{
-	char *c = NULL;
-	
-	c = malloc(10000*sizeof(char));
-	
-	printf2("\n\nDo you really wish to quit? (Y/N): ");
-	xgets(c);
-	while(strcmp(c, "Y") != 0 && strcmp(c, "y") != 0 && strcmp(c, "N") != 0 && strcmp(c, "n") != 0)
-		{
-		printf2("Error '%s' is not a valid response, please respond Y or N\n", c);
-		xgets(c);
-		}
-	
-	if(strcmp(c, "Y") == 0 || strcmp(c, "y") == 0)
-		{
-		user_break = TRUE;
-		printf2("Bye\n");
-		clean_exit(0);
-		}
-	
-	free(c);
-	}
-
-void controlc5(int signal)
-	{
-	char *c = NULL;
-	
-	c = malloc(10000*sizeof(char));
-	
-	printf2("\n\nDo you want to stop the exhaustive searches now? (Y/N): ");
-	xgets(c);
-	while(strcmp(c, "Y") != 0 && strcmp(c, "y") != 0 && strcmp(c, "N") != 0 && strcmp(c, "n") != 0)
-		{
-		printf2("Error '%s' is not a valid response, please respond Y or N\n", c);
-		xgets(c);
-		}
-	if(strcmp(c, "Y") == 0 || strcmp(c, "y") == 0)
-		{
-		user_break = TRUE;
-		printf2("Stopping exhaustive search. The resulting tree may be sub-optimal\n\n");
-		}
-
-
-	if(strcmp(c, "N") == 0 || strcmp(c, "n") == 0)
-			printf2("Continuing heuristic searches.....\n");
-
-	free(c);
-	}
-#endif
 
 
 
@@ -7943,207 +2628,6 @@ static float ml_display_score(float s)
 static const char *ml_score_label(void)
     { return (criterion == 7 && ml_scale == 2) ? "lnL" : "score"; }
 
-
-/* --- Robinson-Foulds bipartition hash-set infrastructure -----------------
- *
- * collect_biparts_newick: parse an integer-indexed Newick string and fill
- *   out[] with canonical bipartition hashes (sorted ascending).  Returns
- *   the count.  Excludes trivial bipartitions (canonical hash == 0).
- *   The source tree must already be unrooted (trifurcating root).
- *
- * bipart_intersection_count: merge-walk two sorted uint64_t arrays and
- *   return the number of equal elements.
- *
- * rf_precompute_fund_biparts: precompute BipartSet for every source tree
- *   once before the heuristic search begins.  Safe to call multiple times.
- *
- * compare_trees_rf: score the current supertree (tree_top) against all
- *   source trees using normalised RF distance.  Follows compare_trees().
- */
-
-/* cmp_uint64, collect_biparts_newick, bipart_intersection_count: moved to scoring.c */
-
-/* rf_precompute_fund_biparts: moved to scoring.c */
-#if 0
-void rf_precompute_fund_biparts(void)
-    {
-    int i, j;
-    if(fund_bipart_sets != NULL)
-        {
-        for(i = 0; i < Total_fund_trees; i++) free(fund_bipart_sets[i].hashes);
-        free(fund_bipart_sets);
-        }
-    fund_bipart_sets = malloc(Total_fund_trees * sizeof(BipartSet));
-    for(i = 0; i < Total_fund_trees; i++)
-        {
-        fund_bipart_sets[i].hashes = malloc(number_of_taxa * sizeof(uint64_t));
-        fund_bipart_sets[i].count  = 0;
-        if(!sourcetreetag[i]) continue;
-        uint64_t total_hash = 0;
-        for(j = 0; j < number_of_taxa; j++)
-            if(presence_of_taxa[i][j]) total_hash ^= taxon_hash_vals[j];
-        char *tmp = malloc(strlen(fundamentals[i]) + 10);
-        strcpy(tmp, fundamentals[i]);
-        unroottree(tmp);
-        fund_bipart_sets[i].count =
-            collect_biparts_newick(tmp, total_hash, fund_bipart_sets[i].hashes);
-        free(tmp);
-        }
-    }
-#endif
-
-/* compare_trees_rf: moved to scoring.c */
-#if 0
-float compare_trees_rf(int spr)
-    {
-    int i, j;
-    float total = 0.0f;
-    char *pruned_nwk    = malloc(TREE_LENGTH * sizeof(char));
-    char *tmp           = malloc(TREE_LENGTH * sizeof(char));
-    uint64_t *super_bp  = malloc(number_of_taxa * sizeof(uint64_t));
-
-    for(i = 0; i < Total_fund_trees; i++)
-        {
-        if(!sourcetreetag[i]) continue;
-
-        int found = FALSE, here1 = TRUE, here2 = TRUE;
-        if(sourcetree_scores[i] != -1 && spr)
-            {
-            for(j = 0; j < number_of_taxa; j++)
-                {
-                if(presence_of_taxa[i][j] > 0 && presenceof_SPRtaxa[j] == TRUE)  here1 = FALSE;
-                if(presence_of_taxa[i][j] > 0 && presenceof_SPRtaxa[j] == FALSE) here2 = FALSE;
-                }
-            if(here1 || here2) found = TRUE;
-            }
-
-        if(!found || !spr)
-            {
-            int ntaxa_i = 0;
-            uint64_t total_hash = 0;
-            for(j = 0; j < number_of_taxa; j++)
-                if(presence_of_taxa[i][j]) { ntaxa_i++; total_hash ^= taxon_hash_vals[j]; }
-            if(ntaxa_i < 4) { sourcetree_scores[i] = 0.0f; continue; }
-
-            prune_tree(tree_top, i);
-            shrink_tree(tree_top);
-
-            pruned_nwk[0] = '\0';
-            if(print_pruned_tree(tree_top, 0, pruned_nwk, FALSE, 0) > 1)
-                {
-                tmp[0] = '\0';
-                strcpy(tmp, "("); strcat(tmp, pruned_nwk); strcat(tmp, ")");
-                strcpy(pruned_nwk, tmp);
-                }
-            strcat(pruned_nwk, ";");
-
-            while(unroottree(pruned_nwk));  /* remove bifurcating root from SPR-at-root grafts */
-            int super_cnt = collect_biparts_newick(pruned_nwk, total_hash, super_bp);
-            reset_tree(tree_top);
-
-            int gene_cnt = fund_bipart_sets[i].count;
-            int shared   = bipart_intersection_count(super_bp, super_cnt,
-                                                     fund_bipart_sets[i].hashes, gene_cnt);
-            float rf = (float)(super_cnt + gene_cnt - 2 * shared);
-            int max_rf = 2 * (ntaxa_i - 3);
-            if(max_rf > 0) rf /= (float)max_rf;
-            rf *= tree_weights[i];
-            sourcetree_scores[i] = rf;
-            total += rf;
-            }
-        else
-            {
-            total += sourcetree_scores[i];
-            }
-        }
-
-    free(super_bp);
-    free(tmp);
-    free(pruned_nwk);
-    return total;
-    }
-#endif
-
-/* --- ML scoring function (Steel & Rodrigo 2008) --------------------------
- * compare_trees_ml: identical to compare_trees_rf() but uses raw (unnormalised)
- * RF distance in the exponential likelihood model P(G_i|T) ∝ e^(-beta*d_i).
- * Steel M & Rodrigo A (2008) Maximum likelihood supertrees. Syst Biol 57:243-250.
- * mlscale=lust applies log10(e) factor for compatibility with Akanni et al. 2014.
- * Reuses fund_bipart_sets precomputed by rf_precompute_fund_biparts().
- */
-/* compare_trees_ml: moved to scoring.c */
-#if 0
-float compare_trees_ml(int spr)
-    {
-    int i, j;
-    float total = 0.0f;
-    char *pruned_nwk   = malloc(TREE_LENGTH * sizeof(char));
-    char *tmp          = malloc(TREE_LENGTH * sizeof(char));
-    uint64_t *super_bp = malloc(number_of_taxa * sizeof(uint64_t));
-
-    for(i = 0; i < Total_fund_trees; i++)
-        {
-        if(!sourcetreetag[i]) continue;
-
-        int found = FALSE, here1 = TRUE, here2 = TRUE;
-        if(sourcetree_scores[i] != -1 && spr)
-            {
-            for(j = 0; j < number_of_taxa; j++)
-                {
-                if(presence_of_taxa[i][j] > 0 && presenceof_SPRtaxa[j] == TRUE)  here1 = FALSE;
-                if(presence_of_taxa[i][j] > 0 && presenceof_SPRtaxa[j] == FALSE) here2 = FALSE;
-                }
-            if(here1 || here2) found = TRUE;
-            }
-
-        if(!found || !spr)
-            {
-            int ntaxa_i = 0;
-            uint64_t total_hash = 0;
-            for(j = 0; j < number_of_taxa; j++)
-                if(presence_of_taxa[i][j]) { ntaxa_i++; total_hash ^= taxon_hash_vals[j]; }
-            if(ntaxa_i < 4) { sourcetree_scores[i] = 0.0f; continue; }
-
-            prune_tree(tree_top, i);
-            shrink_tree(tree_top);
-
-            pruned_nwk[0] = '\0';
-            if(print_pruned_tree(tree_top, 0, pruned_nwk, FALSE, 0) > 1)
-                {
-                tmp[0] = '\0';
-                strcpy(tmp, "("); strcat(tmp, pruned_nwk); strcat(tmp, ")");
-                strcpy(pruned_nwk, tmp);
-                }
-            strcat(pruned_nwk, ";");
-
-            while(unroottree(pruned_nwk));  /* remove bifurcating root from SPR-at-root grafts */
-            int super_cnt = collect_biparts_newick(pruned_nwk, total_hash, super_bp);
-            reset_tree(tree_top);
-
-            int gene_cnt = fund_bipart_sets[i].count;
-            int shared   = bipart_intersection_count(super_bp, super_cnt,
-                                                     fund_bipart_sets[i].hashes, gene_cnt);
-            /* Raw RF distance — no normalisation */
-            float d = (float)(super_cnt + gene_cnt - 2 * shared);
-            /* Negated log-likelihood: -ln L = beta * d  (Steel & Rodrigo 2008 formula).
-             * mlscale=lust multiplies by log10(e) to match Akanni et al. 2014 (L.U.st). */
-            float ml_score = (float)(ml_beta * d * (ml_scale == 1 ? LOG10E : 1.0f)) * tree_weights[i];
-            sourcetree_scores[i] = ml_score;
-            total += ml_score;
-            }
-        else
-            {
-            total += sourcetree_scores[i];
-            }
-        }
-
-    free(super_bp);
-    free(tmp);
-    free(pruned_nwk);
-    return total;
-    }
-#endif
-
 /* --- end RF/ML functions ------------------------------------------------- */
 
 
@@ -8316,6 +2800,146 @@ static void hs_merge_results(char ***par_retained, float **par_scores, int *par_
         }
     }
 #endif /* _OPENMP */
+
+
+/* =======================================================================
+ * ensure_stored_source_trees: populate stored_* snapshot arrays from the
+ * current active source-tree data if they have not already been filled by
+ * a prior bootstrap_search() call.
+ *
+ * This snapshot is the reference set used by build_bootstrap_nj() to
+ * resample starting trees for heuristic search reps.
+ * ======================================================================= */
+static void ensure_stored_source_trees(void)
+	{
+	int i, j, k;
+	if(stored_funds != NULL) return;   /* already populated (e.g. by boot) */
+
+	stored_num_comparisons = malloc(Total_fund_trees * sizeof(int));
+	if(!stored_num_comparisons) memory_error(60);
+	for(i = 0; i < Total_fund_trees; i++)
+		stored_num_comparisons[i] = number_of_comparisons[i];
+
+	stored_fund_scores = malloc(Total_fund_trees * sizeof(int **));
+	if(!stored_fund_scores) memory_error(38);
+	for(i = 0; i < Total_fund_trees; i++)
+		{
+		stored_fund_scores[i] = malloc(number_of_taxa * sizeof(int *));
+		if(!stored_fund_scores[i]) memory_error(39);
+		for(j = 0; j < number_of_taxa; j++)
+			{
+			stored_fund_scores[i][j] = malloc(number_of_taxa * sizeof(int));
+			if(!stored_fund_scores[i][j]) memory_error(40);
+			for(k = 0; k < number_of_taxa; k++)
+				stored_fund_scores[i][j][k] = fund_scores[i][j][k];
+			}
+		}
+
+	stored_presence_of_taxa = malloc(Total_fund_trees * sizeof(int *));
+	if(!stored_presence_of_taxa) memory_error(41);
+	for(i = 0; i < Total_fund_trees; i++)
+		{
+		stored_presence_of_taxa[i] = malloc(number_of_taxa * sizeof(int));
+		if(!stored_presence_of_taxa[i]) memory_error(42);
+		for(j = 0; j < number_of_taxa; j++)
+			stored_presence_of_taxa[i][j] = presence_of_taxa[i][j];
+		}
+
+	stored_funds = malloc(Total_fund_trees * sizeof(char *));
+	if(!stored_funds) memory_error(31);
+	for(i = 0; i < Total_fund_trees; i++)
+		{
+		stored_funds[i] = malloc((strlen(fundamentals[i]) + 100) * sizeof(char));
+		if(!stored_funds[i]) memory_error(32);
+		strcpy(stored_funds[i], fundamentals[i]);
+		}
+	}
+
+
+/* =======================================================================
+ * build_bootstrap_nj: generate one bootstrap-resampled NJ starting tree.
+ *
+ * Resamples Total_fund_trees source trees with replacement from stored_*,
+ * verifies every taxon is present, calls average_consensus + neighbor_joining
+ * to produce a fresh NJ tree, then restores the active arrays to originals.
+ *
+ * Up to BOOT_NJ_MAX_ATTEMPTS resamples are tried.  Returns TRUE and writes
+ * the Newick to out_tree on success; returns FALSE if every attempt produced
+ * a sample missing at least one taxon (caller should fall back to SPR
+ * perturbation of the original NJ tree).
+ * ======================================================================= */
+#define BOOT_NJ_MAX_ATTEMPTS 20
+static int build_bootstrap_nj(char *out_tree, int missing_method)
+	{
+	int attempt, j, k, l, r, allpresent;
+
+	for(attempt = 0; attempt < BOOT_NJ_MAX_ATTEMPTS; attempt++)
+		{
+		/* Resample Total_fund_trees source trees with replacement */
+		for(j = 0; j < Total_fund_trees; j++)
+			{
+			r = (int)fmod(rand(), Total_fund_trees);
+			fundamentals[j] = realloc(fundamentals[j],
+			                          (strlen(stored_funds[r]) + 100) * sizeof(char));
+			strcpy(fundamentals[j], stored_funds[r]);
+			number_of_comparisons[j] = stored_num_comparisons[r];
+			for(k = 0; k < number_of_taxa; k++)
+				{
+				presence_of_taxa[j][k] = stored_presence_of_taxa[r][k];
+				for(l = 0; l < number_of_taxa; l++)
+					fund_scores[j][k][l] = stored_fund_scores[r][k][l];
+				}
+			}
+
+		/* Check every taxon appears in at least one resampled source tree */
+		allpresent = TRUE;
+		for(k = 0; k < number_of_taxa && allpresent; k++)
+			{
+			int found = FALSE;
+			for(j = 0; j < Total_fund_trees && !found; j++)
+				if(presence_of_taxa[j][k] > 0) found = TRUE;
+			if(!found) allpresent = FALSE;
+			}
+
+		if(allpresent)
+			{
+			average_consensus(0, missing_method, NULL, NULL);
+			neighbor_joining(FALSE, out_tree, FALSE);
+
+			/* Restore active arrays to originals */
+			for(j = 0; j < Total_fund_trees; j++)
+				{
+				fundamentals[j] = realloc(fundamentals[j],
+				                          (strlen(stored_funds[j]) + 100) * sizeof(char));
+				strcpy(fundamentals[j], stored_funds[j]);
+				number_of_comparisons[j] = stored_num_comparisons[j];
+				for(k = 0; k < number_of_taxa; k++)
+					{
+					presence_of_taxa[j][k] = stored_presence_of_taxa[j][k];
+					for(l = 0; l < number_of_taxa; l++)
+						fund_scores[j][k][l] = stored_fund_scores[j][k][l];
+					}
+				}
+			return TRUE;
+			}
+		}
+
+	/* All attempts failed — restore originals before returning */
+	for(j = 0; j < Total_fund_trees; j++)
+		{
+		fundamentals[j] = realloc(fundamentals[j],
+		                          (strlen(stored_funds[j]) + 100) * sizeof(char));
+		strcpy(fundamentals[j], stored_funds[j]);
+		number_of_comparisons[j] = stored_num_comparisons[j];
+		for(k = 0; k < number_of_taxa; k++)
+			{
+			presence_of_taxa[j][k] = stored_presence_of_taxa[j][k];
+			for(l = 0; l < number_of_taxa; l++)
+				fund_scores[j][k][l] = stored_fund_scores[j][k][l];
+			}
+		}
+	return FALSE;
+	}
 
 
 void heuristic_search(int user, int print, int sample, int nreps)
@@ -8683,6 +3307,48 @@ void heuristic_search(int user, int print, int sample, int nreps)
 				}
 			hs_maxskips_is_auto = 0;   /* user has set an explicit value — don't auto-scale */
 			}
+		if(strcmp(parsed_command[i], "strategy") == 0)
+			{
+			if(strcmp(parsed_command[i+1], "first") == 0)
+				hs_strategy = 0;
+			else if(strcmp(parsed_command[i+1], "best") == 0)
+				hs_strategy = 1;
+			else
+				{
+				printf2("Error: strategy must be 'first' or 'best'\n");
+				error = TRUE;
+				}
+			}
+		if(strcmp(parsed_command[i], "progress") == 0)
+			{
+			hs_progress_interval = toint(parsed_command[i+1]);
+			if(hs_progress_interval < 0)
+				{
+				printf2("Error: progress must be >= 0 (0=every improvement, N=every N seconds)\n");
+				hs_progress_interval = 5;
+				error = TRUE;
+				}
+			}
+		if(strcmp(parsed_command[i], "droprep") == 0)
+			{
+			hs_droprep = (float)atof(parsed_command[i+1]);
+			if(hs_droprep < 0.0f)
+				{
+				printf2("Error: droprep must be >= 0 (0=disabled, e.g. 0.1 = abandon if >10%% above global best)\n");
+				hs_droprep = 0.0f;
+				error = TRUE;
+				}
+			}
+		if(strcmp(parsed_command[i], "threadreport") == 0)
+			{
+			hs_thread_report_interval = atoi(parsed_command[i+1]);
+			if(hs_thread_report_interval < 0)
+				{
+				printf2("Error: threadreport must be >= 0 (0=disabled, e.g. 10 = each thread reports every 10s)\n");
+				hs_thread_report_interval = 0;
+				error = TRUE;
+				}
+			}
 		if(strcmp(parsed_command[i], "mlbeta") == 0)
 			{
 			ml_beta = atof(parsed_command[i+1]);
@@ -8752,11 +3418,11 @@ void heuristic_search(int user, int print, int sample, int nreps)
 		if(sample > sup) sample=sup;
 		if(nreps > sup) nreps=sup;
 
-        /* Auto-scale maxskips to N² when no explicit value was given.
+        /* Auto-scale maxskips to 2*N² when no explicit value was given.
          * This makes the stopping criterion proportional to tree size:
-         * N=10 → 100, N=20 → 400, N=30 → 900, N=50 → 2500. */
+         * N=10 → 200, N=20 → 800, N=30 → 1800, N=50 → 5000. */
         if(hs_maxskips_is_auto)
-            hs_maxskips = number_of_taxa * number_of_taxa;
+            hs_maxskips = 2 * number_of_taxa * number_of_taxa;
 
         /* Initialise global landscape map if visitedtrees= was specified */
         if(g_landscape_file[0])
@@ -8811,12 +3477,23 @@ void heuristic_search(int user, int print, int sample, int nreps)
                 if(hs_maxskips > 0)
                     {
                     if(hs_maxskips_is_auto)
-                        printf2("\tMax consecutive visited skips (maxskips) = %d (auto: N²=%d²)\n", hs_maxskips, number_of_taxa);
+                        printf2("\tMax consecutive visited skips (maxskips) = %d (auto: 2×N²=2×%d²)\n", hs_maxskips, number_of_taxa);
                     else
                         printf2("\tMax consecutive visited skips (maxskips) = %d\n", hs_maxskips);
                     }
                 else
                     printf2("\tMax consecutive visited skips (maxskips) = disabled\n");
+#ifdef _OPENMP
+                if(hs_progress_interval == 0)
+                    printf2("\tParallel progress reporting (progress) = every improvement\n");
+                else
+                    printf2("\tParallel progress reporting (progress) = every %d seconds\n", hs_progress_interval);
+                if(hs_droprep > 0.0f)
+                    printf2("\tDrop lagging reps (droprep) = %.4f (abandon rep if >%.1f%% above global best)\n",
+                            hs_droprep, hs_droprep * 100.0f);
+                if(hs_thread_report_interval > 0)
+                    printf2("\tPer-thread status reporting (threadreport) = every %d seconds\n", hs_thread_report_interval);
+#endif
                 if(criterion != 5)
 					printf2("\tWeighting Scheme = ");
                 if(criterion==0)
@@ -9103,6 +3780,11 @@ void heuristic_search(int user, int print, int sample, int nreps)
                         unroottree(temptree);
 						distance = get_recon_score(temptree, numspectries, numgenetries);
 						}
+				if(criterion == 6)
+					{
+					if(fund_bipart_sets == NULL) rf_precompute_fund_biparts();
+					distance = compare_trees_rf(FALSE);
+					}
 				if(criterion == 7)
 					{
 					if(fund_bipart_sets == NULL) rf_precompute_fund_biparts();
@@ -9147,7 +3829,7 @@ void heuristic_search(int user, int print, int sample, int nreps)
 					}
 				for(i=0; i<Total_fund_trees; i++)sourcetree_scores[i] = -1;
 				i=0;
-				 if(print) printf2("\nHeuristic search progress indicator:");
+				 if(print) printf2("\nHeuristic search progress indicator:\n");
                     fflush(stdout);
 #ifdef _OPENMP
                 if(nthreads > 1)
@@ -9173,6 +3855,7 @@ void heuristic_search(int user, int print, int sample, int nreps)
                     if(criterion == 6 || criterion == 7) rf_precompute_fund_biparts();
                     par_progress_best    = -1.0f;
                     par_last_print_score = -1.0f;
+                    par_last_progress_time = 0;
                     par_search_start     = time(NULL);
                     /* Snapshot master's input-data pointers for worker threads */
                     g_hs_fundamentals_snap = fundamentals;
@@ -9190,7 +3873,41 @@ void heuristic_search(int user, int print, int sample, int nreps)
                         for(prl_i=0; prl_i<nreps; prl_i++)
                             {
                             if(user_break) continue;
+                            hs_par_rep = prl_i + 1;
                             thr_swaps += do_search(starths[prl_i], TRUE, FALSE, numswaps, outfile, numspectries, numgenetries);
+
+                            /* --- per-rep completion report (all threads) --- */
+                            #pragma omp critical (par_progress_print)
+                                {
+                                int new_best = 0;
+                                if(sprscore >= 0.0f && (par_progress_best < 0.0f || sprscore < par_progress_best))
+                                    {
+                                    par_progress_best = sprscore;
+                                    new_best = 1;
+                                    }
+                                double hs_el = difftime(time(NULL), par_search_start);
+                                int    hs_em = (int)(hs_el / 60), hs_es = (int)hs_el % 60;
+                                const char *stop_reason;
+                                if(user_break)                                           stop_reason = "interrupted";
+                                else if(rep_abandon)                                     stop_reason = "suboptimal";
+                                else if(hs_maxskips > 0 && skip_streak >= hs_maxskips)  stop_reason = "maxskips";
+                                else if(tried_regrafts >= numswaps)                      stop_reason = "maxswaps";
+                                else                                                     stop_reason = "converged";
+                                if(hsprint)
+                                    {
+                                    if(sprscore >= 0.0f)
+                                        printf2("  [%2d:%02d]  rep %d/%d  %s= %s%.6f  (%d spr/tbr + %d nni swaps, %s)\n",
+                                                hs_em, hs_es, prl_i+1, nreps,
+                                                ml_score_label(), new_best ? "* " : "  ",
+                                                ml_display_score(sprscore),
+                                                tried_regrafts, nni_swaps, stop_reason);
+                                    else
+                                        printf2("  [%2d:%02d]  rep %d/%d  (no new topologies)  (%d spr/tbr + %d nni swaps, %s)\n",
+                                                hs_em, hs_es, prl_i+1, nreps,
+                                                tried_regrafts, nni_swaps, stop_reason);
+                                    fflush(stdout);
+                                    }
+                                }
                             }
 
                         #pragma omp critical (hs_merge)
@@ -9216,6 +3933,9 @@ void heuristic_search(int user, int print, int sample, int nreps)
                     swaps = (int)par_visited_set->count + (par_visited_set->zero_present ? 1 : 0);
                     vs_free(par_visited_set);
 
+                    if(user_break && print)
+                        printf2("All threads stopped — writing best tree to output file.\n");
+
                     /* Re-allocate super_scores for post-loop use (freed by hs_free_thread_state). */
                     super_scores = malloc(number_of_taxa * sizeof(int *));
                     for(k=0; k<number_of_taxa; k++)
@@ -9226,11 +3946,43 @@ void heuristic_search(int user, int print, int sample, int nreps)
                     {
                     /* ---- Sequential while loop ---- */
                     if(criterion == 6 || criterion == 7) rf_precompute_fund_biparts();
+                    par_progress_best = -1.0f;
+                    par_last_progress_time = 0;
+                    par_search_start  = time(NULL);
                     while(i != nreps && !user_break) /* Start searching tree space */
                         {
-					    if(print)printf2("\nRepetition %d of %d:", i+1, nreps);
-                        fflush(stdout);
                         swaps += do_search(starths[i], TRUE, print, numswaps, outfile, numspectries, numgenetries);
+                        /* --- per-rep completion report --- */
+                        {
+                        int new_best = 0;
+                        if(sprscore >= 0.0f && (par_progress_best < 0.0f || sprscore < par_progress_best))
+                            {
+                            par_progress_best = sprscore;
+                            new_best = 1;
+                            }
+                        double hs_el = difftime(time(NULL), par_search_start);
+                        int    hs_em = (int)(hs_el / 60), hs_es = (int)hs_el % 60;
+                        const char *stop_reason;
+                        if(user_break)                                           stop_reason = "interrupted";
+                        else if(rep_abandon)                                     stop_reason = "suboptimal";
+                        else if(hs_maxskips > 0 && skip_streak >= hs_maxskips)  stop_reason = "maxskips";
+                        else if(tried_regrafts >= numswaps)                      stop_reason = "maxswaps";
+                        else                                                     stop_reason = "converged";
+                        if(hsprint)
+                            {
+                            if(sprscore >= 0.0f)
+                                printf2("  [%2d:%02d]  rep %d/%d  %s= %s%.6f  (%d spr/tbr + %d nni swaps, %s)\n",
+                                        hs_em, hs_es, i+1, nreps,
+                                        ml_score_label(), new_best ? "* " : "  ",
+                                        ml_display_score(sprscore),
+                                        tried_regrafts, nni_swaps, stop_reason);
+                            else
+                                printf2("  [%2d:%02d]  rep %d/%d  (no new topologies)  (%d spr/tbr + %d nni swaps, %s)\n",
+                                        hs_em, hs_es, i+1, nreps,
+                                        tried_regrafts, nni_swaps, stop_reason);
+                            fflush(stdout);
+                            }
+                        }
                         i++;
                         }
                     }
@@ -9251,7 +4003,7 @@ void heuristic_search(int user, int print, int sample, int nreps)
 						printf2("An error occurred while setting a signal handler\n");
 						}
 					for(i=0; i<Total_fund_trees; i++)sourcetree_scores[i] = -1;
-					 if(print) printf2("\nHeuristic search progress indicator:");
+					 if(print) printf2("\nHeuristic search progress indicator:\n");
 #ifdef _OPENMP
 					if(nthreads > 1)
 						{
@@ -9264,13 +4016,15 @@ void heuristic_search(int user, int print, int sample, int nreps)
 						int    par_NUMSWAPS = 0;
 						VisitedSet *par_visited_set = vs_create(1024);
 
-						/* Pre-compute nreps starting trees with diverse perturbation.
-						   Rep 0 = NJ tree (best single starting point).
-						   Reps 1..nreps/2: NJ + 10-20 independent SPR moves (near-NJ),
-						   each applied freshly from the original NJ tree — not accumulated.
-						   Reps nreps/2+1..: NJ + 30-50 independent SPR moves (far),
-						   again each freshly from the original NJ tree.
-						   Independence across reps ensures diverse basin sampling. */
+						/* Pre-compute nreps starting trees.
+						   Rep 0    = NJ tree from all source trees (best single starting point).
+						   Reps 1+  = NJ tree from a bootstrap resample of source trees — each
+						              resample produces a different distance matrix and therefore
+						              a genuinely different NJ topology, giving independent basin
+						              sampling without relying on SPR perturbation.
+						   Fallback = if a resample cannot cover all taxa after BOOT_NJ_MAX_ATTEMPTS
+						              tries, fall back to NJ + random SPR moves for that rep. */
+						ensure_stored_source_trees();
 						char **start_trees = malloc(nreps * sizeof(char *));
 						char *nj_tree_save = malloc(TREE_LENGTH * sizeof(char));
 						strcpy(nj_tree_save, temptree);   /* save pristine NJ tree */
@@ -9283,14 +4037,15 @@ void heuristic_search(int user, int print, int sample, int nreps)
 								}
 							else
 								{
-								strcpy(temptree, nj_tree_save);   /* restart from NJ each time */
-								if(k <= nreps / 2)
-									random_num = 10 + (int)fmod(rand(), 11);   /* 10-20 moves (near) */
-								else
-									random_num = 30 + (int)fmod(rand(), 21);   /* 30-50 moves (far) */
-								for(j=0; j<random_num; j++)
-									string_SPR(temptree);
-								strcpy(start_trees[k], temptree);
+								if(!build_bootstrap_nj(start_trees[k], missing_method))
+									{
+									/* Fallback: SPR perturbation of original NJ */
+									strcpy(temptree, nj_tree_save);
+									random_num = 10 + (int)fmod(rand(), 21);   /* 10-30 moves */
+									for(j=0; j<random_num; j++)
+										string_SPR(temptree);
+									strcpy(start_trees[k], temptree);
+									}
 								}
 							}
 						free(nj_tree_save);
@@ -9308,6 +4063,7 @@ void heuristic_search(int user, int print, int sample, int nreps)
 						if(criterion == 6 || criterion == 7) rf_precompute_fund_biparts();
 						par_progress_best    = -1.0f;
 						par_last_print_score = -1.0f;
+						par_last_progress_time = 0;
 						par_search_start     = time(NULL);
                     /* Snapshot master's input-data pointers for worker threads */
                     g_hs_fundamentals_snap = fundamentals;
@@ -9326,9 +4082,43 @@ void heuristic_search(int user, int print, int sample, int nreps)
 							for(prl_i=0; prl_i<nreps; prl_i++)
 								{
 								if(user_break) continue;
+								hs_par_rep = prl_i + 1;
 								strcpy(thr_tree, start_trees[prl_i]);
 								returntree(thr_tree);
 								thr_swaps += do_search(thr_tree, TRUE, FALSE, numswaps, outfile, numspectries, numgenetries);
+
+								/* --- per-rep completion report (all threads) --- */
+								#pragma omp critical (par_progress_print)
+									{
+									int new_best = 0;
+									if(sprscore >= 0.0f && (par_progress_best < 0.0f || sprscore < par_progress_best))
+										{
+										par_progress_best = sprscore;
+										new_best = 1;
+										}
+									double hs_el = difftime(time(NULL), par_search_start);
+									int    hs_em = (int)(hs_el / 60), hs_es = (int)hs_el % 60;
+									const char *stop_reason;
+									if(user_break)                                           stop_reason = "interrupted";
+									else if(rep_abandon)                                     stop_reason = "suboptimal";
+									else if(hs_maxskips > 0 && skip_streak >= hs_maxskips)  stop_reason = "maxskips";
+									else if(tried_regrafts >= numswaps)                      stop_reason = "maxswaps";
+									else                                                     stop_reason = "converged";
+									if(hsprint)
+										{
+										if(sprscore >= 0.0f)
+											printf2("  [%2d:%02d]  rep %d/%d  %s= %s%.6f  (%d spr/tbr + %d nni swaps, %s)\n",
+												hs_em, hs_es, prl_i+1, nreps,
+												ml_score_label(), new_best ? "* " : "  ",
+												ml_display_score(sprscore),
+												tried_regrafts, nni_swaps, stop_reason);
+										else
+											printf2("  [%2d:%02d]  rep %d/%d  (no new topologies)  (%d spr/tbr + %d nni swaps, %s)\n",
+												hs_em, hs_es, prl_i+1, nreps,
+												tried_regrafts, nni_swaps, stop_reason);
+										fflush(stdout);
+										}
+									}
 								}
 
 							#pragma omp critical (hs_merge)
@@ -9355,6 +4145,9 @@ void heuristic_search(int user, int print, int sample, int nreps)
 						swaps = (int)par_visited_set->count + (par_visited_set->zero_present ? 1 : 0);
 						vs_free(par_visited_set);
 
+						if(user_break && print)
+							printf2("All threads stopped — writing best tree to output file.\n");
+
 						/* Re-allocate super_scores for post-loop use (freed by hs_free_thread_state). */
 						super_scores = malloc(number_of_taxa * sizeof(int *));
 						for(k=0; k<number_of_taxa; k++)
@@ -9367,28 +4160,63 @@ void heuristic_search(int user, int print, int sample, int nreps)
 #endif
 						{
 						/* ---- Sequential nreps loop ---- */
-						/* Diverse perturbation: rep 0 = NJ, reps 1..nreps/2 = NJ+10-20 SPR,
-						   reps nreps/2+1.. = NJ+30-50 SPR.  Each rep starts fresh from NJ. */
+						/* Rep 0 = NJ from all source trees; reps 1+ = bootstrap-resampled NJ.
+						   Fallback to SPR perturbation if resample cannot cover all taxa. */
 						{
+						ensure_stored_source_trees();
 						char *nj_tree_save = malloc(TREE_LENGTH * sizeof(char));
 						strcpy(nj_tree_save, temptree);
 						if(criterion == 6 || criterion == 7) rf_precompute_fund_biparts();
+						par_progress_best = -1.0f;
+						par_last_progress_time = 0;
+						par_search_start  = time(NULL);
 						for(i=0; i<nreps; i++)
 							{
-							if(print) printf2("\nRepetition %d of %d:", i+1, nreps);
 							if(i != 0)
 								{
-								strcpy(temptree, nj_tree_save);   /* restart from NJ each time */
-								if(i <= nreps / 2)
-									random_num = 10 + (int)fmod(rand(), 11);   /* 10-20 moves (near) */
-								else
-									random_num = 30 + (int)fmod(rand(), 21);   /* 30-50 moves (far) */
-								for(j=0; j<random_num; j++)
-									string_SPR(temptree);
+								if(!build_bootstrap_nj(temptree, missing_method))
+									{
+									/* Fallback: SPR perturbation of original NJ */
+									strcpy(temptree, nj_tree_save);
+									random_num = 10 + (int)fmod(rand(), 21);   /* 10-30 moves */
+									for(j=0; j<random_num; j++)
+										string_SPR(temptree);
+									}
 								}
 							strcpy(tree, temptree);
 							returntree(tree);
 							swaps += do_search(tree, TRUE, print, numswaps, outfile, numspectries,numgenetries);
+							/* --- per-rep completion report --- */
+							{
+							int new_best = 0;
+							if(sprscore >= 0.0f && (par_progress_best < 0.0f || sprscore < par_progress_best))
+								{
+								par_progress_best = sprscore;
+								new_best = 1;
+								}
+							double hs_el = difftime(time(NULL), par_search_start);
+							int    hs_em = (int)(hs_el / 60), hs_es = (int)hs_el % 60;
+							const char *stop_reason;
+							if(user_break)                                           stop_reason = "interrupted";
+							else if(rep_abandon)                                     stop_reason = "suboptimal";
+							else if(hs_maxskips > 0 && skip_streak >= hs_maxskips)  stop_reason = "maxskips";
+							else if(tried_regrafts >= numswaps)                      stop_reason = "maxswaps";
+							else                                                     stop_reason = "converged";
+							if(hsprint)
+								{
+								if(sprscore >= 0.0f)
+									printf2("  [%2d:%02d]  rep %d/%d  %s= %s%.6f  (%d spr/tbr + %d nni swaps, %s)\n",
+										hs_em, hs_es, i+1, nreps,
+										ml_score_label(), new_best ? "* " : "  ",
+										ml_display_score(sprscore),
+										tried_regrafts, nni_swaps, stop_reason);
+								else
+									printf2("  [%2d:%02d]  rep %d/%d  (no new topologies)  (%d spr/tbr + %d nni swaps, %s)\n",
+										hs_em, hs_es, i+1, nreps,
+										tried_regrafts, nni_swaps, stop_reason);
+								fflush(stdout);
+								}
+							}
 							}
 						free(nj_tree_save);
 						}
@@ -9654,175 +4482,6 @@ void heuristic_search(int user, int print, int sample, int nreps)
     free(best_tree);
     }
 
-/* average_consensus: moved to consensus.c */
-#if 0
-int average_consensus(int nrep, int missing_method, char * useroutfile, FILE *paupfile)
-	{
-	int **taxa_comp = NULL, i, j, k, l, found = FALSE, here = FALSE, error = FALSE;
-	float used_weights = 0;
-	char *temptree = NULL;
-	
-	
-	temptree = malloc(TREE_LENGTH*sizeof(char));
-	if(!temptree) printf2("out of memory'n");
-	temptree[0] = '\0';
-	taxa_comp = malloc(number_of_taxa*sizeof(int*));
-	if(!taxa_comp) printf2("out of memory'n");
-	for(i=0; i<number_of_taxa; i++)
-		{
-		taxa_comp[i] = malloc(number_of_taxa*sizeof(int));
-		if(!taxa_comp[i]) printf2("out of memory'n");
-		for(j=0; j<number_of_taxa; j++)
-			taxa_comp[i][j] = FALSE;
-		}
-	for(i=0; i<Total_fund_trees; i++)
-		{
-		if(sourcetreetag[i])weighted_pathmetric(fundamentals[i], weighted_scores, i);
-		}
-	fflush(stdout);
-	for(i=0; i<number_of_taxa; i++)
-		{
-		for(j=0; j<number_of_taxa; j++)
-			{
-			if(i != j)
-				{
-				used_weights = 0;
-				for(k=0; k<Total_fund_trees; k++)
-					{
-					if(presence_of_taxa[k][i] > 0 && presence_of_taxa[k][j] > 0)
-						used_weights = used_weights+tree_weights[k];
-					}
-				weighted_scores[i][j] = weighted_scores[i][j]/used_weights;
-				}
-			}
-		}
-	/** NEED something here to check that all the cells are filled out, and if not to calculate the ultrametric or the 4-point condition for the missing cell */
-	for(k=0; k<Total_fund_trees; k++)
-		{
-		if(sourcetreetag[k])
-			{
-			for(i=0; i<number_of_taxa; i++)
-				{
-				for(j=0; j<number_of_taxa; j++) 
-					{
-					if(presence_of_taxa[k][i] > 0 && presence_of_taxa[k][j] > 0) taxa_comp[i][j] = TRUE; /* this records which taxa are never present together in the same tree */
-					}
-				}
-			}
-		}
-	here = FALSE;
-	for(i=0; i<number_of_taxa; i++)
-		{
-		for(j=0; j<number_of_taxa; j++)
-			{
-			if(!taxa_comp[i][j]) here = TRUE;
-			}
-		}
-	found = TRUE;
-	while(here && found)
-		{
-	
-		for(i=0; i<number_of_taxa; i++)
-			{
-			for(j=0; j<number_of_taxa; j++)
-				{
-				if(!taxa_comp[i][j])
-					{
-					/** Calculate an approximation for the missing cell **/
-					if(missing_method == 0) /*** Do the ultrametric calculation ***/
-						{
-						/** First find a cell shard by i and j that has a distace for to both **/
-						found = FALSE;
-						for(k=0; k<number_of_taxa; k++)
-							{
-							if(k != i && k != j && taxa_comp[i][k] && taxa_comp[j][k] && !found)
-								{
-								found = TRUE;
-								if(weighted_scores[i][k] > weighted_scores[j][k])
-									weighted_scores[i][j] = weighted_scores[j][i] = weighted_scores[i][k];
-								else
-									weighted_scores[i][j] = weighted_scores[j][i] = weighted_scores[j][k];
-								taxa_comp[i][j] = taxa_comp[j][i] = TRUE;
-								i = j = number_of_taxa;
-								k = l = number_of_taxa;
-								}
-							}
-						}
-					if(missing_method == 1) /*** Do the 4 point condition calculation ***/
-						{
-						
-						/** this method requires that i find two cells that have values for both i and j and for each other **/
-						found = FALSE;
-						for(k=0; k<number_of_taxa; k++)
-							{
-							for(l=0; l<number_of_taxa; l++)
-								{
-								if(k != i && k != j && l != i && l != j && l != k && taxa_comp[i][k] && taxa_comp[i][l] && taxa_comp[j][k] && taxa_comp[j][l] && taxa_comp[k][l] && !found)
-									{
-									found = TRUE;
-									if((weighted_scores[i][l] + weighted_scores[j][k]) > (weighted_scores[i][k] + weighted_scores[j][l]))
-										weighted_scores[i][j] = weighted_scores[j][i] = (weighted_scores[i][l] + weighted_scores[j][k]) - weighted_scores[k][l];
-									else
-										weighted_scores[i][j] = weighted_scores[j][i] = (weighted_scores[i][k] + weighted_scores[j][l]) - weighted_scores[k][l];
-									
-									taxa_comp[i][j] = taxa_comp[j][i] = TRUE;
-									i = j = number_of_taxa;
-									k = l = number_of_taxa;
-									}
-								}
-							}
-						}
-					}
-				}
-			}
-			
-		here = FALSE;
-		for(i=0; i<number_of_taxa; i++)
-			{
-			for(j=0; j<number_of_taxa; j++)
-				{
-				if(!taxa_comp[i][j]) here = TRUE;
-				}
-			}
-		
-		}
-	
-	if(!found)
-		{
-		printf2("\n\nERROR: the overlap in the data is too sparse to calculate missing cells using ");
-		if(missing_method == 0) printf2("an ultrametric estimate\n");
-		if(missing_method == 1) printf2("a 4 point condition estimate\n");
-		error = TRUE;
-		}
-	else
-		{
-		if(paupfile != NULL)
-			{
-			if(nrep == 0 || nrep == 1) fprintf(paupfile,"#nexus\n");
-			fprintf(paupfile, "\n\nbegin distances;\ndimensions ntax = %d;\nformat nodiagonal;\nmatrix\n", number_of_taxa);
-			for(i=0; i<number_of_taxa; i++)
-				{
-				fprintf(paupfile, "\n\'%-20.20s\' ", taxa_names[i]);
-				for(j=0; j<i; j++)
-					{
-					fprintf(paupfile, "%f ", weighted_scores[i][j]);
-					}
-				}
-			fprintf(paupfile, "\n;\nend;\n");
-			fprintf(paupfile, "begin paup;\nset increase=auto notifybeep=no errorbeep=no;\nset criterion = dist;\ndset objective = lsfit;\nhs;\nshowtrees;\n\nsavetrees file = %s brlens=yes format = nexus", useroutfile);
-			if(nrep==0) fprintf(paupfile," Append=no replace=yes;\n\tquit;\n\nend;\n");  /* if there is one 1 rep */
-			if(nrep==1) fprintf(paupfile," Append=no replace=yes;\n\nend;\n");     	/* if this is the forst of a few reps */
-			if(nrep==2) fprintf(paupfile," Append=yes;\n\nend;\n");			/* if this is a middle rep */
-			if(nrep==3) fprintf(paupfile," Append=yes;\n\tquit;\n\nend;\n");		/* if this is the last of a few reps */
-			}
-		
-		}
-	for(i=0; i<number_of_taxa; i++) free(taxa_comp[i]);
-	free(taxa_comp);
-	free(temptree);
-	return(error);
-	}
-#endif
 
 
 
@@ -9830,6 +4489,7 @@ int do_search(char *tree, int user, int print, int maxswaps, FILE *outfile, int 
     {
     int swaps = 0, i=0, better_score = TRUE;
 	char *temporary_tree = malloc(TREE_LENGTH * sizeof(char));
+	char *rep_spr_result = NULL;  /* best topology Newick for this rep after SPR/TBR converges */
 
 	temporary_tree[0] = '\0';
     while(unroottree(tree));  /* fully unroot — one call may not suffice for bifurcating root */
@@ -9850,6 +4510,7 @@ int do_search(char *tree, int user, int print, int maxswaps, FILE *outfile, int 
         hs_do_print       = print;
         last_status_score = -1.0f;
         skip_streak       = 0;
+        rep_abandon       = 0;
 /*		print_tree(tree_top, temporary_tree);
 		printf2("built tree = %s\n", temporary_tree);
   */      if(method == 1)
@@ -9877,17 +4538,95 @@ int do_search(char *tree, int user, int print, int maxswaps, FILE *outfile, int 
  */
  
 
+			/* Allocate a buffer to capture the best topology Newick for this rep.
+			 * spr_new() leaves tree_top in a partially-pruned state after its final
+			 * (non-improving) pass — the last branch pruned in its inner loop is never
+			 * restored.  We save the valid topology after each pass that finds an
+			 * improvement so we can rebuild tree_top cleanly before the NNI pass. */
+			rep_spr_result = malloc(TREE_LENGTH * sizeof(char));
+			rep_spr_result[0] = '\0';
+			print_named_tree(tree_top, rep_spr_result);
+			strcat(rep_spr_result, ";");
+			while(unroottree(rep_spr_result));
+
 			do/* for a single rep */
 				{
+				/* Ensure this thread sees the latest user_break value (ARM64 / Apple
+				 * Silicon requires an explicit OMP flush for cross-core visibility;
+				 * volatile alone only prevents compiler register-caching). */
+#ifdef _OPENMP
+				#pragma omp flush(user_break)
+#endif
+				if(user_break) break;   /* bail out before the expensive spr_new() call */
 				branchpointer = NULL;
-				better_score = spr_new(tree_top, maxswaps, numspectries, numgenetries);
-				}while(better_score == TRUE && tried_regrafts < maxswaps && !user_break
+				if(method == 3)
+					better_score = tbr_new2(tree_top, maxswaps, numspectries, numgenetries);
+				else
+					better_score = spr_new3(tree_top, maxswaps, numspectries, numgenetries);
+				if(better_score)
+					{
+					/* tree_top is valid here — save before next pass may corrupt it */
+					rep_spr_result[0] = '\0';
+					print_named_tree(tree_top, rep_spr_result);
+					strcat(rep_spr_result, ";");
+					while(unroottree(rep_spr_result));
+					}
+                /* droprep: only when this SPR pass found no improvement — the rep has
+                 * converged to its local optimum and we can meaningfully compare it to
+                 * the global best.  Checking mid-climb would drop brand-new reps whose
+                 * starting tree is legitimately far from any optimum. */
+#ifdef _OPENMP
+                if(!better_score && hs_droprep > 0.0f && omp_get_num_threads() > 1 &&
+                   sprscore != -1.0f)
+                    {
+                    float _pbest;
+                    #pragma omp atomic read
+                    _pbest = par_progress_best;
+                    if(_pbest != -1.0f)
+                        {
+                        float _denom = _pbest > 0.0f ?  _pbest
+                                     : _pbest < 0.0f ? -_pbest : 1.0f;
+                        if((sprscore - _pbest) / _denom > hs_droprep)
+                            rep_abandon = 1;
+                        }
+                    }
+#endif
+				}while(better_score == TRUE && tried_regrafts < maxswaps && !user_break && !rep_abandon
 			       && (hs_maxskips == 0 || skip_streak < hs_maxskips));
-				
-            swaps = tried_regrafts;
-		   
 
-            
+            swaps = tried_regrafts;
+
+            /* Post-SPR/TBR NNI refinement pass: polish the local optimum found
+             * by SPR/TBR with fast NNI swaps until no further improvement.
+             * NNI is O(N) per round and can tighten hill-climbing after the
+             * coarser SPR/TBR search, improving inter-rep convergence. */
+            nni_swaps = 0;
+            if(!user_break && !rep_abandon)
+                {
+                /* Rebuild tree_top from the last known-good SPR/TBR topology.
+                 * spr_new() leaves tree_top in a partially-pruned state after its
+                 * final non-improving pass.  Rebuild from the saved Newick so NNI
+                 * operates on the full tree.  Also fixes parent pointers broken
+                 * by regraft() (which sets position->parent = NULL). */
+                if(tree_top != NULL) { dismantle_tree(tree_top); tree_top = NULL; }
+                temp_top = NULL;
+                tree_build(1, rep_spr_result, tree_top, TRUE, -1, 0);
+                tree_top = temp_top;
+                temp_top = NULL;
+                fix_parent_pointers(tree_top, NULL);
+                branchpointer = NULL;
+                /* branchswap() (NNI) uses its own internal counter; capture it directly */
+                nni_swaps = branchswap(maxswaps, -1, numspectries, numgenetries);
+                swaps += nni_swaps;
+                /* If NNI improved the score, update sprscore so the per-rep
+                 * completion report reflects the final post-NNI score. */
+                if(scores_retained_supers[0] >= 0.0f &&
+                   (sprscore < 0.0f || scores_retained_supers[0] < sprscore))
+                    sprscore = scores_retained_supers[0];
+                }
+			free(rep_spr_result);
+			rep_spr_result = NULL;
+			
             }
     /* Accumulate this rep's unique topologies into the thread-level accumulator,
      * then free the per-replicate set. */
@@ -9945,6 +4684,32 @@ int branchswap(int number_of_swaps, float score, int numspectries, int numgenetr
             last_number = number;
             i+= find_swaps(&number, tree_top, number_of_swaps, numspectries, numgenetries);
             last = i;
+#ifdef _OPENMP
+            if(hs_thread_report_interval > 0 && omp_get_num_threads() > 1)
+                {
+                time_t _tr_now = time(NULL);
+                if(difftime(_tr_now, thread_report_last) >= hs_thread_report_interval)
+                    {
+                    thread_report_last = _tr_now;
+                    double tr_el = difftime(_tr_now, par_search_start);
+                    int    tr_em = (int)(tr_el / 60), tr_es = (int)tr_el % 60;
+                    float  disp  = (number >= 0.0f) ? number : sprscore;
+                    float _pbest4;
+                    #pragma omp atomic read
+                    _pbest4 = par_progress_best;
+                    if(disp < 0.0f)
+                        printf2("  [%2d:%02d]  thread %2d  rep %d  score=(searching)  nni_tried=%d  [nni]\n",
+                                tr_em, tr_es, omp_get_thread_num(), hs_par_rep, i);
+                    else
+                        printf2("  [%2d:%02d]  thread %2d  rep %d  %s=  %s%.6f  nni_tried=%d  [nni]\n",
+                                tr_em, tr_es, omp_get_thread_num(), hs_par_rep,
+                                ml_score_label(),
+                                ml_display_score(disp) < ml_display_score(_pbest4) ? "* " : "  ",
+                                ml_display_score(disp), i);
+                    fflush(stdout);
+                    }
+                }
+#endif
             if(last_number == number && branchpointer != NULL)
                     {
                     branchpointer = NULL; 
@@ -10035,17 +4800,36 @@ int find_swaps(float * number, struct taxon * position, int number_of_swaps, int
 	}
 		 		
 		 		
+/* Repair parent pointers after SPR/TBR.  spr_new's regraft() sets
+   position->parent = NULL for the grafted node (the scoring path
+   converts to Newick and doesn't need parent pointers).  Before NNI
+   runs directly on tree_top we must fix those so is_ancestor_of()
+   works correctly.  Call as fix_parent_pointers(tree_top, NULL). */
+static void fix_parent_pointers(struct taxon *pos, struct taxon *parent)
+    {
+    if(!pos) return;
+    while(pos != NULL)
+        {
+        pos->parent = parent;
+        if(pos->daughter)
+            fix_parent_pointers(pos->daughter, pos);
+        pos = pos->next_sibling;
+        }
+    }
+
 /* Helper: returns TRUE if ancestor is in the parent-chain of node.
    Used to prevent do_swap from placing a node inside its own subtree,
    which would create a cycle in the tree structure. */
 static int is_ancestor_of(struct taxon *ancestor, struct taxon *node)
 	{
 	struct taxon *pos = node ? node->parent : NULL;
-	while(pos != NULL)
+	int _depth = 0, _max = number_of_taxa * 4 + 16;
+	while(pos != NULL && _depth++ < _max)
 		{
 		if(pos == ancestor) return TRUE;
 		pos = pos->parent;
 		}
+	/* If _depth hit _max the parent chain is cyclic — return FALSE (safe: skip the swap/graft) */
 	return FALSE;
 	}
 
@@ -10059,7 +4843,7 @@ void do_swap(struct taxon * first, struct taxon * second)
         interval2 = time(NULL);
         if(difftime(interval2, interval1) > 5) /* every 5 seconds print a dot to the screen */
             {
-            printf2("=");
+           /* printf2("="); */
             fflush(stdout);
             interval1 = time(NULL);
             }
@@ -10152,7 +4936,9 @@ int swapper(struct taxon * position,struct taxon * prev_pos, int stepstaken, str
         if(!best_tree) memory_error(52);
         best_tree[0] = '\0';
 	
-	while(position->prev_sibling != NULL) position = position->prev_sibling;  /* rewind to start of this level */
+	{ int _g = 0, _gmax = number_of_taxa * 4 + 16;
+	  while(position->prev_sibling != NULL && _g++ < _gmax) position = position->prev_sibling; /* rewind to start of this level */
+	  if(_g >= _gmax) rep_abandon = 1; }
 	second_swap = position;
 
 	/* travel up one if it exists */
@@ -10176,17 +4962,19 @@ int swapper(struct taxon * position,struct taxon * prev_pos, int stepstaken, str
 		start1 = first_swap;
 			
 		if(second_swap == NULL) printf2("second_swap is null!\n");
-		while(second_swap->prev_sibling != NULL) second_swap = second_swap->prev_sibling;  /* rewinding */
+		{ int _g = 0, _gmax = number_of_taxa * 4 + 16;
+		  while(second_swap->prev_sibling != NULL && _g++ < _gmax) second_swap = second_swap->prev_sibling; /* rewinding */
+		  if(_g >= _gmax) rep_abandon = 1; }
 		
 		start2 = second_swap; /* start2 now points to the start levle to be swapped against */
 	
                 /* now first_swap is at the first sibling at this level, and second_swap is at the first sibling at the other level */
                 /* The next step is to swap every sibling at this level with every sibling at the level above */
-		while(first_swap != NULL && *swaps < number_of_swaps && !better_score && !user_break)
+		while(first_swap != NULL && *swaps < number_of_swaps && !better_score && !user_break && !rep_abandon)
 			{
-			while(second_swap != NULL && *swaps < number_of_swaps && !better_score && !user_break)
+			while(second_swap != NULL && *swaps < number_of_swaps && !better_score && !user_break && !rep_abandon)
 				{
-				if(second_swap->daughter != prev_pos && !is_ancestor_of(second_swap, first_swap))   /* Do not swap if second_swap is an ancestor of first_swap (would create a cycle) */
+				if(second_swap->daughter != prev_pos && !is_ancestor_of(second_swap, first_swap) && !is_ancestor_of(first_swap, second_swap))   /* Do not swap if either node is an ancestor of the other (would create a cycle) */
 					{
 					do_swap(first_swap, second_swap);
 
@@ -10226,6 +5014,16 @@ int swapper(struct taxon * position,struct taxon * prev_pos, int stepstaken, str
 												distance = get_recon_score(temptree, numspectries, numgenetries);
 												}
 
+											if(criterion==6)
+												{
+												distance = compare_trees_rf(FALSE);
+												}
+
+											if(criterion==7)
+												{
+												distance = compare_trees_ml(FALSE);
+												}
+
 
                                             if(scores_retained_supers[0] == -1 || *number == -1)
                                                 {
@@ -10258,6 +5056,42 @@ int swapper(struct taxon * position,struct taxon * prev_pos, int stepstaken, str
                                                         retained_supers[0] = realloc(retained_supers[0], (strlen(best_tree)+10)*sizeof(char));
 														strcpy(retained_supers[0], best_tree);
                                                         scores_retained_supers[0] = distance;
+#ifdef _OPENMP
+                                                        /* NNI parallel progress: only when THIS rep set the new
+                                                         * global best — the rep number then matches the rep that
+                                                         * actually achieved the displayed score. */
+                                                        if(omp_get_num_threads() > 1)
+                                                            {
+                                                            time_t _now = time(NULL);
+                                                            int new_global_best = 0;
+                                                            #pragma omp critical (par_progress)
+                                                                {
+                                                                if(par_progress_best < 0.0f || distance < par_progress_best)
+                                                                    {
+                                                                    par_progress_best = distance;
+                                                                    new_global_best = 1;
+                                                                    }
+                                                                }
+                                                            if(new_global_best &&
+                                                               (hs_progress_interval == 0 ||
+                                                                difftime(_now, par_last_progress_time) >= hs_progress_interval))
+                                                                {
+                                                                double hs_el = difftime(_now, par_search_start);
+                                                                int    hs_em = (int)(hs_el / 60), hs_es = (int)hs_el % 60;
+                                                                int    hs_imp = (par_last_print_score < 0.0f ||
+                                                                                 par_progress_best < par_last_print_score);
+                                                                if(hsprint)
+                                                                    {
+                                                                    printf2("  [%2d:%02d]  best so far = %s%.6f\tnni\trep %d\n",
+                                                                            hs_em, hs_es,
+                                                                            hs_imp ? "* " : "  ", ml_display_score(par_progress_best), hs_par_rep);
+                                                                    par_last_print_score = par_progress_best;
+                                                                    par_last_progress_time = _now;
+                                                                    fflush(stdout);
+                                                                    }
+                                                                }
+                                                            }
+#endif
                                                         j=1;
                                                         while(scores_retained_supers[j] != -1 && j < number_retained_supers)
                                                             {
@@ -10265,7 +5099,7 @@ int swapper(struct taxon * position,struct taxon * prev_pos, int stepstaken, str
                                                             scores_retained_supers[j] = -1;
                                                             j++;
                                                             }
-                                                        
+
                                                         branchpointer = second_swap;
                                                         }
                                                     }
@@ -11116,991 +5950,434 @@ int check_if_diff_tree(char *tree)
 
 
 /* Next is the code needed for the Baum/ragan coding scheme */
-/* coding: moved to consensus.c */
-#if 0
-int coding(int nrep, int search, int ptpreps)
-    {
-    int i=0, j=0, k=0, nreps=10,  parenthesis = 0, count =0, *tracking = NULL, total = 0, **BR_coding = NULL, nodecount = 0, position = 0, split_count = 0, calculate_inhouse = FALSE;
-    char number[100];
-    char *string = malloc(TREE_LENGTH * sizeof(char));
-    char filename[1000], **temptrees = NULL;
-    int x=0, one_in_this = FALSE, zero_in_this = FALSE, swap=3, addseq=4, error=FALSE, *num_fund_taxa = NULL, njbuild = FALSE, weighted = FALSE;
-
-    if(!string) { printf2("Error: out of memory in coding\n"); return FALSE; }
-    filename[0] = '\0';
-    for(i=0; i<num_commands; i++)
-        {       
-        if(strcmp(parsed_command[i], "nreps") == 0 && (strcmp(parsed_command[0], "boot") != 0 && strcmp(parsed_command[0], "bootstrap") != 0))
-            {
-            nreps = toint(parsed_command[i+1]);
-            
-            if(nreps == 0)
-                {
-                printf2("Error: '%s' is an invalid integer number to be assigned to nreps\n", parsed_command[i+1]);
-                error = TRUE;
-                }
-            }
-
-        if(strcmp(parsed_command[i], "hsreps") == 0 )
-            {
-            nreps = toint(parsed_command[i+1]);
-            
-            if(nreps == 0)
-                {
-                printf2("Error: '%s' is an invalid integer number to be assigned to nreps\n", parsed_command[i+1]);
-                error = TRUE;
-                }
-            }
- 
-        if(strcmp(parsed_command[i], "analysis") == 0 )
-            {
-            if(strcmp(parsed_command[i+1], "parsimony") == 0)
-                njbuild = FALSE;
-            else
-                {
-                if(strcmp(parsed_command[i+1], "nj") == 0)
-                    njbuild = TRUE;
-                else
-                    {
-                    printf2("Error: option %s not valid analysis\n", parsed_command[i+1]);
-                    error = TRUE;
-                    }
-                }
-            }
-            
-
-
-        if(strcmp(parsed_command[i], "addseq") == 0)
-            {
-            if(strcmp(parsed_command[i+1], "simple") == 0)
-                addseq = 1;
-            if(strcmp(parsed_command[i+1], "closest") == 0)
-                addseq = 2;
-            if(strcmp(parsed_command[i+1], "asis") == 0)
-                addseq = 3;
-            if(strcmp(parsed_command[i+1], "random") == 0)
-                addseq = 4;
-            if(strcmp(parsed_command[i+1], "furthest") == 0)
-                addseq = 5;
-            if(strcmp(parsed_command[i+1], "simple") != 0 && strcmp(parsed_command[i+1], "closest") != 0 && strcmp(parsed_command[i+1], "asis") != 0 && strcmp(parsed_command[i+1], "random") != 0 && strcmp(parsed_command[i+1], "furthest") != 0)
-                {
-                printf2("Error addseq option %s not known\n", parsed_command[i+1]);
-                error=TRUE;
-                }
-            }
-        if(strcmp(parsed_command[i], "swap") == 0)
-            {
-            if(strcmp(parsed_command[i+1], "nni") == 0)
-                swap = 1;
-            if(strcmp(parsed_command[i+1], "spr") == 0)
-                swap = 2;
-            if(strcmp(parsed_command[i+1], "tbr") == 0)
-                swap = 3;
-            if(strcmp(parsed_command[i+1], "nni") != 0 && strcmp(parsed_command[i+1], "spr") != 0 && strcmp(parsed_command[i+1], "tbr") != 0)
-                {
-                printf2("Error swap option %s not known\n", parsed_command[i+1]);
-                error=TRUE;
-                }
-            }
-		
-		if(strcmp(parsed_command[i], "weighted") == 0)
-            {
-            if(strcmp(parsed_command[i+1], "yes") == 0)
-                weighted = TRUE;
-            if(strcmp(parsed_command[i+1], "no") == 0)
-                weighted = FALSE;
-			}
-		
-		
-        if(strcmp(parsed_command[i], "savetrees") == 0)
-            {
-            strcpy(filename, parsed_command[i+1]);
-            }
-
-		if(strcmp(parsed_command[i], "usepaup") == 0)
-            {
-			if(strcmp(parsed_command[i+1], "yes") == 0)
-                calculate_inhouse = FALSE;
-            if(strcmp(parsed_command[i+1], "no") == 0)
-                calculate_inhouse = TRUE;
-            }
-
-    
-        }
 
 
 
-
-    if(!error)
-        {
-		temptrees = malloc(remainingtrees*sizeof(char *));
-		for(i=0; i<remainingtrees; i++)
-			{
-			temptrees[i] = malloc(TREE_LENGTH*sizeof(char));
-			temptrees[i][0] = '\0';
-			}
-		j=0;
-		for(i=0; i<Total_fund_trees; i++)
-			{
-			if(sourcetreetag[i])
-				{
-				strcpy(temptrees[j], fundamentals[i]);
-				j++;
-				}
-			}
-				
-		position = MRP_matrix(temptrees, remainingtrees, FALSE);
-
-        num_partitions = (float)position;
-
-
-        if(criterion==1)   /* if we are to use this coding scheme to do an MRP analysis in paup **/
-            {
-			if(calculate_inhouse)
-				{
-				fprintf(BR_file, " %d %d\n", number_of_taxa, position);
-				for(i=0; i<number_of_taxa; i++)
-					{
-					fprintf(BR_file, "%-10d", i);
-							
-					for(j=0; j<position; j++)
-						{
-						if(total_coding[j][i] != 3)
-							fprintf(BR_file, "%d ",total_coding[j][i]);
-						else
-							fprintf(BR_file, "? ");
-						}
-					fprintf(BR_file, "\n");
-					}
-				
-				
-				}
-			else
-				{
-				if(nrep ==0 || nrep==1)fprintf(BR_file, "#NEXUS\n");     
-				if(nrep ==0 || nrep==1)fprintf(BR_file, "[Baum-Ragan coding ]\n");
-				fprintf(BR_file, "\n\nbegin data;\n");
-				fprintf(BR_file, "\tdimensions ntax=%d nchar=%d;\n", number_of_taxa, position);
-				fprintf(BR_file, "\tformat interleave missing=?;\n");
-				fprintf(BR_file, "\tmatrix\n");
-				
-				for(i=0; i<number_of_taxa; i++)
-					{
-					fprintf(BR_file, "\'%-20.20s\' ", taxa_names[i]);
-							
-					for(j=0; j<position; j++)
-						{
-						if(total_coding[j][i] != 3)
-							fprintf(BR_file, "%d ",total_coding[j][i]);
-						else
-							fprintf(BR_file, "? ");
-						}
-					fprintf(BR_file, "\n");
-					}
-				fprintf(BR_file, "\t;\nend;\n\nbegin paup;\n");
-				
-				if(weighted)
-					{
-					/*** Weight each of the characters depending on the size ofthe tree they come from ***/
-					fprintf(BR_file, "\tweights ");
-					j=0;
-					for(i=0; i<Total_fund_trees; i++)
-						{
-						if(sourcetreetag[i])
-							{
-							k=0; nodecount = 0;
-							while(fundamentals[i][k] != ';')
-								{
-								if(fundamentals[i][k] == '(') nodecount++;
-								k++;
-								}
-							nodecount--;
-							if(nodecount > 0)
-								{
-								if(i == Total_fund_trees-1)
-									fprintf(BR_file, "%f:%d-%d", (float)(tree_weights[i]*1.0/(float)nodecount), j+1, j+nodecount);
-								else
-									fprintf(BR_file, "%f:%d-%d, ", (float)(tree_weights[i]*1.0/(float)nodecount), j+1, j+nodecount);
-								j += nodecount;
-								}
-							}
-						}
-					fprintf(BR_file, ";\n");
-					}
-				
-				if(search==2) /* if instead we want to do a ptp test on our data */
-					{
-					fprintf(BR_file,"\tset increase=auto notifybeep=no errorbeep=no;\n\tconstraints one=(%s,%s,(%s,%s));\n\tpermute NReps=%d;\n\tquit;\n\tend;\n", taxa_names[0], taxa_names[1], taxa_names[2], taxa_names[3], ptpreps);
-					}
-				else
-					{
-					if(search==1) 
-						{
-						fprintf(BR_file,"set increase=auto notifybeep=no errorbeep=no;\n");
-						if(!njbuild)
-							{
-							fprintf(BR_file,"\ths nreps=%d swap=", nreps );
-							if(swap==1) fprintf(BR_file,"nni "); if(swap==2) fprintf(BR_file, "spr "); if(swap==3) fprintf(BR_file, "tbr ");
-							fprintf(BR_file, "addseq=");
-							if(addseq==1) fprintf(BR_file, "simple"); if(addseq==2) fprintf(BR_file, "closest"); if(addseq==3) fprintf(BR_file, "asis"); if(addseq == 4) fprintf(BR_file, "random"); if(addseq==5) fprintf(BR_file, "furthest");
-							fprintf(BR_file, ";\n\tshowtrees;\n");
-							}
-						else
-							fprintf(BR_file, "nj;\n");
-						fprintf(BR_file, "\tsavetrees FILE=");
-						if(strcmp(filename, "") == 0) fprintf(BR_file,"MRP.tree Format=nexus treeWts=yes");    
-						else fprintf(BR_file,"%s Format=nexus treeWts=yes", filename);
-						}
-					if(search==0) 
-						{
-						fprintf(BR_file,"set increase=auto notifybeep=no errorbeep=no;\n\talltrees;\n\tshowtrees;\n\tsavetrees FILE=");
-						if(strcmp(filename, "") == 0) fprintf(BR_file,"MRP.tree Format=nexus treeWts=yes");    
-						else fprintf(BR_file,"%s Format=nexus treeWts=yes", filename);
-						}
-					if(nrep==0) fprintf(BR_file," Append=no replace=yes;\n\tquit;\n\nend;\n");  /* if there is one 1 rep */
-					if(nrep==1) fprintf(BR_file," Append=no replace=yes;\n\nend;\n");     	/* if this is the forst of a few reps */
-					if(nrep==2) fprintf(BR_file," Append=yes;\n\nend;\n");			/* if this is a middle rep */
-					if(nrep==3) fprintf(BR_file," Append=yes;\n\tquit;\n\nend;\n");		/* if this is the last of a few reps */
-					}
-				}
-			}
-        
-        if(num_fund_taxa != NULL) free(num_fund_taxa);
-        }
-	fflush(BR_file);
-	/*if(calculate_inhouse == FALSE) error = 3; */
-	free(string);
-    return(error);
-    }
-#endif
-
-/* MRP_matrix: moved to consensus.c */
-#if 0
-int MRP_matrix(char **trees, int num_trees, int consensus)
-	{
-	int i=0, j=0, k=0, count =0, x=0, *tracking = NULL, total = 0, **BR_coding = NULL, nodecount = 0, position = 0, split_count = 0;
-    char number[100];
-    char *string = malloc(TREE_LENGTH * sizeof(char));
-	int *num_fund_taxa = NULL, one_in_this = FALSE, zero_in_this = FALSE;
-
-	if(!string) { printf2("Error: out of memory in MRP_matrix\n"); return 0; }
-	num_fund_taxa = malloc(num_trees*sizeof(int));
-	if(!num_fund_taxa) memory_error(68);
-	for(i=0; i<num_trees; i++) num_fund_taxa[i] = 0;
-	
-	if(coding_from_tree != NULL) 
-		{
-		free(coding_from_tree);
-		coding_from_tree=NULL;
-	}
-
-	if(total_coding != NULL)
-		{
-		for(i=0; i<total_nodes; i++)
-			free(total_coding[i]);
-		free(total_coding);
-		total_coding = NULL;
-		}
-	/* Calculated the number of nodes in all the fundamental trees */
-	total_nodes= num_trees*(number_of_taxa - 2);
-	/* dynamically allocate the array to hold the resulting the total Baum-ragan coding scheme */
-	total_coding = malloc((total_nodes)*sizeof(int *));
-	if(!total_coding) memory_error(80);
-	for(i=0; i<total_nodes ; i++)
-		{
-		total_coding[i] = malloc((number_of_taxa)*sizeof(int));
-		if(!total_coding[i]) memory_error(81);
-		}
-	for(i=0;i<total_nodes; i++)
-			for(j=0; j<number_of_taxa; j++)
-				total_coding[i][j] =0;
-
-	/* Allcoate an aray that records which tree each partition comes from */
-	coding_from_tree= malloc(total_nodes*sizeof(int));
-	for(i=0; i<total_nodes ; i++) coding_from_tree=0;
-
-	/* for this we need a new array that holds the number of times that any partition is repeated in the array */
-	if(partition_number != NULL) free(partition_number);
-	partition_number = malloc(total_nodes*sizeof(float));
-	if(!partition_number) memory_error(67);
-	for(i=0; i<total_nodes; i++) partition_number[i] = 1;   /* the score of 1 gives each partition the same weight, it means that larger trees will have more say, in the quartet sense it will be very biased, so will have to be modified for this case. **/
-	/* for this we need a new array that records which source tree each partition comes from (so we don't include the same quartet from any tree more than once ) */
-	if(from_tree != NULL) free(from_tree);
-	from_tree = malloc(total_nodes*sizeof(int));
-	if(!from_tree) memory_error(69);
-	for(i=0; i<total_nodes; i++) from_tree[i] = 0;   
-	for(x=0; x<num_trees; x++)
-		{
-		unroottree(trees[x]);
-		string[0] = '\0';
-		strcpy(string, trees[x]);
-
-		nodecount = 0;
-		i=0;
-		while(string[i] != ';')
-			{
-			if(string[i] == '(') nodecount++;
-			i++;
-			}
-		
-		/* dynamically allocate the array to hold the resulting Baum-ragan coding scheme */
-		BR_coding = NULL;
-		BR_coding = malloc((nodecount)*sizeof(int *));
-		if(!BR_coding) memory_error(77);
-		for(i=0; i<nodecount; i++)
-			{
-			BR_coding[i] = malloc((number_of_taxa)*sizeof(int));
-			if(!BR_coding[i]) memory_error(78);
-			}
-		for(i=0;i<nodecount; i++)
-				for(j=0; j<number_of_taxa; j++)
-					BR_coding[i][j] =0;
-		/* Allocate the array that records the clade were are in during calculation */
-		tracking = malloc((2*nodecount)*sizeof(int));
-		if(!tracking) memory_error(79);
-		for(i=0; i<(2*nodecount); i++) tracking[i] = FALSE;
-		i=0;
-		count = 0;
-		/* we scan the nested parenthesis string once from left to right calculating the baum-ragan coding scheme */
-		while(string[i] != ';')
-			{
-			
-			switch(string[i])
-				{
-	
-				case '(' :
-					tracking[count] = TRUE;
-					count++;
-					i++;
-					break;
-	
-				case ')':
-					j = count;
-					while(tracking[j] == FALSE) j--;
-					if(tracking[j] == TRUE) tracking[j] = FALSE;
-					i++;
-					while(string[i] != '(' && string[i] != ')' && string[i] != ',' && string[i] != ';' &&  string[i] != ':')
-						i++;
-					break;
-	
-				case ',':
-					i++;
-					break;
-				
-				case ':':
-					while(string[i] != '(' && string[i] != ')' && string[i] != ',' && string[i] != ';')
-						i++;
-					break;
-	
-				default :
-					num_fund_taxa[x]++;
-					for(j=0; j<100; j++)
-						number[j] = '\0';
-					j=0;
-					while(string[i] != '(' && string[i] != ')' && string[i] != ',' && string[i] != ':')
-						{
-						number[j] = string[i];
-						i++;
-						j++;
-						}
-					total = 0;
-					if(consensus)
-						{
-						total = assign_taxa_name(number, FALSE);
-						}
-					else
-						{
-						j--; k=j;
-						while(j>=0)
-							{
-							total+=(((int)pow(10,k-j))*texttoint(number[j]));  /* Turn the character to an integer */
-							j--;
-							}
-						}
-					for(j=0; j<nodecount; j++)
-						{
-						if(tracking[j] == TRUE)
-							{
-							BR_coding[j][total] = 1;
-							}
-						}
-				}
-			}
-		if(!consensus)
-			{
-			/*** Put ? at those taxa that are not present **/
-			for(i=0; i<number_of_taxa; i++)
-				{
-				if(!presence_of_taxa[x][i])
-					{
-					for(j=0; j<nodecount; j++)
-						{
-						BR_coding[j][i] = 3;
-						}
-					}
-				}
-			}
-		split_count = 0;
-		for(i=0; i<nodecount; i++)
-			{
-			one_in_this = FALSE; zero_in_this = FALSE;
-			for(j=0; j<number_of_taxa; j++)
-				{
-				if(BR_coding[i][j] == 1) one_in_this = TRUE;
-				if(BR_coding[i][j] == 0) zero_in_this = TRUE;
-				}
-			if(one_in_this && zero_in_this) split_count++;
-			
-			}
-		/*** Copy the coding from this tree into the total coding  **/
-		for(i=0; i<nodecount; i++)
-			{
-			one_in_this = FALSE; zero_in_this = FALSE;
-			for(j=0; j<number_of_taxa; j++)
-				{
-				if(BR_coding[i][j] == 1) one_in_this = TRUE;
-				if(BR_coding[i][j] == 0) zero_in_this = TRUE;
-				}
-			
-			if(one_in_this && zero_in_this)
-				{
-				from_tree[position]=x;
-				for(j=0; j<number_of_taxa; j++)
-					{
-					total_coding[position][j] = BR_coding[i][j];
-					}
-				
-				if(consensus)
-					{
-					partition_number[position] = score_of_bootstraps[x];   /** if this is being used for a consensus then we want the partition to have a weight equal to the inverse of the number of trees recorded during that replicate */
-					}
-				else
-					{
-					
-					if(criterion == 3)
-						{
-						if(quartet_normalising == 1)
-							partition_number[position] = 1*tree_weights[x];   /* equal weighting */
-						if(quartet_normalising == 2)
-							partition_number[position] = (1/((float)num_fund_taxa[x]-3))*tree_weights[x];    /* this is to try to normalise the score that any partition contributes ...... in the quartet method it will help to normalise for large tree bias, It may be ignored for the split compatibility analysis **/
-						if(quartet_normalising == 3)
-							{
-							partition_number[position] = (1/((float)(num_fund_taxa[x]*(num_fund_taxa[x]-1)*(num_fund_taxa[x]-2)*(num_fund_taxa[x]-3))/(float)24))*tree_weights[x];
-							}
-						}
-					if(criterion == 2)
-						{
-						if(splits_weight == 1)
-							partition_number[position] = 1*tree_weights[x]; 	/* equal weighting */
-						if(splits_weight == 2)
-							partition_number[position] = (1/((float)split_count))*tree_weights[x];	/* weighted by number of splits in the source tree */
-						}
-					}
-				position++;
-				}
-			}
-		/** free up the memory space for BR_coding **/
-		for(i=0; i<nodecount; i++)
-			{
-			free(BR_coding[i]);
-			}
-		free(BR_coding);
-		BR_coding = NULL;
-		free(tracking);
-		tracking = NULL;
-
-		}
-	free(string);
-	return(position);
-	}
-#endif
-
-
-/* set_parameters: moved to main.c */
-#if 0
-void set_parameters(void)
-    {
-    int i=0, j=0, isdigit=TRUE, this=FALSE;
-    for(i=0; i<num_commands; i++)
-        {
-        if(strcmp(parsed_command[i], "criterion") == 0)
-            {
-            if(strcmp(parsed_command[i+1], "mrp") == 0 || strcmp(parsed_command[i+1], "MRP") == 0)
-                {
-                if(criterion != 1) printf2("Scoring criterion set to matrix representation using parsimony (MRP)\n");
-                criterion = 1;
-                }
-            else
-                {
-                if(strcmp(parsed_command[i+1], "dfit") == 0 || strcmp(parsed_command[i+1], "DFIT") == 0)
-                    {
-                    if(criterion != 0) printf2("Scoring criterion set to best distance fit (DFIT)\n");
-                    criterion = 0;
-                    }
-                else
-                    {
-                    if(strcmp(parsed_command[i+1], "sfit") == 0 || strcmp(parsed_command[i+1], "SFIT") == 0)
-                        {
-                        if(criterion != 2) printf2("Scoring criterion set to maximum split fit (SFIT)\n");
-                        criterion = 2;
-                        }
-                    else
-                        {
-                        if(strcmp(parsed_command[i+1], "qfit") == 0 || strcmp(parsed_command[i+1], "QFIT") == 0)
-                            {
-                            if(criterion != 3) printf2("Scoring criterion set to maximum quartet fit (QFIT)\n");
-                            criterion = 3;
-                            }
-                        else
-                            {
-                            if(strcmp(parsed_command[i+1], "avcon") == 0 || strcmp(parsed_command[i+1], "AVCON") == 0)
-                                {
-								if(criterion != 4) printf2("Scoring criterion set to average consensus (AVCON)\n");
-								criterion = 4;
-                                }
-                            else
-								{
-								if(strcmp(parsed_command[i+1], "recon") == 0 || strcmp(parsed_command[i+1], "RECON") == 0)
-									{
-									if(criterion != 5) printf2("Scoring criterion set to duplication and loss reconstruction (RECON)\n");
-									criterion = 5;
-									}
-								else if(strcmp(parsed_command[i+1], "rf") == 0 || strcmp(parsed_command[i+1], "RF") == 0)
-									{
-									if(criterion != 6) printf2("Scoring criterion set to Robinson-Foulds distance (RF)\n");
-									criterion = 6;
-									}
-								else if(strcmp(parsed_command[i+1], "ml") == 0 || strcmp(parsed_command[i+1], "ML") == 0
-									     || strcmp(parsed_command[i+1], "lust") == 0)
-									{
-									if(criterion != 7) printf2("Scoring criterion set to ML supertree likelihood (Steel & Rodrigo 2008)\n");
-									criterion = 7;
-									}
-								else
-									printf2("Error: %s not known as criterion tpye\n", parsed_command[i+1]);
-								}
-							}
-                        }
-                    }
-                }
-            }
-        if(strcmp(parsed_command[i], "seed") == 0)
-        	{
-        	isdigit=TRUE;
-        	for(j=0; j<strlen(parsed_command[i+1]); j++)
-        		{
-        		this=FALSE;
-        		if( parsed_command[i+1][j] == '0' || parsed_command[i+1][j] == '1' || parsed_command[i+1][j] == '2' || parsed_command[i+1][j] == '3' || parsed_command[i+1][j] == '4' || parsed_command[i+1][j] == '5' || parsed_command[i+1][j] == '6' || parsed_command[i+1][j] == '7' || parsed_command[i+1][j] == '8' || parsed_command[i+1][j] == '9' ) this=TRUE;
-        		if(this == FALSE) isdigit=FALSE;
-        		}
-      		if(isdigit==FALSE)
-  				{
-      			printf2("ERROR: the value you entered (%s) is not an integer\n", parsed_command[i+1] );
-  				}
-  			else
-  				{
-  				seed=atoi(parsed_command[i+1]);
-  				srand((unsigned) (seed));
-  				printf2("The seed value for the random number generator has been set to %d\n", seed);
-  				}
-        	}
-        if(strcmp(parsed_command[i], "mlbeta") == 0)
-            {
-            ml_beta = atof(parsed_command[i+1]);
-            if(ml_beta <= 0)
-                {
-                printf2("Error: mlbeta must be > 0\n");
-                ml_beta = 1.0f;
-                }
-            else
-                printf2("ML beta parameter set to %.4f\n", ml_beta);
-            }
-        if(strcmp(parsed_command[i], "mlscale") == 0)
-            {
-            if(strcmp(parsed_command[i+1], "lnl") == 0 || strcmp(parsed_command[i+1], "LNL") == 0)
-                { ml_scale = 2; printf2("ML scale set to lnl\n"); }
-            else if(strcmp(parsed_command[i+1], "lust") == 0 || strcmp(parsed_command[i+1], "LUST") == 0)
-                { ml_scale = 1; printf2("ML scale set to lust\n"); }
-            else if(strcmp(parsed_command[i+1], "paper") == 0 || strcmp(parsed_command[i+1], "PAPER") == 0)
-                { ml_scale = 0; printf2("ML scale set to paper\n"); }
-            else
-                printf2("Error: mlscale must be 'paper', 'lust', or 'lnl'\n");
-            }
-        }
-
-    }
-#endif
 
  
 
 /* this function calculates the score of a supertree to a set of source trees using the criterion of Matrix representation using Compatibility */
 /* This is analogous to a clique analysis */
-/* MRC: moved to scoring.c */
-#if 0
-float MRC(char *supertree)
-    {
-    int i=0, j=0, k=0, **super_matrix = NULL, count = 0, *tracking = NULL, parenthesis = 0, total=0, allsame1 = TRUE, allsame2 = TRUE;
-     char number[100];
-    float score = 0;
-
-
-    /* assign the array super_matrix */
-    super_matrix = malloc(number_of_taxa*sizeof(int *));
-    if(!super_matrix) memory_error(64);
-    for(i=0; i<number_of_taxa; i++)
-        {
-        super_matrix[i] = malloc((number_of_taxa)*sizeof(int));
-        if(!super_matrix[i]) memory_error(65);
-        for(j=0; j<number_of_taxa; j++)
-            super_matrix[i][j] = 0;
-        }
-
-
-    /* Allocate the array that records the clade we are in during calculation */
-    tracking = malloc(number_of_taxa*sizeof(int));
-    for(i=0; i<number_of_taxa; i++) tracking[i] = FALSE;
-    
-    
-    /** unroot the supertree (if necessary )  **/
-    while(unroottree(supertree));
-    
-    i=0;j=0;k=0;
-    /*** first we need to calculate the coding scheme for the supertree ***/
-    /* we scan the nested parenthesis string once from right to left calculating the baum-ragan coding scheme */
-    while(supertree[i] != ';')
-        {
-        switch(supertree[i])
-            {
-
-            case '(' :
-                tracking[count] = TRUE;
-                count++;
-                i++;
-                break;
-
-            case ')':
-                j = count;
-                while(tracking[j] == FALSE) j--;
-                if(tracking[j] == TRUE) tracking[j] = FALSE;
-                i++;
-                break;
-
-            case ',':
-                i++;
-                break;
-
-            default :
-                for(j=0; j<100; j++)
-                    number[j] = '\0';
-                j=0;
-                while(supertree[i] != '(' && supertree[i] != ')' && supertree[i] != ',')
-                    {
-                    number[j] = supertree[i];
-                    i++;
-                    j++;
-                    }
-                total = 0;
-                j--; k=j;
-                while(j>=0)
-                    {
-                    total+=(((int)pow(10,k-j))*texttoint(number[j]));  /* Turn the character to an integer */
-                    j--;
-                    }
-                for(j=0; j<number_of_taxa; j++)
-                    {
-                    if(tracking[j] == TRUE)
-                        {
-                        super_matrix[j][total] = 1;
-                        }
-                    }
-            }
-        }
-    total_partitions = 0;
-    k=0;
-    /** Next we are going to check for the presence of each of the partitions contained in total_coding in the super_matrix **/
-    /** For each partition that is present in the supermatrix the score is incremented by 1 **/
-   
-    
-    for(i=0; i<num_partitions; i++)  /* for every partition in total_coding */
-        {
-        for(j=1; j<number_of_taxa-2; j++) /* for every position in super_matrix */
-            {
-            allsame1 = TRUE;
-            allsame2 = TRUE;
-            for(k=0; k<number_of_taxa; k++)  /* for every position in both arrays */
-                {
-                if(total_coding[i][k] != 3)  
-                    {
-                    if(total_coding[i][k] != super_matrix[j][k]) allsame1 = FALSE;
-                    if(total_coding[i][k] == super_matrix[j][k]) allsame2 = FALSE;
-                    }
-                }
-            if(allsame1 || allsame2)
-                {
-                score += partition_number[i];
-                /** if we have found a matching partition then we need to stop looking for this partition **/
-                k=number_of_taxa;
-                j=number_of_taxa-2;
-                }
-           
-            }
-        total_partitions += partition_number[i];
-        }
-
-    for(i=0; i<number_of_taxa; i++)
-        {
-        free(super_matrix[i]);
-        }
-    free(super_matrix);
-    super_matrix = NULL;
-    free(tracking);
-    tracking = NULL;
-    return(total_partitions-score);
-    }
-#endif
                          
 
 
 /* this function calculates the score of a supertree to a set of source trees using the criterion of Matrix representation using Compatibility */
 /* This is analogous to a clique analysis */
-/* quartet_compatibility: moved to scoring.c */
-#if 0
-float quartet_compatibility(char * supertree)
-    {
-    int i=0, j=0, k=0,w=0, x=0, y=0, z=0, **super_matrix = NULL, count = 0, *tracking = NULL, parenthesis = 0, total=0,  allsame1 = TRUE, allsame2 = TRUE;
-    char number[100];
-    float score = 0, num_quartets = 0;
-    int zerocount = 0, onecount = 0, *done_tree = NULL;
-     
-    /* assign the array super_matrix */
-    super_matrix = malloc(number_of_taxa*sizeof(int *));
-    if(!super_matrix) memory_error(64);
-    for(i=0; i<number_of_taxa; i++)
-        {
-        super_matrix[i] = malloc((number_of_taxa)*sizeof(int));
-        if(!super_matrix[i]) memory_error(65);
-        for(j=0; j<number_of_taxa; j++)
-            super_matrix[i][j] = 0;
-        }
 
 
-    done_tree = malloc(Total_fund_trees*sizeof(int));
-    for(i=0; i<Total_fund_trees; i++)
-        done_tree[i] = FALSE;
-
-    /* Allocate the array that records the clade were are in during calculation */
-    tracking = malloc(number_of_taxa*sizeof(int));
-    for(i=0; i<number_of_taxa; i++) tracking[i] = FALSE;
-    
-    
-    /** unroot the supertree (if necessary )  **/
-    unroottree(supertree);
-    
-    i=0;j=0;k=0;
-    /*** first we need to calculate the coding scheme for the supertree ***/
-    /* we scan the nested parenthesis string once from right to left calculating the baum-ragan coding scheme */
-    while(supertree[i] != ';')
-        {
-        switch(supertree[i])
-            {
-
-            case '(' :
-                tracking[count] = TRUE;
-                count++;
-                i++;
-                break;
-
-            case ')':
-                j = count;
-                while(tracking[j] == FALSE) j--;
-                if(tracking[j] == TRUE) tracking[j] = FALSE;
-                i++;
-                break;
-
-            case ',':
-                i++;
-                break;
-
-            default :
-                for(j=0; j<100; j++)
-                    number[j] = '\0';
-                j=0;
-                while(supertree[i] != '(' && supertree[i] != ')' && supertree[i] != ',')
-                    {
-                    number[j] = supertree[i];
-                    i++;
-                    j++;
-                    }
-                total = 0;
-                j--;k=j;
-                while(j>=0)
-                    {
-                    total+=(((int)pow(10,k-j))*texttoint(number[j]));  /* Turn the character to an integer */
-                    j--;
-                    }
-                for(j=0; j<number_of_taxa; j++)
-                    {
-                    if(tracking[j] == TRUE)
-                        {
-                        super_matrix[j][total] = 1;
-                        }
-                    }
-            }
-        }
-       
 
 
-    
-    k=0;
-    /** Next we are going to check for the presence of each of the partitions contained in total_coding in the super_matrix **/
-    /** For each partition that is present in the supermatrix the score is incremented by 1 **/
-    
-        for(w=0; w<number_of_taxa-3; w++)   /* first position in the quartet */
-            {
-            for(x=w+1; x<number_of_taxa-2; x++)   /* second position in the quartet */
-                {
-                for(y=x+1; y<number_of_taxa-1; y++)    /* third position in the quartet */
-                    {
-                    for(z=y+1; z<number_of_taxa; z++)     /* fourth position in the quartet  */
-                        {
-                        for(i=0; i<Total_fund_trees; i++) done_tree[i] = FALSE;
-                        for(i=0; i<num_partitions; i++)  /* for every partition in total_coding */
-                            {
-                            if(!done_tree[from_tree[i]] && (total_coding[i][w]+total_coding[i][x]+total_coding[i][y]+total_coding[i][z]) == 2)  
-                                {
-                                for(j=1; j<number_of_taxa-2; j++) /* for every position in super_matrix */
-                                    {
-                                    if((super_matrix[j][w] +super_matrix[j][x] +super_matrix[j][y] +super_matrix[j][z]) == 2)
-                                        {
-                                        num_quartets += partition_number[i];  
-                                        done_tree[from_tree[i]] = TRUE;                                
-                                        if(total_coding[i][w] != super_matrix[j][w] || total_coding[i][x] != super_matrix[j][x] || total_coding[i][y] != super_matrix[j][y] || total_coding[i][z] != super_matrix[j][z]) allsame1 = FALSE;
-                                        if(total_coding[i][w] == super_matrix[j][w] || total_coding[i][x] == super_matrix[j][x] || total_coding[i][y] == super_matrix[j][y] || total_coding[i][z] == super_matrix[j][z]) allsame2 = FALSE;
-                                        if(allsame1 || allsame2)
-                                            {
-                                            score += partition_number[i];
-                                            }
-                                        j = number_of_taxa;  /** if we have found a matching partition then we need to stop looking for this quartet **/  
-                                        allsame1 = TRUE;
-                                        allsame2 = TRUE;
-                                        }
-                                    }
 
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        
-    
- 
-    for(i=0; i<number_of_taxa; i++)
-        {
-        free(super_matrix[i]);
-        }
-    free(super_matrix);
-    super_matrix = NULL;
-    free(tracking);
-    if(done_tree != NULL) free(done_tree);
-    tracking = NULL;
-    return(num_quartets-score);
-    }
+
+
+
+
+/* -------------------------------------------------------------------------
+ * TBR helpers — string-based rerooting
+ *
+ * These three static functions implement the new TBR rerooting path.
+ * The key invariant: every tree passed to regraft() is built by tree_build()
+ * from a Newick string, guaranteeing it is cycle-free.  reroot_tree() is
+ * never called.
+ * ----------------------------------------------------------------------- */
+
+/* true_parent: return the actual structural parent of a node.
+ *
+ * Clann tree invariant: only the FIRST sibling at each level has its
+ * parent pointer set; all subsequent siblings have parent == NULL.
+ * Walk back via prev_sibling to the first sibling, then return its parent.
+ * For genuine root-level nodes (first sibling at root also has parent==NULL)
+ * this correctly returns NULL. */
+static struct taxon *true_parent(struct taxon *node)
+	{
+	while(node->prev_sibling != NULL) node = node->prev_sibling;
+	return node->parent;
+	}
+
+
+/* serialise_complement: write the Newick fragment for every node in the tree
+ * EXCEPT `node` and its descendants.  `root_node` is the first sibling at
+ * the top level of the freshly-built working tree.
+ * Returns 0 on success, -1 if the depth guard fires (sets rep_abandon). */
+static int serialise_complement(struct taxon *node, struct taxon *root_node,
+                                char *buf, int depth, int maxdepth)
+	{
+	struct taxon *child = NULL, *sib = NULL;
+	int first = 1;
+	struct taxon *parent = NULL;
+
+	if(depth > maxdepth) { rep_abandon = 1; return -1; }
+
+	/* Use true_parent() — clann invariant: only first siblings carry parent */
+	parent = true_parent(node);
+
+	if(parent == NULL)
+		{
+		/* node is at root level — emit all root siblings except node */
+		sib = root_node;
+		while(sib != NULL)
+			{
+			if(sib != node)
+				{
+				if(!first) strcat(buf, ",");
+				first = 0;
+				print_single_subtree(sib, buf);
+				}
+			sib = sib->next_sibling;
+			}
+		return 0;
+		}
+
+	/* General case: wrap children-of-parent (minus path node) + complement above */
+	strcat(buf, "(");
+
+	child = parent->daughter;
+	while(child != NULL)
+		{
+		if(child != node)
+			{
+			if(!first) strcat(buf, ",");
+			first = 0;
+			print_single_subtree(child, buf);
+			}
+		child = child->next_sibling;
+		}
+
+	if(true_parent(parent) != NULL)
+		{
+		/* recurse upward for complement of parent */
+		if(!first) strcat(buf, ",");
+		if(serialise_complement(parent, root_node, buf, depth + 1, maxdepth) != 0)
+			{
+			strcat(buf, ")");
+			return -1;
+			}
+		}
+	else
+		{
+		/* parent is at root level — emit parent's root-level siblings */
+		sib = root_node;
+		while(sib != NULL)
+			{
+			if(sib != parent)
+				{
+				if(!first) strcat(buf, ",");
+				first = 0;
+				print_single_subtree(sib, buf);
+				}
+			sib = sib->next_sibling;
+			}
+		}
+
+	strcat(buf, ")");
+	return 0;
+	}
+
+
+/* newick_reroot_at_tag: given an unrooted Newick string and node tag q
+ * (assigned by number_tree()), produce a rerooted Newick with the edge to
+ * node q as the root edge.  Uses an independent working copy built by
+ * tree_build() — no pointer surgery on the caller's tree.
+ * Returns 0 on success, -1 on failure (caller should set rep_abandon). */
+static int newick_reroot_at_tag(const char *base_nwk, int q, char *out_nwk)
+	{
+	struct taxon *root = NULL, *target = NULL;
+	char *working = NULL;
+	int status;
+
+	working = malloc(TREE_LENGTH * sizeof(char));
+	if(!working) return -1;
+	strcpy(working, base_nwk);
+
+	/* Build an independent, cycle-free working copy */
+	temp_top = NULL;
+	tree_build(1, working, NULL, FALSE, -1, 0);
+	root = temp_top;
+	temp_top = NULL;
+	free(working);
+
+	if(root == NULL) return -1;
+
+	number_tree(root, 0);
+
+	target = get_branch(root, q);
+	if(target == NULL) { dismantle_tree(root); return -1; }
+
+	/* Produce rerooted Newick: (target_subtree, complement) */
+	out_nwk[0] = '\0';
+	strcat(out_nwk, "(");
+	print_single_subtree(target, out_nwk);
+	strcat(out_nwk, ",");
+
+	status = serialise_complement(target, root, out_nwk, 0, number_of_taxa + 4);
+
+	strcat(out_nwk, ");");
+
+	dismantle_tree(root);
+
+	if(status != 0) return -1;
+
+	/* Normalise to unrooted form */
+	while(unroottree(out_nwk));
+
+	return 0;
+	}
+
+
+/* bisect_newick: split tree at branch tag x, producing two valid unrooted
+ * Newick strings without any pointer surgery on the input tree.
+ *
+ * subtree_nwk  — the pruned subtree rooted at the node with tag x
+ * remaining_nwk — everything else (complement), normalised to unrooted form
+ *
+ * Returns:  0 = success
+ *          -1 = skip (x is the root node — no meaningful bisection)
+ *          -2 = serialise_complement depth overflow (sets rep_abandon)
+ *
+ * Both output buffers must be at least TREE_LENGTH bytes. */
+static int bisect_newick(struct taxon *tree_root, int x,
+                         char *subtree_nwk, char *remaining_nwk)
+	{
+	struct taxon *position = NULL;
+	int rc = 0, wrap = 0;
+
+	position = get_branch(tree_root, x);
+	if(position == NULL || position == tree_root) return -1;
+
+	/* --- pruned subtree --- */
+	subtree_nwk[0] = '\0';
+	print_single_subtree(position, subtree_nwk);
+	strcat(subtree_nwk, ";");
+	/* Unroot the subtree Newick.  Use a change-tracking loop instead of
+	 * while(unroottree(...)) to avoid infinite loops when unroottree() returns
+	 * TRUE but makes no actual change (e.g. for a 2-leaf subtree "(A,B);"). */
+	if(strchr(subtree_nwk, '(') != NULL)
+		{
+		char *_prev = malloc(TREE_LENGTH * sizeof(char));
+		if(_prev)
+			{
+			do { strcpy(_prev, subtree_nwk); unroottree(subtree_nwk); }
+			while(strcmp(_prev, subtree_nwk) != 0);
+			free(_prev);
+			}
+		}
+
+	/* --- remaining (complement) ---
+	 * serialise_complement() output format depends on position's level:
+	 *   non-root (parent != NULL): already wrapped in "(...)" → just add ";"
+	 *   root-level (true_parent()==NULL): comma-separated list → wrap in "(...);" */
+	remaining_nwk[0] = '\0';
+	wrap = (true_parent(position) == NULL);
+	if(wrap) strcat(remaining_nwk, "(");
+	rc = serialise_complement(position, tree_root, remaining_nwk, 0, number_of_taxa + 4);
+	if(rc != 0) { rep_abandon = 1; return -2; }
+	if(wrap) strcat(remaining_nwk, ")");
+	strcat(remaining_nwk, ";");
+	if(strchr(remaining_nwk, '(') != NULL)
+		{
+		char *_prev = malloc(TREE_LENGTH * sizeof(char));
+		if(_prev)
+			{
+			do { strcpy(_prev, remaining_nwk); unroottree(remaining_nwk); }
+			while(strcmp(_prev, remaining_nwk) != 0);
+			free(_prev);
+			}
+		}
+
+	return 0;
+	}
+
+
+/* tbr_new: new TBR search driver.
+ *
+ * Uses bisect_newick() + tree_build() for both the pruned subtree and the
+ * remaining tree — zero pointer surgery, guaranteed cycle-free trees into
+ * regraft().  The inner rerooting loop uses newick_reroot_at_tag().
+ *
+ * Thread safety: all variables are stack-local or threadprivate globals.
+ * ctrl+C: user_break checked at every outer- and inner-loop iteration.
+ * rep_abandon: propagated from bisect_newick(), newick_reroot_at_tag(),
+ * and regraft(). */
+static int tbr_new(struct taxon *master, int maxswaps, int numspectries, int numgenetries)
+	{
+	struct taxon *newbie = NULL, *remaining_tree = NULL;
+	struct taxon *master_copy = NULL, *position = NULL, *temper = NULL;
+	int better_score = FALSE;
+	int x = 0, y = 0, q = 0, r = 0, i = 0;
+	int brc = 0, reroot_status = 0;
+	char *base_nwk     = NULL;   /* pruned subtree Newick (bisect output / canonical TBR base) */
+	char *remaining_nwk = NULL;  /* remaining tree Newick (bisect output) */
+	char *rerooted_nwk  = NULL;  /* rerooted subtree Newick (inner loop) */
+
+	base_nwk      = malloc(TREE_LENGTH * sizeof(char));
+	remaining_nwk = malloc(TREE_LENGTH * sizeof(char));
+	rerooted_nwk  = malloc(TREE_LENGTH * sizeof(char));
+	if(!base_nwk || !remaining_nwk || !rerooted_nwk)
+		{ free(base_nwk); free(remaining_nwk); free(rerooted_nwk); return FALSE; }
+
+	/* Make a master copy to restore from each outer iteration */
+	temp_top = NULL;
+	duplicate_tree(master, NULL);
+	master_copy = temp_top;
+	temp_top = NULL;
+
+	y = number_tree(master, 0);
+
+	for(x = 0; x < y; x++)
+		{
+#ifdef _OPENMP
+		if(hs_thread_report_interval > 0 && omp_get_num_threads() > 1)
+			{
+			time_t _tr_now = time(NULL);
+			if(difftime(_tr_now, thread_report_last) >= hs_thread_report_interval)
+				{
+				thread_report_last = _tr_now;
+				double tr_el = difftime(_tr_now, par_search_start);
+				int    tr_em = (int)(tr_el / 60), tr_es = (int)tr_el % 60;
+				float  _pbest_tbr;
+				#pragma omp atomic read
+				_pbest_tbr = par_progress_best;
+				if(sprscore < 0.0f)
+					printf2("  [%2d:%02d]  thread %2d  rep %d  score=(searching)  tried=%d  skips=%d  [tbr_new branch %d/%d]\n",
+					        tr_em, tr_es, omp_get_thread_num(), hs_par_rep,
+					        tried_regrafts, skip_streak, x, y);
+				else
+					printf2("  [%2d:%02d]  thread %2d  rep %d  %s=  %s%.6f  tried=%d  skips=%d  [tbr_new branch %d/%d]\n",
+					        tr_em, tr_es, omp_get_thread_num(), hs_par_rep,
+					        ml_score_label(),
+					        ml_display_score(sprscore) < ml_display_score(_pbest_tbr) ? "* " : "  ",
+					        ml_display_score(sprscore), tried_regrafts, skip_streak, x, y);
+				fflush(stdout);
+				}
+			}
 #endif
 
+		/* Restore fresh master from master_copy */
+		if(master != NULL) dismantle_tree(master);
+		master = NULL;
+		temp_top = NULL;
+		duplicate_tree(master_copy, NULL);
+		master = temp_top;
+		tree_top = master;
+		temp_top = NULL;
+		number_tree(master, 0);
 
+		if(rep_abandon) { x = y; continue; }
 
+		/* --- String-based bisect: no pointer surgery on master --- */
+		position = get_branch(master, x);
+		brc = bisect_newick(master, x, base_nwk, remaining_nwk);
 
-/* condense_coding: moved to consensus.c */
-#if 0
-void condense_coding(void)
-    {
-    int i=0, j=0, k=0, l=0, same1 = TRUE, same2 = TRUE;
-    
-    
-    /* what we need to do is check every defined partition in the total_coding array to see it it is repeated anywhere else in the array */
-    for(i=0; i<num_partitions-1; i++)
-        {
-        if(total_coding[i][0] != 4)
-            {
-            for(j=i+1; j<num_partitions; j++)
-                {
-                if(total_coding[j][0] != 4)
-                    {
-                    same1 = TRUE; same2=TRUE;
-                    for(k=0; k<number_of_taxa; k++)
-                        {
-                        if(total_coding[i][k] != total_coding[j][k])  /* if this not the same partition */
-                            {
-                            same1 = FALSE;
-                            }
-                        if(total_coding[i][k] == 3 || total_coding[j][k] == 3)  /* this section is to see if its the same partition but coded in the opposite manner (0s switched with 1s)  */
-                            {
-                            if(total_coding[j][k] != 3 || total_coding[i][k] != 3)
-                                same2 = FALSE;
-                            }
-                        else
-                            {
-                            if(total_coding[i][k] == total_coding[j][k])
-                                {
-                                same2 = FALSE;
-                                }
-                            }
-                        }
-                    if(same1 || same2)
-                        {
-                        partition_number[i]++;
-                        for(k=0; k<number_of_taxa; k++)
-                            total_coding[j][k] = 4;
-                        }
-                    }
-                }
-            }
-        }
- 
- 
-    /* Next we need to bunch up the array, removing duplicates of the same partitions */
-    k=0;l=1;
-    for(i=0; i<num_partitions-1; i++)
-        {
-        if(total_coding[i][0] == 4)
-            {
-            l=i+1;
-            while(l < num_partitions && total_coding[l][0] == 4) l++;
-            if(l != num_partitions)
-                {
-                for(j=0; j<number_of_taxa; j++)
-                    {
-                    total_coding[i][j] = total_coding[l][j];
-                    total_coding[l][j] = 4;
-                    }
-                partition_number[i] = partition_number[l];
-                k++;
-                }
-            else
-                i = num_partitions;
-            }
-        else
-            k++;
-        }
+		/* Dismantle master — Newick strings have everything we need */
+		dismantle_tree(master); master = NULL; tree_top = NULL;
 
-    k=0;
-    for(i=0; i<num_partitions; i++)
-        if(total_coding[i][0] != 4) k++;
-        
-     
-    total_partitions= num_partitions;
-    /* k isthe number of partitions that have been turned into 4's, this is the number of repeated partitions */            
-    num_partitions = k;
-    }
-#endif
+		if(brc == -1) continue;          /* root node — skip */
+		if(brc == -2) { x = y; continue; } /* depth overflow — rep_abandon already set */
 
+		/* Build fresh, cycle-free remaining tree */
+		temp_top = NULL;
+		tree_build(1, remaining_nwk, NULL, FALSE, -1, 0);
+		remaining_tree = temp_top; temp_top = NULL;
+		if(remaining_tree == NULL) { rep_abandon = 1; x = y; continue; }
+		tree_top = remaining_tree;
 
+		/* Build initial newbie from subtree Newick.
+		 * For a bare leaf ("N;"), tree_build(1,...) starts at ';' and returns
+		 * name=-1.  Detect and create the leaf directly in that case. */
+		if(strchr(base_nwk, '(') == NULL)
+			{
+			newbie = make_taxon();
+			newbie->name = atoi(base_nwk);
+			}
+		else
+			{
+			temp_top = NULL;
+			tree_build(1, base_nwk, NULL, FALSE, -1, 0);
+			newbie = temp_top; temp_top = NULL;
+			}
+		if(newbie == NULL) { rep_abandon = 1; goto tbr_cleanup; }
 
+		r = number_tree(newbie, 0);
+
+		for(i = 0; i < number_of_taxa; i++) presenceof_SPRtaxa[i] = FALSE;
+		identify_taxa(newbie, presenceof_SPRtaxa);
+
+		if(r <= 4)
+			{
+			/* Subtree too small to meaningfully reroot — single SPR-style graft */
+			temper = make_taxon();
+			temper->daughter = newbie;
+			newbie->parent = temper;
+			newbie = temper;
+			temper = NULL;
+			newbie->spr = TRUE;
+			better_score = regraft(remaining_tree, newbie, NULL, 1, maxswaps, numspectries, numgenetries);
+			}
+		else
+			{
+			/* Re-serialise newbie after tree_build() so base_nwk has canonical
+			 * tag assignment consistent with newick_reroot_at_tag(). */
+			r = number_tree(newbie, 0);
+			base_nwk[0] = '\0';
+			print_single_subtree(newbie, base_nwk);
+			strcat(base_nwk, ";");
+			while(unroottree(base_nwk));
+
+			/* Discard the build-for-count newbie — inner loop builds fresh
+			 * per-rerooting copies from rerooted_nwk. */
+			dismantle_tree(newbie); newbie = NULL;
+
+			/* --- Inner loop: try each rerooting q against remaining_tree --- */
+			for(q = 0; q < r; q++)
+				{
+				if(user_break || rep_abandon) break;
+
+				reroot_status = newick_reroot_at_tag(base_nwk, q, rerooted_nwk);
+				if(reroot_status != 0) { rep_abandon = 1; break; }
+
+				temp_top = NULL;
+				tree_build(1, rerooted_nwk, NULL, FALSE, -1, 0);
+				newbie = temp_top; temp_top = NULL;
+				if(newbie == NULL) { rep_abandon = 1; break; }
+
+				temper = make_taxon();
+				temper->daughter = newbie;
+				newbie->parent = temper;
+				newbie = temper;
+				temper = NULL;
+				newbie->spr = TRUE;
+
+				/* regraft() restores remaining_tree on FALSE return — safe to reuse */
+				better_score = regraft(remaining_tree, newbie, NULL, 1, maxswaps, numspectries, numgenetries);
+
+				if(better_score || user_break || rep_abandon) break;
+
+				dismantle_tree(newbie);
+				newbie = NULL;
+				}
+			}
+
+tbr_cleanup:
+		if(!better_score && newbie != NULL) { dismantle_tree(newbie); newbie = NULL; }
+		if(!better_score && remaining_tree != NULL)
+			{ dismantle_tree(remaining_tree); remaining_tree = NULL; tree_top = NULL; }
+
+		if(better_score || (position == branchpointer) || tried_regrafts >= maxswaps
+		   || user_break || rep_abandon
+		   || (hs_maxskips > 0 && skip_streak >= hs_maxskips))
+			x = y;
+		}
+
+	free(base_nwk);
+	free(remaining_nwk);
+	free(rerooted_nwk);
+	if(master_copy != NULL) { dismantle_tree(master_copy); master_copy = NULL; }
+	return better_score;
+	}
 
 
 /* This function is a second method of tree traversal to find the optimum tree. Because the NNI and SPS (subtree pruning and swapping) algorithm
-	is such a gentle method, we need something that will change the actual structure of the tree. each node will be pruned out of its present 
+	is such a gentle method, we need something that will change the actual structure of the tree. each node will be pruned out of its present
 	position on the tree and will be grafted into a new position on a new node somewhere else in the tree, this will continue until a better score
 	is found. This is called SPR (subtree pruning and regrafting).
    The algorithm is as follows:
@@ -12113,6 +6390,882 @@ void condense_coding(void)
 			iii) check the score, if better then STOP. If not better then put the node back and move onto the next node to replace with newbie
 		5) If the whole tree is traversed  (or we have reached the limit of nodes) and no better score is found then put node x back where it was
 */
+
+/* spr_new2: SPR search driver.
+ *
+ * Uses bisect_newick() + tree_build() for both the pruned subtree and the
+ * remaining tree — zero pointer surgery, guaranteed cycle-free trees into
+ * regraft(), and correct parent pointers throughout the remaining tree so
+ * regraft() can traverse all internal branches.
+ *
+ * All additions preserved: OpenMP thread reporting, user_break, rep_abandon,
+ * skip_streak/hs_maxskips convergence guard, branchpointer early-exit,
+ * per-iteration master restore from master_copy, identify_taxa() optimisation.
+ *
+ * spr_new() is retained as dead code; do_search() calls spr_new2() for SPR. */
+static int spr_new2(struct taxon *master, int maxswaps, int numspectries, int numgenetries)
+	{
+	struct taxon *newbie = NULL, *remaining_tree = NULL;
+	struct taxon *temper = NULL, *master_copy = NULL, *position = NULL;
+	int better_score = FALSE;
+	int x = 0, y = 0, i = 0, brc = 0;
+	char *subtree_nwk  = NULL;
+	char *remaining_nwk = NULL;
+
+	subtree_nwk  = malloc(TREE_LENGTH * sizeof(char));
+	remaining_nwk = malloc(TREE_LENGTH * sizeof(char));
+	if(!subtree_nwk || !remaining_nwk)
+		{ free(subtree_nwk); free(remaining_nwk); return FALSE; }
+
+	/* Make a master copy to restore from each outer iteration */
+	temp_top = NULL;
+	duplicate_tree(master, NULL);
+	master_copy = temp_top;
+	temp_top = NULL;
+
+	y = number_tree(master, 0);
+
+	for(x = 0; x < y; x++)
+		{
+#ifdef _OPENMP
+		if(hs_thread_report_interval > 0 && omp_get_num_threads() > 1)
+			{
+			time_t _tr_now = time(NULL);
+			if(difftime(_tr_now, thread_report_last) >= hs_thread_report_interval)
+				{
+				thread_report_last = _tr_now;
+				double tr_el = difftime(_tr_now, par_search_start);
+				int    tr_em = (int)(tr_el / 60), tr_es = (int)tr_el % 60;
+				float  _pbest_spr2;
+				#pragma omp atomic read
+				_pbest_spr2 = par_progress_best;
+				if(sprscore < 0.0f)
+					printf2("  [%2d:%02d]  thread %2d  rep %d  score=(searching)  tried=%d  skips=%d  [spr_new2 branch %d/%d]\n",
+					        tr_em, tr_es, omp_get_thread_num(), hs_par_rep,
+					        tried_regrafts, skip_streak, x, y);
+				else
+					printf2("  [%2d:%02d]  thread %2d  rep %d  %s=  %s%.6f  tried=%d  skips=%d  [spr_new2 branch %d/%d]\n",
+					        tr_em, tr_es, omp_get_thread_num(), hs_par_rep,
+					        ml_score_label(),
+					        ml_display_score(sprscore) < ml_display_score(_pbest_spr2) ? "* " : "  ",
+					        ml_display_score(sprscore), tried_regrafts, skip_streak, x, y);
+				fflush(stdout);
+				}
+			}
+#endif
+
+		/* Restore fresh master from master_copy */
+		if(master != NULL) dismantle_tree(master);
+		master = NULL;
+		temp_top = NULL;
+		duplicate_tree(master_copy, NULL);
+		master = temp_top;
+		tree_top = master;
+		temp_top = NULL;
+		number_tree(master, 0);
+
+		if(rep_abandon) { x = y; continue; }
+
+		/* --- String-based bisect: no pointer surgery on master --- */
+		position = get_branch(master, x);
+		brc = bisect_newick(master, x, subtree_nwk, remaining_nwk);
+
+		/* Dismantle master — Newick strings have everything we need */
+		dismantle_tree(master); master = NULL; tree_top = NULL;
+
+		if(brc == -1) continue;           /* root node — skip */
+		if(brc == -2) { x = y; continue; } /* depth overflow — rep_abandon already set */
+
+		/* Build fresh, cycle-free remaining tree */
+		temp_top = NULL;
+		tree_build(1, remaining_nwk, NULL, FALSE, -1, 0);
+		remaining_tree = temp_top; temp_top = NULL;
+		if(remaining_tree == NULL) { rep_abandon = 1; x = y; continue; }
+		tree_top = remaining_tree;
+
+		/* Build fresh, cycle-free newbie.
+		 * tree_build(1,...) skips the leading '(' — for a bare leaf string like
+		 * "3;" there is no '(', so it starts at ';' and produces name=-1.
+		 * Detect this case and create the leaf node directly. */
+		if(strchr(subtree_nwk, '(') == NULL)
+			{
+			newbie = make_taxon();
+			newbie->name = atoi(subtree_nwk);  /* "3;" → 3 */
+			}
+		else
+			{
+			temp_top = NULL;
+			tree_build(1, subtree_nwk, NULL, FALSE, -1, 0);
+			newbie = temp_top; temp_top = NULL;
+			}
+		if(newbie == NULL) { rep_abandon = 1; goto spr2_cleanup; }
+
+		for(i = 0; i < number_of_taxa; i++) presenceof_SPRtaxa[i] = FALSE;
+		identify_taxa(newbie, presenceof_SPRtaxa);
+
+		/* Wrap newbie in SPR sentinel and regraft */
+		temper = make_taxon();
+		temper->daughter = newbie;
+		newbie->parent = temper;
+		newbie = temper;
+		temper = NULL;
+		newbie->spr = TRUE;
+
+		better_score = regraft(remaining_tree, newbie, NULL, 1, maxswaps, numspectries, numgenetries);
+
+spr2_cleanup:
+		if(!better_score && newbie != NULL) { dismantle_tree(newbie); newbie = NULL; }
+		if(!better_score && remaining_tree != NULL)
+			{ dismantle_tree(remaining_tree); remaining_tree = NULL; tree_top = NULL; }
+
+		if(better_score || (position == branchpointer) || tried_regrafts >= maxswaps
+		   || user_break || rep_abandon
+		   || (hs_maxskips > 0 && skip_streak >= hs_maxskips))
+			x = y;
+		}
+
+	free(subtree_nwk);
+	free(remaining_nwk);
+	if(master_copy != NULL) { dismantle_tree(master_copy); master_copy = NULL; }
+	return better_score;
+	}
+
+
+/* =======================================================================
+ * evaluate_candidate: score a candidate tree topology.
+ *
+ * Builds tree_top from candidate_nwk (integer-label Newick produced by
+ * spr_graft()), scores it, and updates all bookkeeping (BESTSCORE,
+ * sprscore, scores_retained_supers[], retained_supers[], visited_set,
+ * OMP parallel-progress).
+ *
+ * tmp_fund_scores must be a caller-allocated float[Total_fund_trees]
+ * scratch buffer (so we don't malloc/free on every evaluation call).
+ *
+ * On return:
+ *   TRUE  — better score found; tree_top valid (caller owns it).
+ *   FALSE — not an improvement; tree_top dismantled and set to NULL.
+ *
+ * Thread safety: all state is threadprivate or stack-local; no shared
+ * mutable state accessed outside the OMP critical(par_progress) guard.
+ * ======================================================================= */
+/* =======================================================================
+ * probe_candidate: score a candidate tree without committing to it.
+ *
+ * Used by the best-improvement strategy to survey the full SPR/TBR
+ * neighbourhood before selecting the single best move.
+ *
+ * Differences from evaluate_candidate:
+ *   - Does NOT insert the topology into visited_set (deferred to commit).
+ *   - Always restores sourcetree_scores[] on return.
+ *   - Does NOT update sprscore, BESTSCORE, retained_supers, or landscape.
+ *   - Does NOT leave tree_top set on return.
+ *
+ * Returns the candidate's score, or -1.0f if it should be skipped
+ * (already visited, build failure, wrong taxon count, user break).
+ * ======================================================================= */
+static float probe_candidate(const char *candidate_nwk,
+                              float      *tmp_fund_scores,
+                              int         numspectries,
+                              int         numgenetries)
+	{
+	float    tmpscore = -1.0f;
+	uint64_t topo_h;
+	char    *temptree = NULL;
+	int      i;
+
+	if(tree_top != NULL) { dismantle_tree(tree_top); tree_top = NULL; }
+	temp_top = NULL;
+	tree_build(1, (char *)candidate_nwk, NULL, FALSE, -1, 0);
+	tree_top = temp_top;
+	temp_top = NULL;
+	if(tree_top == NULL) return -1.0f;
+
+	if(check_taxa(tree_top) != number_of_taxa || user_break)
+		{ dismantle_tree(tree_top); tree_top = NULL; return -1.0f; }
+
+	/* Check visited-set but do NOT insert — insertion is deferred to the
+	 * evaluate_candidate commit step so the winner can be re-processed. */
+	topo_h = tree_topo_hash(tree_top);
+	if(visited_set != NULL && vs_contains(visited_set, topo_h))
+		{
+		skip_streak++;
+		dismantle_tree(tree_top); tree_top = NULL;
+		return -1.0f;
+		}
+
+	/* New topology: count it and reset streak */
+	skip_streak = 0;
+	tried_regrafts++;
+	NUMSWAPS++;
+
+	/* Save sourcetree_scores — always restored before return */
+	for(i = 0; i < Total_fund_trees; i++) tmp_fund_scores[i] = sourcetree_scores[i];
+
+	/* Score by criterion (mirrors evaluate_candidate) */
+	if(criterion == 0)
+		tmpscore = compare_trees(FALSE);
+	else if(criterion == 2)
+		{
+		temptree = malloc(TREE_LENGTH * sizeof(char));
+		if(temptree)
+			{
+			print_tree(tree_top, temptree); strcat(temptree, ";");
+			while(unroottree(temptree));
+			tmpscore = (float)MRC(temptree);
+			free(temptree);
+			}
+		}
+	else if(criterion == 3)
+		{
+		temptree = malloc(TREE_LENGTH * sizeof(char));
+		if(temptree)
+			{
+			print_tree(tree_top, temptree); strcat(temptree, ";");
+			while(unroottree(temptree));
+			tmpscore = (float)quartet_compatibility(temptree);
+			free(temptree);
+			}
+		}
+	else if(criterion == 5)
+		{
+		temptree = malloc(TREE_LENGTH * sizeof(char));
+		if(temptree)
+			{
+			print_tree(tree_top, temptree); strcat(temptree, ";");
+			while(unroottree(temptree));
+			tmpscore = get_recon_score(temptree, numspectries, numgenetries);
+			free(temptree);
+			}
+		}
+	else if(criterion == 6)
+		tmpscore = compare_trees_rf(TRUE);
+	else if(criterion == 7)
+		tmpscore = compare_trees_ml(TRUE);
+
+	/* Always restore sourcetree_scores — no permanent state change */
+	for(i = 0; i < Total_fund_trees; i++) sourcetree_scores[i] = tmp_fund_scores[i];
+
+	dismantle_tree(tree_top); tree_top = NULL;
+	return tmpscore;
+	}
+
+
+static int evaluate_candidate(const char *candidate_nwk,
+                               float      *tmp_fund_scores,
+                               int         numspectries,
+                               int         numgenetries)
+	{
+	int   better_score = FALSE;
+	int   i, j, different;
+	float tmpscore = 0.0f;
+	char *best_tree = NULL;
+	char *temptree  = NULL;
+	uint64_t topo_h;
+
+	best_tree = malloc(TREE_LENGTH * sizeof(char));
+	temptree  = malloc(TREE_LENGTH * sizeof(char));
+	if(!best_tree || !temptree)
+		{ free(best_tree); free(temptree); return FALSE; }
+	best_tree[0] = '\0';
+	temptree[0]  = '\0';
+
+	/* Build candidate tree_top from integer-label Newick */
+	if(tree_top != NULL) { dismantle_tree(tree_top); tree_top = NULL; }
+	temp_top = NULL;
+	tree_build(1, (char *)candidate_nwk, NULL, FALSE, -1, 0);
+	tree_top = temp_top;
+	temp_top = NULL;
+	if(tree_top == NULL) { free(best_tree); free(temptree); return FALSE; }
+
+	/* Sanity: correct taxon count and no ctrl+C */
+	if(check_taxa(tree_top) != number_of_taxa || user_break)
+		{
+		dismantle_tree(tree_top); tree_top = NULL;
+		free(best_tree); free(temptree);
+		return FALSE;
+		}
+
+	/* Deduplication: skip already-visited topologies this replicate */
+	topo_h = tree_topo_hash(tree_top);
+	if(visited_set != NULL && vs_contains(visited_set, topo_h))
+		{
+		skip_streak++;
+		if(g_landscape_file[0])
+			lm_record(landscape_map ? landscape_map : g_landscape_map,
+			          topo_h, 0.0f, NULL);
+		dismantle_tree(tree_top); tree_top = NULL;
+		free(best_tree); free(temptree);
+		return FALSE;
+		}
+	if(visited_set != NULL) vs_insert(visited_set, topo_h);
+	skip_streak = 0;
+	tried_regrafts++;
+	NUMSWAPS++;
+
+	/* Save sourcetree_scores[] — restore on non-improvement */
+	for(i = 0; i < Total_fund_trees; i++) tmp_fund_scores[i] = sourcetree_scores[i];
+
+	/* Named-tree string (for retained_supers and some scoring functions) */
+	print_named_tree(tree_top, best_tree);
+	strcat(best_tree, ";");
+	while(unroottree(best_tree));
+
+	/* Score by criterion */
+	if(criterion == 0)
+		tmpscore = compare_trees(FALSE);
+	else if(criterion == 2)
+		{
+		print_tree(tree_top, temptree);
+		strcat(temptree, ";");
+		while(unroottree(temptree));
+		tmpscore = (float)MRC(temptree);
+		}
+	else if(criterion == 3)
+		{
+		print_tree(tree_top, temptree);
+		strcat(temptree, ";");
+		while(unroottree(temptree));
+		tmpscore = (float)quartet_compatibility(temptree);
+		}
+	else if(criterion == 5)
+		{
+		print_tree(tree_top, temptree);
+		strcat(temptree, ";");
+		while(unroottree(temptree));
+		tmpscore = get_recon_score(temptree, numspectries, numgenetries);
+		}
+	else if(criterion == 6)
+		tmpscore = compare_trees_rf(TRUE);
+	else if(criterion == 7)
+		tmpscore = compare_trees_ml(TRUE);
+
+	/* Landscape recording */
+	if(g_landscape_file[0])
+		lm_record(landscape_map ? landscape_map : g_landscape_map,
+		          topo_h, tmpscore, best_tree);
+
+	/* --- Bookkeeping --- */
+	/* Always initialise sprscore at the start of a new rep */
+	if(sprscore == -1)
+		sprscore = tmpscore;
+
+	if(BESTSCORE == -1) BESTSCORE = tmpscore;
+
+	if(scores_retained_supers[0] == -1)
+		{
+		/* Very first tree ever across all reps: bootstrap retained_supers */
+		retained_supers[0] = realloc(retained_supers[0],
+		                            (strlen(best_tree) + 10) * sizeof(char));
+		strcpy(retained_supers[0], best_tree);
+		scores_retained_supers[0] = tmpscore;
+		better_score = TRUE;
+		}
+	else
+		{
+		if(tmpscore < scores_retained_supers[0] || tmpscore < sprscore)
+			{
+			if(tmpscore < BESTSCORE) BESTSCORE = tmpscore;
+			if(tmpscore < sprscore)
+				{ better_score = TRUE; sprscore = tmpscore; }
+			if(tmpscore < scores_retained_supers[0])
+				{
+				better_score = TRUE;
+				retained_supers[0] = realloc(retained_supers[0],
+				                            (strlen(best_tree) + 10) * sizeof(char));
+				strcpy(retained_supers[0], best_tree);
+				scores_retained_supers[0] = tmpscore;
+#ifdef _OPENMP
+				if(omp_get_num_threads() > 1)
+					{
+					time_t _now = time(NULL);
+					int    new_global_best = 0;
+					#pragma omp critical (par_progress)
+						{
+						if(par_progress_best < 0.0f || tmpscore < par_progress_best)
+							{ par_progress_best = tmpscore; new_global_best = 1; }
+						}
+					if(new_global_best &&
+					   (hs_progress_interval == 0 ||
+					    difftime(_now, par_last_progress_time) >= hs_progress_interval))
+						{
+						double hs_el = difftime(_now, par_search_start);
+						int hs_em = (int)(hs_el / 60), hs_es = (int)hs_el % 60;
+						int hs_imp = (par_last_print_score < 0.0f ||
+						              par_progress_best < par_last_print_score);
+						if(hsprint)
+							{
+							printf2("  [%2d:%02d]  best so far = %s%.6f\tspr/tbr\trep %d\n",
+							        hs_em, hs_es,
+							        hs_imp ? "* " : "  ",
+							        ml_display_score(par_progress_best), hs_par_rep);
+							par_last_print_score   = par_progress_best;
+							par_last_progress_time = _now;
+							fflush(stdout);
+							}
+						}
+					}
+#endif
+				j = 1;
+				while(scores_retained_supers[j] != -1 && j < number_retained_supers)
+					{
+					strcpy(retained_supers[j], "");
+					scores_retained_supers[j] = -1;
+					j++;
+					}
+				}
+			}
+		else
+			{
+			/* Not strictly better — check for equal-score distinct topology */
+			if(tmpscore == scores_retained_supers[0])
+				{
+				j = 0;
+				different = TRUE;
+				if(!check_if_diff_tree(best_tree)) different = FALSE;
+				if(different)
+					{
+					while(scores_retained_supers[j] != -1)
+						{
+						j++;
+						if(j + 1 == number_retained_supers) reallocate_retained_supers();
+						}
+					retained_supers[j] = realloc(retained_supers[j],
+					                            (strlen(best_tree) + 10) * sizeof(char));
+					strcpy(retained_supers[j], best_tree);
+					scores_retained_supers[j] = tmpscore;
+					}
+				}
+			/* Restore sourcetree_scores to last-known-good state */
+			for(i = 0; i < Total_fund_trees; i++)
+				sourcetree_scores[i] = tmp_fund_scores[i];
+			/* Dismantle non-improving tree_top */
+			dismantle_tree(tree_top); tree_top = NULL;
+			}
+		}
+
+	free(best_tree);
+	free(temptree);
+	return better_score;
+	}
+
+
+/* =======================================================================
+ * spr_new3: string-native SPR search driver.
+ *
+ * Uses spr_tree.c (spr_parse / spr_bisect / spr_graft) for all tree
+ * manipulation — zero pointer surgery, no clann tree invariant issues.
+ * Candidate topologies are produced as Newick strings and scored via
+ * evaluate_candidate(), which builds a fresh tree_top for each candidate.
+ *
+ * Algorithm per call:
+ *   1. Serialise master → integer-label Newick.
+ *   2. Parse → spr_node tree (once per call; dismantle master after parse).
+ *   3. Enumerate all edges (prune positions).
+ *   4. For each prune edge x:
+ *      a. Bisect → sub_nwk + rem_nwk.
+ *      b. Parse rem_nwk → rem_tree.
+ *      c. Enumerate graft edges.
+ *      d. For each graft edge g: spr_graft() → candidate_nwk.
+ *      e. evaluate_candidate() — stops the inner loop on first improvement.
+ *   5. Return TRUE on first improvement (do_search outer loop will re-call).
+ *
+ * Thread safety: all state is stack-local or threadprivate.
+ * ctrl+C: user_break checked at every outer- and inner-loop iteration.
+ * ======================================================================= */
+static int spr_new3(struct taxon *master, int maxswaps, int numspectries, int numgenetries)
+	{
+	int   better_score = FALSE;
+	int   x, g, n_prune = 0, n_graft = 0;
+	int   max_nodes;
+	float best_score;   /* best-improvement: best score seen in survey */
+
+	char *master_nwk    = NULL;
+	char *sub_nwk       = NULL;
+	char *rem_nwk       = NULL;
+	char *candidate_nwk = NULL;
+	char *best_nwk      = NULL;   /* best-improvement: Newick of best candidate */
+	float *tmp_fund_scores = NULL;
+
+	struct spr_node  *spr_tree  = NULL;
+	struct spr_node  *rem_tree  = NULL;
+	struct spr_node **prune_edges = NULL;
+	struct spr_node **graft_edges = NULL;
+
+	/* Allocate Newick string buffers */
+	master_nwk    = malloc(TREE_LENGTH * sizeof(char));
+	sub_nwk       = malloc(TREE_LENGTH * sizeof(char));
+	rem_nwk       = malloc(TREE_LENGTH * sizeof(char));
+	candidate_nwk = malloc(TREE_LENGTH * sizeof(char));
+	best_nwk      = malloc(TREE_LENGTH * sizeof(char));
+	tmp_fund_scores = malloc(Total_fund_trees * sizeof(float));
+	if(!master_nwk || !sub_nwk || !rem_nwk || !candidate_nwk || !best_nwk || !tmp_fund_scores)
+		goto spr3_cleanup;
+	best_nwk[0] = '\0';
+
+	/* Edge arrays: an unrooted tree with N taxa has at most 2N-2 nodes */
+	max_nodes   = 2 * number_of_taxa + 8;
+	prune_edges = malloc(max_nodes * sizeof(struct spr_node *));
+	graft_edges = malloc(max_nodes * sizeof(struct spr_node *));
+	if(!prune_edges || !graft_edges) goto spr3_cleanup;
+
+	/* --- Step 1: Serialise master to integer-label Newick --- */
+	master_nwk[0] = '\0';
+	print_tree(master, master_nwk);
+	strcat(master_nwk, ";");
+
+	/* --- Step 2: Parse into spr_node tree then dismantle master ---
+	 * Once parsed, we have everything we need in spr_tree; master (which
+	 * is tree_top) can be freed so tree_top is clean for evaluate_candidate. */
+	spr_tree = spr_parse(master_nwk);
+	if(spr_tree == NULL) goto spr3_cleanup;
+
+	dismantle_tree(master); master = NULL; tree_top = NULL;
+
+	/* --- Step 3: Enumerate prune edges --- */
+	spr_get_edges(spr_tree, prune_edges, &n_prune);
+
+	/* --- Steps 4–5: For each prune edge, bisect and try all grafts --- */
+	for(x = 0; x < n_prune; x++)
+		{
+		if(better_score) break;   /* a commit was made — stop */
+#ifdef _OPENMP
+		if(hs_thread_report_interval > 0 && omp_get_num_threads() > 1)
+			{
+			time_t _tr_now = time(NULL);
+			if(difftime(_tr_now, thread_report_last) >= hs_thread_report_interval)
+				{
+				thread_report_last = _tr_now;
+				double tr_el = difftime(_tr_now, par_search_start);
+				int    tr_em = (int)(tr_el / 60), tr_es = (int)tr_el % 60;
+				float  _pbest_s3;
+				#pragma omp atomic read
+				_pbest_s3 = par_progress_best;
+				if(sprscore < 0.0f)
+					printf2("  [%2d:%02d]  thread %2d  rep %d  score=(searching)  tried=%d  skips=%d  [spr_new3 branch %d/%d]\n",
+					        tr_em, tr_es, omp_get_thread_num(), hs_par_rep,
+					        tried_regrafts, skip_streak, x, n_prune);
+				else
+					printf2("  [%2d:%02d]  thread %2d  rep %d  %s=  %s%.6f  tried=%d  skips=%d  [spr_new3 branch %d/%d]\n",
+					        tr_em, tr_es, omp_get_thread_num(), hs_par_rep,
+					        ml_score_label(),
+					        ml_display_score(sprscore) < ml_display_score(_pbest_s3) ? "* " : "  ",
+					        ml_display_score(sprscore), tried_regrafts, skip_streak, x, n_prune);
+				fflush(stdout);
+				}
+			}
+#endif
+		if(user_break || rep_abandon) break;
+
+		/* Bisect at prune_edges[x] */
+		if(spr_bisect(spr_tree, prune_edges[x], sub_nwk, rem_nwk,
+		              TREE_LENGTH) != 0)
+			continue;
+
+		/* Parse remaining tree */
+		rem_tree = spr_parse(rem_nwk);
+		if(rem_tree == NULL) { rep_abandon = 1; break; }
+
+		/* Enumerate graft positions in remaining tree */
+		spr_get_edges(rem_tree, graft_edges, &n_graft);
+
+		/* Per-cut best-improvement: reset tracker for this prune edge */
+		best_score  = 1e30f;
+		best_nwk[0] = '\0';
+
+		/* Try each graft position */
+		for(g = 0; g < n_graft; g++)
+			{
+			if(hs_strategy == 0 && better_score) break;
+			if(user_break || rep_abandon) break;
+			if(tried_regrafts >= maxswaps) break;
+			if(hs_maxskips > 0 && skip_streak >= hs_maxskips) break;
+
+			spr_graft(sub_nwk, rem_tree, graft_edges[g],
+			          candidate_nwk, TREE_LENGTH);
+
+			if(hs_strategy == 0)
+				{
+				/* First-improvement: commit immediately on improvement */
+				if(evaluate_candidate(candidate_nwk, tmp_fund_scores,
+				                      numspectries, numgenetries))
+					better_score = TRUE;
+				}
+			else
+				{
+				/* Best-improvement: probe only, track best */
+				float s = probe_candidate(candidate_nwk, tmp_fund_scores,
+				                          numspectries, numgenetries);
+				if(s >= 0.0f && s < best_score)
+					{ best_score = s; strcpy(best_nwk, candidate_nwk); }
+				}
+			}
+
+		spr_free(rem_tree); rem_tree = NULL;
+
+		/* Per-cut best-improvement: commit the best graft found for this cut */
+		if(hs_strategy == 1 && best_nwk[0] != '\0')
+			{
+			float threshold = (sprscore >= 0.0f) ? sprscore : 1e30f;
+			if(best_score < threshold)
+				better_score = evaluate_candidate(best_nwk, tmp_fund_scores,
+				                                  numspectries, numgenetries);
+			}
+
+		if(tried_regrafts >= maxswaps) break;
+		if(hs_strategy == 0 && hs_maxskips > 0 && skip_streak >= hs_maxskips) break;
+		}
+
+spr3_cleanup:
+	spr_free(spr_tree);
+	spr_free(rem_tree);
+	free(master_nwk);
+	free(sub_nwk);
+	free(rem_nwk);
+	free(candidate_nwk);
+	free(best_nwk);
+	free(tmp_fund_scores);
+	free(prune_edges);
+	free(graft_edges);
+
+	/* On FALSE return tree_top is already NULL (evaluate_candidate dismantled it).
+	 * On TRUE  return tree_top points to the new best tree. */
+	if(!better_score) tree_top = NULL;
+	return better_score;
+	}
+
+
+/* =======================================================================
+ * tbr_new2: string-native TBR search driver.
+ *
+ * Same outer structure as spr_new3() but adds an inner rerooting loop:
+ * for each pruned subtree with more than 4 nodes, every internal edge
+ * of the subtree is tried as a rerooting point before attempting the graft.
+ * This enumerates the full TBR neighbourhood.
+ *
+ * For pruned subtrees with <= 4 nodes (0 or 1 internal edges), a single
+ * SPR-style graft is performed (equivalent to TBR for small subtrees).
+ * ======================================================================= */
+static int tbr_new2(struct taxon *master, int maxswaps, int numspectries, int numgenetries)
+	{
+	int   better_score = FALSE;
+	int   x, g, q, n_prune = 0, n_graft = 0, n_internals = 0;
+	int   max_nodes;
+	float best_score;   /* best-improvement: best score seen in survey */
+
+	char *master_nwk    = NULL;
+	char *sub_nwk       = NULL;
+	char *rem_nwk       = NULL;
+	char *rerooted_nwk  = NULL;
+	char *candidate_nwk = NULL;
+	char *best_nwk      = NULL;   /* best-improvement: Newick of best candidate */
+	float *tmp_fund_scores = NULL;
+
+	struct spr_node  *spr_tree    = NULL;
+	struct spr_node  *sub_tree    = NULL;
+	struct spr_node  *rem_tree    = NULL;
+	struct spr_node **prune_edges = NULL;
+	struct spr_node **graft_edges = NULL;
+	struct spr_node **sub_internals = NULL;
+
+	/* Allocate Newick string buffers */
+	master_nwk    = malloc(TREE_LENGTH * sizeof(char));
+	sub_nwk       = malloc(TREE_LENGTH * sizeof(char));
+	rem_nwk       = malloc(TREE_LENGTH * sizeof(char));
+	rerooted_nwk  = malloc(TREE_LENGTH * sizeof(char));
+	candidate_nwk = malloc(TREE_LENGTH * sizeof(char));
+	best_nwk      = malloc(TREE_LENGTH * sizeof(char));
+	tmp_fund_scores = malloc(Total_fund_trees * sizeof(float));
+	if(!master_nwk || !sub_nwk || !rem_nwk || !rerooted_nwk ||
+	   !candidate_nwk || !best_nwk || !tmp_fund_scores)
+		goto tbr2_cleanup;
+	best_nwk[0] = '\0';
+
+	/* Edge / internal-node arrays */
+	max_nodes     = 2 * number_of_taxa + 8;
+	prune_edges   = malloc(max_nodes * sizeof(struct spr_node *));
+	graft_edges   = malloc(max_nodes * sizeof(struct spr_node *));
+	sub_internals = malloc(max_nodes * sizeof(struct spr_node *));
+	if(!prune_edges || !graft_edges || !sub_internals) goto tbr2_cleanup;
+
+	/* Serialise master → integer-label Newick */
+	master_nwk[0] = '\0';
+	print_tree(master, master_nwk);
+	strcat(master_nwk, ";");
+
+	/* Parse once, then dismantle master */
+	spr_tree = spr_parse(master_nwk);
+	if(spr_tree == NULL) goto tbr2_cleanup;
+
+	dismantle_tree(master); master = NULL; tree_top = NULL;
+
+	spr_get_edges(spr_tree, prune_edges, &n_prune);
+
+	for(x = 0; x < n_prune; x++)
+		{
+		if(better_score) break;   /* a commit was made — stop */
+#ifdef _OPENMP
+		if(hs_thread_report_interval > 0 && omp_get_num_threads() > 1)
+			{
+			time_t _tr_now = time(NULL);
+			if(difftime(_tr_now, thread_report_last) >= hs_thread_report_interval)
+				{
+				thread_report_last = _tr_now;
+				double tr_el = difftime(_tr_now, par_search_start);
+				int    tr_em = (int)(tr_el / 60), tr_es = (int)tr_el % 60;
+				float  _pbest_t2;
+				#pragma omp atomic read
+				_pbest_t2 = par_progress_best;
+				if(sprscore < 0.0f)
+					printf2("  [%2d:%02d]  thread %2d  rep %d  score=(searching)  tried=%d  skips=%d  [tbr_new2 branch %d/%d]\n",
+					        tr_em, tr_es, omp_get_thread_num(), hs_par_rep,
+					        tried_regrafts, skip_streak, x, n_prune);
+				else
+					printf2("  [%2d:%02d]  thread %2d  rep %d  %s=  %s%.6f  tried=%d  skips=%d  [tbr_new2 branch %d/%d]\n",
+					        tr_em, tr_es, omp_get_thread_num(), hs_par_rep,
+					        ml_score_label(),
+					        ml_display_score(sprscore) < ml_display_score(_pbest_t2) ? "* " : "  ",
+					        ml_display_score(sprscore), tried_regrafts, skip_streak, x, n_prune);
+				fflush(stdout);
+				}
+			}
+#endif
+		if(user_break || rep_abandon) break;
+
+		if(spr_bisect(spr_tree, prune_edges[x], sub_nwk, rem_nwk,
+		              TREE_LENGTH) != 0)
+			continue;
+
+		rem_tree = spr_parse(rem_nwk);
+		if(rem_tree == NULL) { rep_abandon = 1; break; }
+
+		spr_get_edges(rem_tree, graft_edges, &n_graft);
+
+		/* Parse subtree to count internal nodes */
+		sub_tree = spr_parse(sub_nwk);
+		if(sub_tree == NULL) { spr_free(rem_tree); rem_tree = NULL; rep_abandon = 1; break; }
+
+		if(sub_tree->first_child == NULL)
+			{
+			/* Single-leaf subtree: no rerooting needed — treat as SPR */
+			n_internals = 0;
+			}
+		else
+			{
+			spr_get_internals(sub_tree, sub_internals, &n_internals);
+			}
+
+		/* Per-cut best-improvement: reset tracker for this prune edge
+		 * (includes all rerootings of the subtree) */
+		best_score  = 1e30f;
+		best_nwk[0] = '\0';
+
+		if(n_internals <= 1)
+			{
+			/* Small subtree (<=4 nodes): single SPR-style pass */
+			for(g = 0; g < n_graft; g++)
+				{
+				if(hs_strategy == 0 && better_score) break;
+				if(user_break || rep_abandon) break;
+				if(tried_regrafts >= maxswaps) break;
+				if(hs_maxskips > 0 && skip_streak >= hs_maxskips) break;
+
+				spr_graft(sub_nwk, rem_tree, graft_edges[g],
+				          candidate_nwk, TREE_LENGTH);
+
+				if(hs_strategy == 0)
+					{
+					if(evaluate_candidate(candidate_nwk, tmp_fund_scores,
+					                      numspectries, numgenetries))
+						better_score = TRUE;
+					}
+				else
+					{
+					float s = probe_candidate(candidate_nwk, tmp_fund_scores,
+					                          numspectries, numgenetries);
+					if(s >= 0.0f && s < best_score)
+						{ best_score = s; strcpy(best_nwk, candidate_nwk); }
+					}
+				}
+			}
+		else
+			{
+			/* Larger subtree: for each rerooting of the subtree, try all
+			 * graft positions in the remaining tree. */
+			for(q = 0; q < n_internals; q++)
+				{
+				if(hs_strategy == 0 && better_score) break;
+				if(user_break || rep_abandon) break;
+
+				/* Produce rerooted subtree Newick */
+				spr_write_rerooted(sub_tree, sub_internals[q],
+				                   rerooted_nwk, TREE_LENGTH);
+
+				for(g = 0; g < n_graft; g++)
+					{
+					if(hs_strategy == 0 && better_score) break;
+					if(user_break || rep_abandon) break;
+					if(tried_regrafts >= maxswaps) break;
+					if(hs_maxskips > 0 && skip_streak >= hs_maxskips) break;
+
+					spr_graft(rerooted_nwk, rem_tree, graft_edges[g],
+					          candidate_nwk, TREE_LENGTH);
+
+					if(hs_strategy == 0)
+						{
+						if(evaluate_candidate(candidate_nwk, tmp_fund_scores,
+						                      numspectries, numgenetries))
+							better_score = TRUE;
+						}
+					else
+						{
+						float s = probe_candidate(candidate_nwk, tmp_fund_scores,
+						                          numspectries, numgenetries);
+						if(s >= 0.0f && s < best_score)
+							{ best_score = s; strcpy(best_nwk, candidate_nwk); }
+						}
+					}
+
+				if(tried_regrafts >= maxswaps) break;
+				if(hs_strategy == 0 && hs_maxskips > 0 && skip_streak >= hs_maxskips) break;
+				}
+			}
+
+		/* Per-cut best-improvement: commit the best graft found for this cut */
+		if(hs_strategy == 1 && best_nwk[0] != '\0')
+			{
+			float threshold = (sprscore >= 0.0f) ? sprscore : 1e30f;
+			if(best_score < threshold)
+				better_score = evaluate_candidate(best_nwk, tmp_fund_scores,
+				                                  numspectries, numgenetries);
+			}
+
+		spr_free(sub_tree); sub_tree = NULL;
+		spr_free(rem_tree); rem_tree = NULL;
+
+		if(tried_regrafts >= maxswaps) break;
+		if(hs_strategy == 0 && hs_maxskips > 0 && skip_streak >= hs_maxskips) break;
+		}
+
+tbr2_cleanup:
+	spr_free(spr_tree);
+	spr_free(sub_tree);
+	spr_free(rem_tree);
+	free(master_nwk);
+	free(sub_nwk);
+	free(rem_nwk);
+	free(rerooted_nwk);
+	free(candidate_nwk);
+	free(best_nwk);
+	free(tmp_fund_scores);
+	free(prune_edges);
+	free(graft_edges);
+	free(sub_internals);
+
+	if(!better_score) tree_top = NULL;
+	return better_score;
+	}
+
 
 int spr_new(struct taxon * master, int maxswaps, int numspectries, int numgenetries)
 	{
@@ -12145,6 +7298,34 @@ int spr_new(struct taxon * master, int maxswaps, int numspectries, int numgenetr
 	/* end 2) */
 	for(x=0; x<y; x++) /* for each branch of the master tree, create an instance where it is bisected at this point */
 		{
+#ifdef _OPENMP
+		/* Per-thread diagnostic: report from spr_new outer loop so silent threads are
+		 * visible even when stuck in dismantle/duplicate between regraft() calls. */
+		if(hs_thread_report_interval > 0 && omp_get_num_threads() > 1)
+			{
+			time_t _tr_now = time(NULL);
+			if(difftime(_tr_now, thread_report_last) >= hs_thread_report_interval)
+				{
+				thread_report_last = _tr_now;
+				double tr_el = difftime(_tr_now, par_search_start);
+				int    tr_em = (int)(tr_el / 60), tr_es = (int)tr_el % 60;
+				float  _pbest2;
+				#pragma omp atomic read
+				_pbest2 = par_progress_best;
+				if(sprscore < 0.0f)
+					printf2("  [%2d:%02d]  thread %2d  rep %d  score=(searching)  tried=%d  skips=%d  [spr_new branch %d/%d]\n",
+					        tr_em, tr_es, omp_get_thread_num(), hs_par_rep,
+					        tried_regrafts, skip_streak, x, y);
+				else
+					printf2("  [%2d:%02d]  thread %2d  rep %d  %s=  %s%.6f  tried=%d  skips=%d  [spr_new branch %d/%d]\n",
+					        tr_em, tr_es, omp_get_thread_num(), hs_par_rep,
+					        ml_score_label(),
+					        ml_display_score(sprscore) < ml_display_score(_pbest2) ? "* " : "  ",
+					        ml_display_score(sprscore), tried_regrafts, skip_streak, x, y);
+				fflush(stdout);
+				}
+			}
+#endif
 		/* create a new instance of "master" from master_copy */
 		if(master != NULL)
 			dismantle_tree(master);
@@ -12164,16 +7345,16 @@ int spr_new(struct taxon * master, int maxswaps, int numspectries, int numgenetr
 		/* count number ofsiblings */
 		/* rewind to start */
 		tmp = position;
-		while(tmp->prev_sibling != NULL) tmp = tmp->prev_sibling;
+		{ int _g = 0, _gmax = number_of_taxa * 4 + 16;
+		  while(tmp->prev_sibling != NULL && _g++ < _gmax) tmp = tmp->prev_sibling;
+		  if(_g >= _gmax) rep_abandon = 1; /* sibling chain is cyclic — corrupt tree, abandon rep */ }
 		/* count number of sibligs */
 		numofsiblings = 0;
-		while(tmp != NULL) 
-			{
-			numofsiblings++;
-			tmp = tmp->next_sibling;
-			}
-		
-		if(position != master) /* if we are at the top of the tree, don't do anything */
+		{ int _g2 = 0, _gmax2 = number_of_taxa * 4 + 16;
+		  while(tmp != NULL && _g2++ < _gmax2) { numofsiblings++; tmp = tmp->next_sibling; }
+		  if(_g2 >= _gmax2) rep_abandon = 1; }
+
+		if(position != master && !rep_abandon) /* if we are at the top of the tree, don't do anything */
 			{
 			/* 3) break the tree at this point and create "newbie" */
 
@@ -12187,11 +7368,13 @@ int spr_new(struct taxon * master, int maxswaps, int numspectries, int numgenetr
 
 			if(position->prev_sibling != NULL) (position->prev_sibling)->next_sibling = position->next_sibling;
 			if(position->next_sibling != NULL) (position->next_sibling)->prev_sibling = position->prev_sibling;
-			if(position->parent != NULL)
-				{
+			/* Only update parent->daughter when position was the first child.
+			 * When position has a prev_sibling it is not the first child and
+			 * parent->daughter already points elsewhere.  The redundant
+			 * next_sibling->parent assignment is removed: tree_build() already
+			 * set those pointers, and it crashes when next_sibling is NULL. */
+			if(position->parent != NULL && position->prev_sibling == NULL)
 				(position->parent)->daughter = position->next_sibling;
-				(position->next_sibling)->parent = position->parent;
-				}
 			position->next_sibling = NULL;
 			position->prev_sibling = NULL;
 			
@@ -12218,7 +7401,9 @@ int spr_new(struct taxon * master, int maxswaps, int numspectries, int numgenetr
 			newbie = position;
 			
 			tmp = latest;
-			while(tmp->prev_sibling != NULL) tmp = tmp->prev_sibling;  /* rewinding */
+			{ int _g = 0, _gmax = number_of_taxa * 4 + 16;
+			  while(tmp->prev_sibling != NULL && _g++ < _gmax) tmp = tmp->prev_sibling; /* rewinding */
+			  if(_g >= _gmax) rep_abandon = 1; }
 			/**** Now that we have the subtree that we want to regraft, identify the taxa in that subtree for the purposes of speeding up the calculations */
 			for(i=0; i<number_of_taxa; i++)presenceof_SPRtaxa[i] = FALSE;
 			identify_taxa(newbie, presenceof_SPRtaxa);
@@ -12243,96 +7428,16 @@ int spr_new(struct taxon * master, int maxswaps, int numspectries, int numgenetr
 				better_score = regraft(latest, newbie, NULL, 1, maxswaps, numspectries, numgenetries);
 				
 				}
-			if(method == 3) /*tbr method */
+			if(method == 3) /* tbr — handled by tbr_new(), called from do_search() */
 				{
-
-				i = number_tree(newbie, 0); /* count the parts of newbie */
-				
-				if(i > 4) /* no point rerooting a clade with only 2 taxa or a single taxa */
-					{
-					temper = newbie->daughter;
-					temper->parent = NULL;
-					free(newbie);
-					newbie = temper;
-					temper = NULL;
-
-					print_tree(newbie, debugtree);
-					strcat(debugtree, ";");
-					unroottree(debugtree);
-					
-					dismantle_tree(newbie);
-					newbie = NULL;
-					temp_top = NULL;
-					tree_build(1, debugtree, newbie, FALSE, -1, 0);
-					newbie = temp_top;
-					temp_top = NULL;
-					
-					debugtree[0] = '\0';
-					
-					r = number_tree(newbie, 0); /* count the parts of newbie */
-					temp_top = NULL;
-					duplicate_tree(newbie, NULL); /* make a copy of the subtree */
-					copy = temp_top;
-					temp_top = NULL;
-					
-					
-				
-					for(q=0; q<r; q++) /* reroot newbie at each of the "r" positions on the subtree */
-						{
-						temper1 = get_branch(newbie, q);
-						
-						
-						temp_top = newbie;
-						reroot_tree(temper1);
-						newbie = temp_top;
-
-						
-						temper = make_taxon();
-						temper->daughter = newbie; 
-						newbie->parent = temper;
-						newbie = temper;
-						temper= NULL;
-						newbie->spr = TRUE;
-
-
-						better_score = regraft(tmp, newbie, NULL, 1, maxswaps, numspectries, numgenetries);
-						
-
-						if(better_score || user_break) q = r;
-						else
-							{
-							dismantle_tree(newbie);
-							newbie = NULL;
-							temp_top = NULL;
-
-							duplicate_tree(copy, NULL); /* make a copy of the subtree */
-							newbie = temp_top;
-							temp_top = NULL;
-							number_tree(newbie, 0);
-							newbie->spr = TRUE;
-							}
-						}
-					if(copy != NULL)dismantle_tree(copy);
-					
-					copy = NULL;
-					}
-				else
-					{
-					temper = make_taxon();
-					temper->daughter = newbie; 
-					newbie->parent = temper;
-					newbie = temper;
-					temper= NULL;
-					newbie->spr = TRUE;
-					
-					
-					better_score = regraft(latest, newbie, NULL, 1, maxswaps, numspectries, numgenetries); 
-					}
+				/* This branch is dead code when method==3 because do_search()
+				 * dispatches to tbr_new() instead of spr_new() for TBR. */
+				if(newbie != NULL) { dismantle_tree(newbie); newbie = NULL; }
 				}
 			if(!better_score && newbie != NULL) dismantle_tree(newbie);
 			newbie = NULL;
             }
-		if(better_score == TRUE || (position == branchpointer) || donenextlevel || tried_regrafts >= maxswaps || user_break
+		if(better_score == TRUE || (position == branchpointer) || donenextlevel || tried_regrafts >= maxswaps || user_break || rep_abandon
 		   || (hs_maxskips > 0 && skip_streak >= hs_maxskips))
 			{
 			x = y;
@@ -12667,10 +7772,12 @@ int regraft(struct taxon * position, struct taxon * newbie, struct taxon * last,
 	temptree[0] = '\0';
             
         
-	while(position->prev_sibling != NULL && !user_break) position = position->prev_sibling; /* rewinding */
+	{ int _g = 0, _gmax = number_of_taxa * 4 + 16;
+	  while(position->prev_sibling != NULL && !user_break && _g++ < _gmax) position = position->prev_sibling; /* rewinding */
+	  if(_g >= _gmax) rep_abandon = 1; }
 	start = position;
 	
-	while(position != NULL && !better_score && tried_regrafts < maxswaps && !user_break
+	while(position != NULL && !better_score && tried_regrafts < maxswaps && !user_break && !rep_abandon
 	      && (hs_maxskips == 0 || skip_streak < hs_maxskips))
 		{
 		if(steps < number_of_steps && position->parent != NULL && position->parent != last && !user_break) better_score = regraft(position->parent, newbie, position, steps+1, maxswaps, numspectries, numgenetries);  /* go up the tree */
@@ -12678,9 +7785,9 @@ int regraft(struct taxon * position, struct taxon * newbie, struct taxon * last,
 		}
 
 	position = start;
-	if(!better_score && !user_break)
+	if(!better_score && !user_break && !rep_abandon)
 		{
-		while(position != NULL && !better_score && tried_regrafts < maxswaps && !user_break
+		while(position != NULL && !better_score && tried_regrafts < maxswaps && !user_break && !rep_abandon
 		      && (hs_maxskips == 0 || skip_streak < hs_maxskips))
 			{
 			if(steps < number_of_steps && !user_break)
@@ -12690,10 +7797,11 @@ int regraft(struct taxon * position, struct taxon * newbie, struct taxon * last,
 			}
 		position = start;
 
-		while(position != NULL && !better_score && tried_regrafts < maxswaps && !user_break
+		while(position != NULL && !better_score && tried_regrafts < maxswaps && !user_break && !rep_abandon
 		      && (hs_maxskips == 0 || skip_streak < hs_maxskips))
 			{
-			if(!better_score && steps <= number_of_steps && position != tree_top && !user_break)
+			if(!better_score && steps <= number_of_steps && position != tree_top && !user_break
+			   && !is_ancestor_of(newbie, position))  /* skip if position is inside newbie's subtree — would create a cycle */
 				{
 				/* regraft newbie here -- skip position==tree_top: inserting there creates a
 				 * degree-2 internal node (invalid in a binary unrooted tree). The 3 edges
@@ -12727,7 +7835,33 @@ int regraft(struct taxon * position, struct taxon * newbie, struct taxon * last,
 
                                 for(i=0; i<Total_fund_trees; i++) tmp_fund_scores[i] = sourcetree_scores[i];
                                 interval2 = time(NULL);
-                                if(difftime(interval2, interval1) > 5)
+#ifdef _OPENMP
+                                /* Per-thread diagnostic report: each thread independently prints
+                                 * its own current state every hs_thread_report_interval seconds.
+                                 * thread_report_last is threadprivate so each thread has its own
+                                 * timer and fires independently of all other threads. */
+                                if(hs_thread_report_interval > 0 && omp_get_num_threads() > 1 &&
+                                   difftime(interval2, thread_report_last) >= hs_thread_report_interval)
+                                    {
+                                    thread_report_last = interval2;
+                                    double tr_el = difftime(interval2, par_search_start);
+                                    int    tr_em = (int)(tr_el / 60), tr_es = (int)tr_el % 60;
+                                    float _pbest3;
+                                    #pragma omp atomic read
+                                    _pbest3 = par_progress_best;
+                                    if(sprscore < 0.0f)
+                                        printf2("  [%2d:%02d]  thread %2d  rep %d  score=(searching)  tried=%d  skips=%d\n",
+                                                tr_em, tr_es, omp_get_thread_num(), hs_par_rep,
+                                                tried_regrafts, skip_streak);
+                                    else
+                                        printf2("  [%2d:%02d]  thread %2d  rep %d  %s=  %s%.6f  tried=%d  skips=%d\n",
+                                                tr_em, tr_es, omp_get_thread_num(), hs_par_rep,
+                                                ml_score_label(), ml_display_score(sprscore) < ml_display_score(_pbest3) ? "* " : "  ",
+                                                ml_display_score(sprscore), tried_regrafts, skip_streak);
+                                    fflush(stdout);
+                                    }
+#endif
+                                if(hs_progress_interval > 0 && difftime(interval2, interval1) >= hs_progress_interval)
                                     {
                                     if(hs_do_print)
                                         {
@@ -12751,30 +7885,41 @@ int regraft(struct taxon * position, struct taxon * newbie, struct taxon * last,
 #ifdef _OPENMP
                                     else if(omp_get_num_threads() > 1)
                                         {
-                                        /* Parallel: update shared best; thread 0 prints the global summary */
-                                        if(sprscore >= 0.0f)
-                                            #pragma omp critical (par_progress)
+                                        /* Parallel heartbeat: update shared best; the first thread to
+                                         * exceed the interval window claims the print slot by updating
+                                         * par_last_progress_time inside the critical section, so only one
+                                         * line is emitted per interval regardless of which thread fires.
+                                         * No rep attribution — the global best may have been found by any rep. */
+                                        int do_heartbeat = 0;
+                                        float heartbeat_score = -1.0f;
+                                        int   heartbeat_imp   = 0;
+                                        #pragma omp critical (par_progress)
+                                            {
+                                            if(sprscore >= 0.0f &&
+                                               (par_progress_best < 0.0f || sprscore < par_progress_best))
+                                                par_progress_best = sprscore;
+                                            if(par_progress_best >= 0.0f &&
+                                               difftime(interval2, par_last_progress_time) >= hs_progress_interval)
                                                 {
-                                                if(par_progress_best < 0.0f || sprscore < par_progress_best)
-                                                    par_progress_best = sprscore;
+                                                do_heartbeat   = 1;
+                                                heartbeat_score = par_progress_best;
+                                                heartbeat_imp   = (par_last_print_score < 0.0f ||
+                                                                   par_progress_best < par_last_print_score);
+                                                par_last_print_score   = par_progress_best;
+                                                par_last_progress_time = interval2;
                                                 }
-                                        if(omp_get_thread_num() == 0)
+                                            }
+                                        if(do_heartbeat)
                                             {
                                             double hs_el = difftime(interval2, par_search_start);
                                             int    hs_em = (int)(hs_el / 60), hs_es = (int)hs_el % 60;
-                                            if(par_progress_best < 0.0f)
-                                                printf2("  [%2d:%02d]  best so far = (searching...)\n",
-                                                        hs_em, hs_es);
-                                            else
+                                            if(hsprint)
                                                 {
-                                                int hs_imp = (par_last_print_score < 0.0f ||
-                                                              par_progress_best < par_last_print_score);
-                                                printf2("  [%2d:%02d]  best so far = %s%.6f\n",
+                                                printf2("  [%2d:%02d]  best so far = %s%.6f\tspr/tbr\n",
                                                         hs_em, hs_es,
-                                                        hs_imp ? "* " : "  ", ml_display_score(par_progress_best));
-                                                par_last_print_score = par_progress_best;
+                                                        heartbeat_imp ? "* " : "  ", ml_display_score(heartbeat_score));
+                                                fflush(stdout);
                                                 }
-                                            fflush(stdout);
                                             }
                                         }
 #endif
@@ -12868,6 +8013,42 @@ int regraft(struct taxon * position, struct taxon * newbie, struct taxon * last,
 												retained_supers[0] = realloc(retained_supers[0], (strlen(best_tree)+10)*sizeof(char));
                                                 strcpy(retained_supers[0], best_tree);
                                                 scores_retained_supers[0] = tmpscore;
+#ifdef _OPENMP
+                                                /* SPR/TBR parallel progress: only when THIS rep set the new
+                                                 * global best — the rep number in the message then matches
+                                                 * the rep that actually achieved the displayed score. */
+                                                if(omp_get_num_threads() > 1)
+                                                    {
+                                                    time_t _now = time(NULL);
+                                                    int new_global_best = 0;
+                                                    #pragma omp critical (par_progress)
+                                                        {
+                                                        if(par_progress_best < 0.0f || tmpscore < par_progress_best)
+                                                            {
+                                                            par_progress_best = tmpscore;
+                                                            new_global_best = 1;
+                                                            }
+                                                        }
+                                                    if(new_global_best &&
+                                                       (hs_progress_interval == 0 ||
+                                                        difftime(_now, par_last_progress_time) >= hs_progress_interval))
+                                                        {
+                                                        double hs_el = difftime(_now, par_search_start);
+                                                        int    hs_em = (int)(hs_el / 60), hs_es = (int)hs_el % 60;
+                                                        int    hs_imp = (par_last_print_score < 0.0f ||
+                                                                         par_progress_best < par_last_print_score);
+                                                        if(hsprint)
+                                                            {
+                                                            printf2("  [%2d:%02d]  best so far = %s%.6f\tspr/tbr\trep %d\n",
+                                                                    hs_em, hs_es,
+                                                                    hs_imp ? "* " : "  ", ml_display_score(par_progress_best), hs_par_rep);
+                                                            par_last_print_score = par_progress_best;
+                                                            par_last_progress_time = _now;
+                                                            fflush(stdout);
+                                                            }
+                                                        }
+                                                    }
+#endif
                                                 j=1;
                                                 while(scores_retained_supers[j] != -1 && j < number_retained_supers)
                                                     {
@@ -13399,7 +8580,7 @@ void generatetrees(void)
 				}
 				
 			interval1 = time(NULL);
-			printf2("\nProgress Indicator:");
+			printf2("\nProgress Indicator:\n");
 			fflush(stdout);
 			if(print_all_scores) allscores = fopen("allscores.txt", "w");
 
@@ -13411,7 +8592,7 @@ void generatetrees(void)
 					interval2 = time(NULL);
 					if(difftime(interval2, interval1) > 5) /* every 5 seconds print a dot to the screen */
 						{
-						printf2("=");
+						/* printf2("="); */
 						fflush(stdout);
 						interval1 = time(NULL);
 						}
@@ -13521,2182 +8702,19 @@ void generatetrees(void)
 
 /* xposition1, middle_number, xposition2, yposition0, yposition1, yposition2,
  * printcolour, print_coordinates, tree_coordinates, draw_histogram:
- * moved to viz.c */
-
-/* do_consensus: moved to consensus.c */
-#if 0
-void do_consensus(void)
-	{
-	int tree_type = 0, i, j, k, l,m, numtrees = 0, present = TRUE, number, error = FALSE, useguide = FALSE;
-	char **temptrees = NULL, c, tempname[1000], consensusfilename[1000], guidetreename[1000]; 
-	float percentage = 0;
-	FILE *consensusfile = NULL, *guidetreefile = NULL;
-	
-	guidetreename[0] = '\0';
-	consensusfilename[0] = '\0';
-	strcpy(consensusfilename, "consensus.ph");
-	 for(i=0; i<num_commands; i++)
-        {
-		if(strcmp(parsed_command[i], "filename") == 0)
-			{
-			strcpy(consensusfilename, parsed_command[i+1]);
-			}
-		if(strcmp(parsed_command[i], "guidetree") == 0)
-			{
-			strcpy(guidetreename, parsed_command[i+1]);
-			if(guidetreefile != NULL) fclose(guidetreefile);
-			if((guidetreefile = fopen(guidetreename, "r")) == NULL)		/* check to see if the file is there */
-				{								/* Open the source tree file */
-				printf2("Cannot open file %s\n", guidetreename);
-				error = TRUE;
-				}
-			useguide = TRUE;
-			}
-		if(strcmp(parsed_command[i], "method") == 0)
-			{
-			if(strcmp(parsed_command[i+1], "strict") == 0) percentage = 1.0;
-			else
-				{
-				if(strcmp(parsed_command[i+1], "majrule") == 0) percentage = 0.5;
-				else
-					{
-					if(strcmp(parsed_command[i+1], "minor") == 0) percentage = 0;
-					else
-						{
-						percentage = tofloat(parsed_command[i+1]);
-						if(percentage > 1)
-							{
-							printf2("Error: The cut off for a consensus tree must be between .5 and 1.0\n");
-							error = TRUE;
-							}
-						}
-					}
-				}
-			}
-
-
-		if(strcmp(parsed_command[i], "data") == 0)
-			{
-			if(strcmp(parsed_command[i+1], "source") == 0)
-				tree_type = 0;
-			else
-				{
-				if(strcmp(parsed_command[i+1], "supertrees") == 0)
-					tree_type = 1;
-				else
-					{
-					if(strcmp(parsed_command[i+1], "bootstraps") == 0)
-						tree_type = 2;
-					else
-						{
-						printf2("Error: %s is an invalid option for data\n", parsed_command[i+1]);
-						error = TRUE;
-						}
-					}
-				}
-			}
-		}
-	
-	
-	if(!error)
-		{
-		
-					
-			
-			
-		if(tree_type == 0)  /* do a consensus of the universally distributed source trees */
-			{
-			/*** count the nmber of universally distributed source trees */
-			for(i=0; i<Total_fund_trees; i++)
-				{
-				if(sourcetreetag[i])
-					{
-					present = TRUE;
-					for(k=0; k<number_of_taxa; k++)
-						{
-						if(presence_of_taxa[i][k] == FALSE)
-							present = FALSE;
-						}
-					if(present) numtrees++;
-					}
-				}
-				
-			if(numtrees > 0)
-				{
-				
-				if(score_of_bootstraps != NULL)
-					free(score_of_bootstraps);
-				score_of_bootstraps = malloc(numtrees*sizeof(float));
-				tempname[0] = '\0';
-				temptrees = malloc(numtrees*sizeof(char*));
-				for(i=0; i<numtrees; i++)
-					{
-					score_of_bootstraps[i] = 1;
-					temptrees[i] = malloc(TREE_LENGTH*sizeof(char));
-					temptrees[i][0] = '\0';
-					}
-				j=0; k=0;
-				for(i=0; i<Total_fund_trees; i++)
-					{
-					if(sourcetreetag[i])
-						{
-						present = TRUE;
-						for(k=0; k<number_of_taxa; k++)
-							{
-							if(presence_of_taxa[i][k] == FALSE)
-								present = FALSE;
-							}
-						if(present)
-							{
-							k=0;l=0;
-							while(fundamentals[i][k] != ';')
-								{
-								switch(fundamentals[i][k])
-									{
-									case '(':
-									case ',':
-										temptrees[j][l] = fundamentals[i][k];
-										k++; l++;
-										break;
-									case ')':
-										temptrees[j][l] = fundamentals[i][k];
-										k++; l++;
-										while(fundamentals[i][k] != ')' && fundamentals[i][k] != '(' && fundamentals[i][k] != ':' && fundamentals[i][k] != ',' && fundamentals[i][k] != ';')
-											{
-											temptrees[j][l] = fundamentals[i][k];
-											k++; l++;
-											}
-										break;
-									case ':':
-										temptrees[j][l] = fundamentals[i][k];
-										k++; l++;
-										while(fundamentals[i][k] != ')' && fundamentals[i][k] != '(' && fundamentals[i][k] != ':' && fundamentals[i][k] != ',' && fundamentals[i][k] != ';')
-											{
-											temptrees[j][l] = fundamentals[i][k];
-											k++; l++;
-											}
-										
-										break;
-									default:
-										m = 0;
-										while(fundamentals[i][k] != ')' && fundamentals[i][k] != '(' && fundamentals[i][k] != ':' && fundamentals[i][k] != ',' && fundamentals[i][k] != ';')
-											{
-											tempname[m] = fundamentals[i][k];
-											m++; k++;
-											}
-										tempname[m] = '\0';
-										number = toint(tempname);
-										m=0;
-										while(taxa_names[number][m] != '\0')
-											{
-											temptrees[j][l] = taxa_names[number][m];
-											m++; l++;
-											}
-										break;
-									}
-								}
-							temptrees[j][l] = ';';
-							temptrees[j][l+1] = '\0';
-							j++;
-						
-
-							}
-						}
-					}
-				printf2("\nConsensus settings:\n");
-				printf2("\tConsensus of %d universally distributed source trees\n", numtrees);
-				if(useguide)
-					{
-					printf2("\tOnly relationships as defined by the guidetree in %s ", guidetreename);
-					}
-				else
-					{
-					printf2("\tOnly relationships with ");
-					if(percentage == 1) printf2("100%% support ");
-					if(percentage == 0) printf2("50%% support or greater (including congruent minor components) ");
-					if(percentage != 0 && percentage != 1) printf2("%0.0f%% support or greater ", percentage*100);
-					}
-				printf2("are included in the consensus\n");
-				printf2("\tConsensus file = %s\n", consensusfilename);
-				
-				consensusfile = fopen(consensusfilename, "w");
-				
-				consensus(numtrees, temptrees, numtrees, percentage, consensusfile, guidetreefile);
-				
-				fclose(consensusfile);
-				}
-			else
-				printf2("There are no tress that contain all the taxa, unable to construct a consensus tree\n");
-					
-			}
-		}
-	
-	}
-#endif
 
     
 /*** consensus is a function to carry out a majority-rule consensus on the results of a bootstrap analysis ****/
-/* consensus: moved to consensus.c */
-#if 0
-void consensus(int num_trees, char **trees, int num_reps, float percentage, FILE *outfile, FILE *guidetreefile)
-    {
-    int i, j, k, q, r, same1 = FALSE, same2 = FALSE, same3 = FALSE, same4 = FALSE,same5 = FALSE,same6 = FALSE,same7 = FALSE,same8 = FALSE, l, **sets, *in, *tmpcoding = NULL, end = FALSE, found = -1;
-	/* The first thing needed is to create a Baum-Ragan coding scheme holding all the information from the bootstrapped trees */
-	char **string, *tmp = NULL, name[100], *rest = malloc(TREE_LENGTH * sizeof(char)), value[100];
-	if(!rest) { printf2("Error: out of memory in consensus\n"); return; }
-	int count, first = -1, support = 0, **shorthand = NULL, subdivisions = ((int)(number_of_taxa/16))+1;
-	float tmpnumber = 0;
-	
-	
-    num_partitions = MRP_matrix(trees, num_trees, TRUE);
-/*	shorthand = malloc(num_partitions*sizeof(int *));
-	for(i=0; i<num_partitions; i++)
-		{
-		shorthand[i] = malloc(subdivisions*sizeof(int));
-		for(j=0; j<subdivisions; j++) shorthand[i][j] = 0;
-		}
-*/		
-	tmp = malloc(TREE_LENGTH*sizeof(char));
-	tmp[0] = '\0';
-	name[0] = '\0';
-	rest[0] = '\0';
-	value[0] = '\0';
-	
-	/** calculated the binary evivalent in blocks of 16 bits */
-	/*  for(i=0; i<num_partitions-1; i++)
-        {
-        if(total_coding[i][0] != 4)
-            {
-			k=-1; q=0;
-			for(j=0; j<number_of_taxa; j++)
-				{
-				if(j%16 == 0)
-					{
-					k++; shorthand[i][k]=0;
-					if(k != 0) printf2("%d ", shorthand[k-1]);
-					}
-				shorthand[i][k] += (((int)(pow(2, j%16))) * total_coding[i][j]);
-				}
-			 printf2("%d ", shorthand[i][k]);
-			printf2("\n");
-			}
-		}
-	 */
-	   for(i=0; i<num_partitions-1; i++)
-        {
-        if(total_coding[i][0] != 4)
-            {
-            for(j=i+1; j<num_partitions; j++)
-                {
-                if(total_coding[j][0] != 4)
-                    {
-                    same1 = TRUE; same2=TRUE;
-                    for(k=0; k<number_of_taxa; k++)
-                        {
-                        if(total_coding[i][k] != total_coding[j][k])  /* if this not the same partition */
-                            {
-                            same1 = FALSE;
-							if(same2 == FALSE) k = number_of_taxa;
-                            }
-                        if(total_coding[i][k] == 3 || total_coding[j][k] == 3)  /* this section is to see if its the same partition but coded in the opposite manner (0s switched with 1s)  */
-                            {
-                            if(total_coding[j][k] != 3 || total_coding[i][k] != 3)
-								{
-                                same2 = FALSE;
-								if(same1 == FALSE) k = number_of_taxa;
-								}
-                            }
-                        else
-                            {
-                            if(total_coding[i][k] == total_coding[j][k])
-                                {
-                                same2 = FALSE;
-								if(same1 == FALSE) k = number_of_taxa;
-                                }
-                            }
-                        }
-                    if(same1 || same2)
-                        {
-                        partition_number[i] += partition_number[j];
-                        for(k=0; k<number_of_taxa; k++)
-                            total_coding[j][k] = 4;
-                        }
-                    }
-                }
-            }
-        }
-    /* Next we need to bunch up the array, removing duplicates of the same partitions */
-    k=0;l=1;
-    for(i=0; i<num_partitions-1; i++)
-        {
-        if(total_coding[i][0] == 4)
-            {
-            l=i+1;
-            while(l < num_partitions && total_coding[l][0] == 4) l++;
-            if(l != num_partitions)
-                {
-                for(j=0; j<number_of_taxa; j++)
-                    {
-                    total_coding[i][j] = total_coding[l][j];
-                    total_coding[l][j] = 4;
-                    }
-                partition_number[i] = partition_number[l];
-                k++;
-                }
-            else
-                i = num_partitions;
-            }
-        else
-            k++;
-        }
-
-    k=0;
-    for(i=0; i<num_partitions; i++)
-        if(total_coding[i][0] != 4) k++;
-        
-    total_partitions= num_partitions;
-    /* k isthe number of partitions that have been turned into 4's, this is the number of repeated partitions */            
-    num_partitions = k;
-
-	/* sort the partitions according to their representation (score) */
-	tmpcoding = malloc(number_of_taxa*sizeof(int));
-	for(i=0; i<num_partitions; i++)
-		{
-		for(j=i+1; j<num_partitions; j++)
-			{
-			if(partition_number[i] < partition_number[j])
-				{
-				tmpnumber = partition_number[j];
-				for(k=0; k<number_of_taxa; k++)
-					tmpcoding[k] = total_coding[j][k];
-				
-				for(k=j; k>i; k--)
-					{
-					partition_number[k] = partition_number[k-1];
-					for(q=0; q<number_of_taxa; q++)
-						total_coding[k][q] = total_coding[k-1][q];
-					}
-				partition_number[i] = tmpnumber;
-				for(k=0; k<number_of_taxa; k++)
-						total_coding[i][k] = tmpcoding[k];
-				j--;
-				}
-			
-			}
-		}
-
-	free(tmpcoding);
-/*** There are going to be two ways of summarising the results of a consensus, the user can ask for the best supported tree (default) or give a guidetree ("best tree") onto which the support tree is to be projected. */
-	if(guidetreefile == NULL)	
-		{
-		/** From the remaining splits, only retain those that have at least x% representation (this would be 50% for maj-rule or 100% for strict) **/
-		in = malloc(num_partitions*sizeof(int));  /* will record the partitions to be included */
-		for(i=0; i<num_partitions; i++)
-			in[i] = TRUE;
-			
-		if(percentage < 0.5)
-			tmpnumber = 0.5;
-		else
-			tmpnumber = percentage;
-		for(i=0; i<num_partitions; i++)
-			{
-			if((float)(partition_number[i]/num_reps) >= tmpnumber)
-				{
-				for(k=0; k<i; k++)
-					{
-					if(in[k] == TRUE)
-						{
-						same1 = same2 = same3 = same4 = same5 = same6 = same7 = same8 = TRUE;
-						for(j=0; j<number_of_taxa; j++)
-							{
-							/* are all the 1s in this all 1s or all zeros in the earler one? */
-							if(total_coding[i][j] == 1)
-								{
-								if(total_coding[i][j] != total_coding[k][j])
-									same1 = FALSE;
-								else
-									same2 = FALSE;
-								}
-							if(total_coding[i][j] == 0)
-								{
-								if(total_coding[i][j] != total_coding[k][j])
-									same3 = FALSE;
-								else
-									same4 = FALSE;
-								}
-							/* are all the 1s in this all 1s or all zeros in the earler one? */
-							if(total_coding[k][j] == 1)
-								{
-								if(total_coding[i][j] != total_coding[k][j])
-									same5 = FALSE;
-								else
-									same6 = FALSE;
-								}
-							if(total_coding[k][j] == 0)
-								{
-								if(total_coding[i][j] != total_coding[k][j])
-									same7 = FALSE;
-								else
-									same8 = FALSE;
-								}
-							}
-						if(same1 != TRUE && same2 != TRUE && same3 != TRUE && same4 != TRUE && same5 != TRUE && same6 != TRUE && same7 != TRUE && same8 != TRUE)
-							in[i] = FALSE;
-							
-							
-						}
-					}
-				}
-			else
-				in[i] = FALSE;
-			}
-			
-	/**** Now do the same but identifying the minor components ***/
-		if(percentage == 0)
-			{
-			for(i=0; i<num_partitions; i++)
-				{
-				if(in[i] == FALSE)
-					{
-					in[i] = TRUE;
-					for(k=0; k<i; k++)
-						{
-						if(in[k] == TRUE)
-							{
-							same1 = same2 = same3 = same4 = same5 = same6 = same7 = same8 = TRUE;
-							for(j=0; j<number_of_taxa; j++)
-								{
-								/* are all the 1s in this all 1s or all zeros in the earler one? */
-								if(total_coding[i][j] == 1)
-									{
-									if(total_coding[i][j] != total_coding[k][j])
-										same1 = FALSE;
-									else
-										same2 = FALSE;
-									}
-								if(total_coding[i][j] == 0)
-									{
-									if(total_coding[i][j] != total_coding[k][j])
-										same3 = FALSE;
-									else
-										same4 = FALSE;
-									}
-								/* are all the 1s in this all 1s or all zeros in the earler one? */
-								if(total_coding[k][j] == 1)
-									{
-									if(total_coding[i][j] != total_coding[k][j])
-										same5 = FALSE;
-									else
-										same6 = FALSE;
-									}
-								if(total_coding[k][j] == 0)
-									{
-									if(total_coding[i][j] != total_coding[k][j])
-										same7 = FALSE;
-									else
-										same8 = FALSE;
-									}
-								}
-							if(same1 != TRUE && same2 != TRUE && same3 != TRUE && same4 != TRUE && same5 != TRUE && same6 != TRUE && same7 != TRUE && same8 != TRUE)
-								in[i] = FALSE;
-								
-								
-							}
-						}
-					}
-				}
-			}
-
-		
-		printf2("\n\n\nSets included in the consensus tree\n");
-		for(i=0; i<num_partitions; i++)
-			{
-			if(in[i] && (float)(partition_number[i]/num_reps) >= percentage && (float)(partition_number[i]/num_reps) >= .5)
-				{
-				printf2("\t");
-				for(j=0; j<number_of_taxa; j++)
-					{
-					if(total_coding[i][j] == 1)
-						printf2("*");
-					else
-						printf2(".");
-					}
-				printf2("\t%.2f\n", (float)(partition_number[i]/num_reps));
-				}
-			}
-		
-		printf2("\n\n\nMinor Components included in the consensus tree\n");
-		for(i=0; i<num_partitions; i++)
-			{
-			if(in[i] && (float)(partition_number[i]/num_reps) < .5)
-				{
-				printf2("\t");
-				for(j=0; j<number_of_taxa; j++)
-					{
-					if(total_coding[i][j] == 1)
-						printf2("*");
-					else
-						printf2(".");
-					}
-				printf2("\t%.2f\n", (float)(partition_number[i]/num_reps));
-				}
-			}
-		
-		printf2("\n\nSets not included in the consensus tree\n");
-		for(i=0; i<num_partitions; i++)
-			{
-			if(!in[i])
-				{
-				printf2("\t");
-				for(j=0; j<number_of_taxa; j++)
-					{
-					if(total_coding[i][j] == 1)
-						printf2("*");
-					else
-						printf2(".");
-					}
-				printf2("\t%.2f\n", (float)(partition_number[i]/num_reps));
-				}
-			}
-		/* build a nested parenthesis tree from the remaining splits and return. This is the result */
-		
-		/** next start to put together the tree from the matrix **/
-		/** starting with those partitions with two 1s and working up to those partitions with n-2 partitions, put the tree together **/
-		
-		string = malloc(number_of_taxa*sizeof(char*));
-		for(i=0; i<number_of_taxa; i++)
-			{
-			string[i] = malloc(TREE_LENGTH*sizeof(char));
-			string[i][0] = '\0';
-			strcpy(string[i], taxa_names[i]);
-			}
-		
-		tmp[0] = '\0';
-		for(i=2; i<number_of_taxa-2; i++)
-			{
-			same1 = FALSE;
-			/** check each partition to see if it has i number of partitions */
-			for(j=0; j<num_partitions; j++)
-				{
-				if(in[j])
-					{
-					count = 0;
-					for(k=0; k<number_of_taxa; k++)
-						{
-						
-						count += total_coding[j][k];
-						}
-					
-					if(count == i || count == number_of_taxa-i)
-						{
-						/** if it is transposed we need to turn it back around **/
-						if(count == number_of_taxa-i)
-							{
-							for(k=0; k<number_of_taxa; k++)
-								{
-								if(total_coding[j][k] == 1)
-									total_coding[j][k] = 0;
-								else
-									total_coding[j][k] = 1;
-								}
-							}
-						
-						
-						first = -1;
-						for(k=0; k<number_of_taxa; k++)
-							{
-							if(total_coding[j][k] == 1 && first == -1)
-								{
-								first = k;
-								strcpy(tmp, "(");
-								strcat(tmp, string[first]);
-								strcpy(string[first], tmp);
-								}
-							else
-								{
-								if(total_coding[j][k] == 1)
-									{
-									strcat(string[first], ",");
-									strcat(string[first], string[k]);
-									for(q=0; q<num_partitions; q++)
-										total_coding[q][k] = 0;
-									strcpy(string[k], "");
-									
-									}
-								}
-							}
-						sprintf(tmp, ")%.2f", (float)(partition_number[j]/num_reps));
-						strcat(string[first], tmp);
-						same1 = TRUE;
-						}
-					}
-				}
-			if(same1) i =1;
-			}
-		strcpy(tmp, "(");
-		first = FALSE;
-		for(i=0; i<number_of_taxa; i++)
-			{
-			if(strcmp(string[i], "") != 0)
-				{
-				if(!first)
-					{
-					first = TRUE;
-					strcat(tmp, string[i]);
-					}
-				else
-					{
-					strcat(tmp, ",");
-					strcat(tmp, string[i]);
-					}
-				}
-			}
-		strcat(tmp, ");");	
-		tree_coordinates(tmp, TRUE, TRUE, FALSE, -1);
-		fprintf(outfile, "%s\n", tmp);
-		free(in);
-		for(i=0; i<number_of_taxa; i++)
-			free(string[i]);
-		free(string);
-		}
-	else  /* we are going to use a guide tree */
-		{
-		in = malloc(number_of_taxa*sizeof(int));
-		for(i=0; i< number_of_taxa; i++) in[i] = FALSE;
-		
-		/** read in the guide tree **/
-		i=0;
-		tmp[i] = getc(guidetreefile);
-		i++;
-		while(!feof(guidetreefile))
-			{
-			tmp[i] = getc(guidetreefile);
-			if(tmp[i-1] != ';')i++;
-			}
-		if(tmp[i] != ';' )tmp[i] = '\0';
-		else tmp[i+1] = '\0';
-		/** unroot the guide tree **/
-		unroottree(tmp);
-		/** identify the taxa inside each of the nested parentheses **/
-		i=1; /* we don't do the first parenthesis */
-		
-		
-		while(tmp[i] != ';' && tmp[i] != '\0')
-			{
-			switch(tmp[i])
-				{
-				case '(':
-					/** find the corresponding closing parenthesis and remember all the taxa in between **/
-					j=i+1;
-					for(k=0; k<number_of_taxa; k++) in[k] = FALSE;
-					k=1;
-					end = FALSE;
-					while(tmp[j] != '\0' && !end)
-						{
-						switch(tmp[j])
-							{
-							case '(':
-								k++;
-								j++;
-								break;
-							case ')':
-								k--;
-								j++;
-								if(k == 0) end = TRUE;
-								while(tmp[j] != '(' && tmp[j] != ')' && tmp[j] != ',' && tmp[j] != ';' && tmp[j]!= ':' && tmp[j] != '\0') j++;
-								break;
-							case ',':
-								j++;
-								break;
-							case ':':
-								while(tmp[j] != '(' && tmp[j] != ')' && tmp[j] != ',' && tmp[j] != ';' && tmp[j] != '\0') j++;
-								break;
-							default:
-								q=0;
-								while(tmp[j] != '(' && tmp[j] != ')' && tmp[j] != ',' && tmp[j] != ';' && tmp[j]!= ':' && tmp[j] != '\0')
-									{
-									name[q] = tmp[j];
-									j++; q++;
-									}
-								name[q] = '\0';
-								/** find this name **/
-								for(q=0; q<number_of_taxa; q++)
-									{
-									if(strcmp(name, taxa_names[q]) == 0)
-										{
-										in[q] = TRUE;
-										q = number_of_taxa;
-										}
-									}
-								break;
-							}
-						}
-
-					
-					/** we now have a list of all the taxa inside this set of parentheses, j points to where we need to put the support found **/
-					support = 0;
-					/** find the partition that matches the set of taxa in "in" */
-					
-					found = -1;
-					for(k=0; k<num_partitions; k++)
-						{
-						if(total_coding[k][0] != 4)
-							{
-							same1 = same2 = TRUE;
-							for(q=0; q<number_of_taxa; q++)
-								{
-								/* are all the 1s in this all 1s or all zeros in the earler one? */
-								if(in[q] == TRUE)
-									{
-									if(total_coding[k][q] == 1)
-										same1 = FALSE;
-									else
-										same2 = FALSE;
-									}
-								if(in[q] == FALSE)
-									{
-									if(total_coding[k][q] == 0)
-										same1 = FALSE;
-									else
-										same2 = FALSE;
-									}
-								}
-							if(same1 == TRUE || same2 == TRUE)
-								{
-								/* this is the partition */
-								found = k;
-								k = num_partitions;
-								}
-							}
-						}
-					/* record everything from position j to the end into the array "rest" **/
-					q=0; r = j;
-					while(tmp[r] != '\0')
-						{
-						rest[q] = tmp[r];
-						tmp[r] = '\0';
-						q++; r++;
-						}
-					rest[q] = '\0';
-					if(found != -1) sprintf(value, "%.2f", (float)(partition_number[found]/num_reps));
-					else sprintf(value, "0.00");
-					strcat(tmp, value);
-					strcat(tmp, rest);
-					i++;
-					break;
-				default:
-					i++;
-					break;
-				}
-			}
-		tree_coordinates(tmp, TRUE, TRUE, FALSE, -1);
-		fprintf(outfile, "%s\n", tmp);
-		free(in);
-		}
-	free(rest);
-	free(tmp);
-    }
-#endif
 
 
 
-/* showtrees: moved to tree_io.c */
-#if 0
-void showtrees(int savet)
-	{
-	int worst = -2, best = -2,savetrees = FALSE, found = TRUE, taxachosen = 0, counter = 0, mode[5] = {TRUE, FALSE, FALSE, FALSE, FALSE}, start = 0, end = Total_fund_trees, error = FALSE, i=0, j=0, k=0, l=0, num=0, equalto = -1, greaterthan =0, lessthan = 1000000000, taxa_count = 0;
-	char *temptree, string_num[10], namecontains[NAME_LENGTH], **containstaxa = NULL, savedfile[100];
-	char *temptree1 = malloc(TREE_LENGTH * sizeof(char));
-	char *tmp = malloc(TREE_LENGTH * sizeof(char));
-	if(!temptree1 || !tmp) { free(temptree1); free(tmp); printf2("Error: out of memory in showtrees\n"); return; }
-	FILE *showfile = NULL;
-	float bestscore =10000000, worstscore = 0, **tempscores = NULL;
-	int *tempsourcetreetag = NULL, display = TRUE, best_total = -1, total = 0, display_fullnames = FALSE, taxaorder=0;
-	struct taxon *position = NULL, *species_tree = NULL, *gene_tree = NULL, *best_mapping = NULL, *unknown_fund = NULL, *pos = NULL,*copy = NULL;
-	
-	tempscores = malloc(Total_fund_trees*sizeof(float *));
-	for(i=0; i<Total_fund_trees; i++)
-		{
-		tempscores[i] = malloc(2*sizeof(float));
-		tempscores[i][0] = 0;
-		tempscores[i][1] = i;
-		}
-	
-	tempsourcetreetag = malloc(Total_fund_trees*sizeof(int));
-	for(i=0; i<Total_fund_trees; i++) tempsourcetreetag[i] = sourcetreetag[i];
-	savedfile[0] = '\0';
-	if(savet == TRUE)
-		{
-		savetrees=TRUE;
-		display=FALSE;
-		strcpy(savedfile, "savedtrees.txt");
-		}
-	else
-		strcpy(savedfile, "showtrees.txt");
-
-	containstaxa = malloc(number_of_taxa*sizeof(char*));
-	for(i=0; i<number_of_taxa; i++)
-		{
-		containstaxa[i] = malloc(NAME_LENGTH*sizeof(char));
-		containstaxa[i][0] = '\0';
-		}
-	temptree = malloc(TREE_LENGTH*sizeof(char));
-	temptree[0] = '\0';
-	temptree1[0] = '\0';
-	for(i=0; i<num_commands; i++)
-		{
-		if(strcmp(parsed_command[i], "fullnames") == 0)
-			{
-			if(strcmp(parsed_command[i+1], "no") == 0)
-				display_fullnames = FALSE;
-			else
-				{
-				if(strcmp(parsed_command[i+1], "yes") == 0)
-					{
-					display_fullnames = TRUE;
-					}
-				else
-					{
-					printf2("ERROR: %s not valid modifier of \"fullnames\"\n", parsed_command[i+1]);
-					error = TRUE;
-					}
-				}
-			}
-		if(strcmp(parsed_command[i], "display") == 0)
-			{
-			if(strcmp(parsed_command[i+1], "no") == 0)
-				display = FALSE;
-			else
-				{
-				if(strcmp(parsed_command[i+1], "yes") == 0)
-					{
-					display = TRUE;
-					}
-				else
-					{
-					printf2("ERROR: %s not valid modifier of \"display\"\n", parsed_command[i+1]);
-					error = TRUE;
-					}
-				}
-			}
-		if(savet==FALSE) /* If this has been calledf  from the showtrees command */
-			{
-			if(strcmp(parsed_command[i], "savetrees") == 0)
-				{
-				if(strcmp(parsed_command[i+1], "yes") == 0)
-					savetrees = TRUE;
-				else
-					{
-					if(strcmp(parsed_command[i+1], "no") == 0)
-						savetrees = FALSE;
-					else
-						{
-						printf2("Error: %s not a valid modifier of \"savetrees\"\n", parsed_command[i+1]);
-						error = TRUE;
-						}
-					}
-				}
-			}
-		if(strcmp(parsed_command[i], "filename") == 0)
-			strcpy(savedfile, parsed_command[i+1]);
-			
-		if(strcmp(parsed_command[i], "range") == 0)
-			{
-			mode[0] = TRUE;
-			start = toint(parsed_command[i+1])-1;
-			end = toint(parsed_command[i+2])-1;
-			if(start <0 || end > Total_fund_trees)
-				{
-				error = TRUE;
-				printf2("Error: the start of the range must not be less than 1 and the end of the range must no be greater than the number of source trees\n");
-				}
-			}
-		if(strcmp(parsed_command[i], "namecontains") == 0)
-			{
-			namecontains[0] = '\0';
-			strcpy(namecontains, parsed_command[i+1]);
-			mode[2] = TRUE;
-			}
-		if(strcmp(parsed_command[i], "containstaxa") == 0)
-			{
-			namecontains[0] = '\0';
-			if(taxachosen < number_of_taxa)
-				{
-				strcpy(containstaxa[taxachosen], parsed_command[i+1]);
-				taxachosen++;
-				}
-			else
-				{
-				printf2("Error: the number of taxa chosen os greater than the number of taxa in memory\n");
-				error = TRUE;
-				}
-			mode[3] = TRUE;
-			}
-			
-		if(strcmp(parsed_command[i], "score") == 0)
-			{
-			mode[4] = TRUE;
-			bestscore = atof(parsed_command[i+1]);
-			worstscore = atof(parsed_command[i+2]);
-			}
-
-		if(strcmp(parsed_command[i], "size") == 0)
-			{
-			mode[1] = TRUE;
-			if(strcmp(parsed_command[i+1], "equalto") == 0)
-				{
-				equalto = toint(parsed_command[i+2]);
-				
-				if(equalto < 4 || equalto > number_of_taxa)
-					{
-					error = TRUE;
-					printf2("Error in size \"equalto\"\n\n");
-					}
-				}
-			else
-				{
-				if(strcmp(parsed_command[i+1], "greaterthan") == 0)
-					{
-					greaterthan = toint(parsed_command[i+2]);
-					
-					if(greaterthan >= number_of_taxa)
-						{
-						error = TRUE;
-						printf2("Error in size \"greaterthan\"\n\n");
-						}
-					}
-				else
-					{
-					if(strcmp(parsed_command[i+1], "lessthan") == 0)
-						{
-						lessthan = toint(parsed_command[i+2]);
-						
-						if(lessthan < 5)
-							{
-							error = TRUE;
-							printf2("Error in size \"lessthan\"\n\n");
-							}
-						}
-					else
-						{
-						printf2("Error: %s not valid option for \"size\"\n", parsed_command[i+1]);
-						error = TRUE;
-						}
-					}
-				}
-			}
-
-
-			
-		}
-	if(mode[4])
-		{
-		if(trees_in_memory == 0)
-			{
-			printf2("Error: There are no saved supertrees in memory from which to calculate scores\n");
-			error = TRUE;
-			}
-		}
-			
-	if(savetrees)
-		{
-		if((showfile = fopen(savedfile, "w")) == NULL)		/* check to see if the file is there */
-			{								/* Open the source tree file */
-			printf2("Cannot open file %s\n", savedfile);
-			error = TRUE;
-			}
-		}
-	if(!error)
-		{
-		if(savet == TRUE)
-			printf2("savetrees settings:\n\n");
-		else
-			printf2("showtrees settings:\n\n");
-		if(savetrees)
-			printf2("\tsaving selection of trees in phylip format to file: %s\n", savedfile);
-		
-		
-		
-		if(mode[0])  /* Specifies a particular range of trees - usually true by default */
-			{
-			for(i=0; i<start; i++)
-				tempsourcetreetag[i] = FALSE;
-			for(i=end+1; i<Total_fund_trees; i++)
-				tempsourcetreetag[i] = FALSE;
-			}
-			
-		if(mode[1]) /* Looks for trees of a particular size */
-			{
-			for(i=0; i<Total_fund_trees; i++)
-				{
-				strcpy(temptree, fundamentals[i]);
-				returntree(temptree);
-				/* build the tree in memory */
-				/****** We now need to build the Supertree in memory *******/
-				if(tree_top != NULL)
-					{
-					dismantle_tree(tree_top);
-					tree_top = NULL;
-					}
-				temp_top = NULL;
-				tree_build(1, temptree, tree_top, 1, -1, 0);
-
-				tree_top = temp_top;
-				temp_top = NULL;
-				
-				/* check how many taxa are on the tree */
-				taxa_count = count_taxa(tree_top, 0);
-				
-				if(equalto != -1)
-					{
-					if(taxa_count != equalto)
-						tempsourcetreetag[i] = FALSE;
-					}
-				else
-					{
-					if(taxa_count >= lessthan || taxa_count <= greaterthan)
-						tempsourcetreetag[i] = FALSE;
-					}
-				}
-			}
-		if(mode[2])
-			{
-			for(i=0; i<Total_fund_trees; i++)
-				{
-				if(strstr(tree_names[i], namecontains) == NULL)
-					{
-					tempsourcetreetag[i] = FALSE;
-					}
-				}
-			}
-		if(mode[3]) /* Look for trees that contain a particular taxon */
-			{
-			for(i=0; i<Total_fund_trees; i++)
-				{
-				strcpy(temptree, fundamentals[i]);
-				returntree(temptree);
-				/* build the tree in memory */
-				/****** We now need to build the Supertree in memory *******/
-				if(tree_top != NULL)
-					{
-					dismantle_tree(tree_top);
-					tree_top = NULL;
-					}
-				temp_top = NULL;
-				tree_build(1, temptree, tree_top, 1, -1, 0);
-
-				tree_top = temp_top;
-				temp_top = NULL;
-				
-
-				found = TRUE;
-				for(j=0; j<taxachosen; j++)
-					{
-					if(found == TRUE)
-						found = find_taxa(tree_top, containstaxa[j]); 
-					}
-				if(!found)
-					tempsourcetreetag[i] = FALSE;
-				}
-			}
-
-		if(mode[4])
-			{
-			for(i=0; i<Total_fund_trees; i++)
-				{
-				if(bestscore != worstscore)
-					{
-					if(sourcetree_scores[i] < bestscore || sourcetree_scores[i] > worstscore)
-						tempsourcetreetag[i] = FALSE;
-					}
-				else
-					{
-					if(sourcetree_scores[i] < bestscore-0.000001 || sourcetree_scores[i] > worstscore+0.000001)
-						tempsourcetreetag[i] = FALSE;
-					}
-				}
-			}
-	
-		for(j=0; j<Total_fund_trees; j++)
-	        {
-	        if(tempsourcetreetag[j] && sourcetreetag[j])
-				{
-				if(savetrees)
-					{	
-			        if(tree_top != NULL) dismantle_tree(tree_top);  /* Dismantle any trees already in memory */
-			        tree_top = NULL;
-			        
-			        temp_top = NULL;
-			        taxaorder=0;
-			        temptree[0] = '\0';
-			        strcpy(temptree, fundamentals[j]);
-					returntree_fullnames(temptree, j);
-			        basic_tree_build(1, temptree, tree_top, TRUE);
-
-			        tree_top = temp_top;
-			        temp_top = NULL;
-			        reset_tree(tree_top);
-
-			        shrink_tree(tree_top);    /* Shrink the pruned tree by switching off any internal nodes that are not needed */
-			        temptree[0] = '\0'; /* initialise the string */
-			        if(print_pruned_tree(tree_top, 0, temptree, TRUE, j) >1)
-			            {
-			            tmp[0] = '\0';
-			            strcpy(tmp, "(");
-			            strcat(tmp, temptree);
-			            strcat(tmp, ")");
-			            strcpy(temptree, tmp);
-			            }
-			        strcat(temptree, ";");
-
-			        if(strcmp(tree_names[j], "") != 0)
-			        	fprintf(showfile, "%s[%s", temptree, tree_names[j]);
-			        else
-			        	fprintf(showfile, "%s[%d", temptree, j);
-			        if(trees_in_memory > 0)
-						fprintf(showfile, " %f]\n", sourcetree_scores[j]);
-					else
-						fprintf(showfile, "]\n");
-					}
-				if(display)
-					{
-					temptree[0] = '\0';
-					strcpy(temptree, fundamentals[j]);
-					returntree_fullnames(temptree, j);
-
-					/*returntree(temptree); */
-					printf2("\n\n\nTree number %d",j+1);
-					if(strcmp(tree_names[j], "")!=0) printf2("\nTree name = %s", tree_names[j]); 
-					printf2("\nWeight = %f\n", tree_weights[j]);
-					if(trees_in_memory > 0)printf2("Score = %f\n", sourcetree_scores[j]);
-					tree_coordinates(temptree, TRUE, TRUE, FALSE, -1);
-					}
-				counter++;
-		        }
-			}
-
-
-/*
-		for(i=0; i<Total_fund_trees; i++)
-			{
-			if(tempsourcetreetag[i] && sourcetreetag[i])
-				{
-				strcpy(temptree, fundamentals[i]);
-				returntree(temptree);
-				if(savetrees)
-					{
-					fprintf(showfile, "%s ", temptree);
-					if(strcmp(tree_names[i], "") != 0)
-						fprintf(showfile, "[%s] ", tree_names[i]);
-					if(trees_in_memory > 0)
-						fprintf(showfile, " [%f]\n", sourcetree_scores[i]);
-					else
-						fprintf(showfile, "\n");
-					}
-				if(display)
-					{
-					printf2("\n\n\nTree number %d\nTree name = %s\n", i+1, tree_names[i]);
-					printf2("Weight = %f\n", tree_weights[i]);
-					if(trees_in_memory > 0)printf2("Score = %f\n", sourcetree_scores[i]);
-					tree_coordinates(temptree, TRUE, TRUE, FALSE, -1);
-					}
-				counter++;
-				}
-			} */ /* Old save trees before names were delimited */
-		if(savet == TRUE)
-			printf2("\n%d source trees met with the criteria specified and saved to file\n", counter);
-		else
-			printf2("\n%d source trees met with the criteria specified\n", counter);
-		}
-	if(savetrees) fclose(showfile);
-	free(temptree);
-	free(temptree1);
-	free(tmp);
-	for(i=0; i<Total_fund_trees; i++)
-		free(tempscores[i]);
-	for(i=0; i<number_of_taxa; i++)
-		free(containstaxa[i]);
-	free(tempscores);
-	free(containstaxa);
-	free(tempsourcetreetag);
-	}
-#endif /* showtrees: moved to tree_io.c */
-
-/* quick: moved to tree_io.c (static) */
-/* qs: moved to tree_io.c (static) */
-#if 0
-void qs(float **items, int left, int right)
-	{
-	int i, j;
-	float x, y, x1, y1;
-	
-	i= left; j=right;
-	x = items[(left+right)/2][0];
-	
-	do {
-		while((items[i][0] < x) && (i < right)) i++;
-		while((x < items[j][0]) && (j > left)) j--;
-		
-		if(i <= j)
-			{
-			y = items[i][0];
-			y1 = items[i][1];
-			items[i][0] = items[j][0];
-			items[i][1] = items[j][1];
-			items[j][0] = y;
-			items[j][1] = y1;
-			i++; j--;
-			}
-		} while(i <= j);
-		
-	if(left < j) qs(items, left, j);
-	if(i < right) qs(items, i, right);
-	}
-#endif /* qs: moved to tree_io.c (static) */
-
-
-/* exclude: moved to tree_io.c */
-#if 0
-void exclude(int do_all)
-	{
-	int worst = -2, best = -2,savetrees = FALSE, found = TRUE, taxachosen = 0, counter = 0, mode[10] = {FALSE, FALSE, FALSE, FALSE, FALSE, FALSE, FALSE, FALSE, FALSE, FALSE}, start = 0, end = Total_fund_trees, error = FALSE, i=0, j=0, k=0, l=0, num=0, equalto = -1, greaterthan =1000000000, lessthan = 0, taxa_count = 0;
-	char *temptree, string_num[10], namecontains[100], **containstaxa = NULL, savedfile[100], *command = NULL;
-	char *tmp = malloc(TREE_LENGTH * sizeof(char));
-	if(!tmp) { printf2("Error: out of memory in exclude\n"); return; }
-	FILE *showfile = NULL, *tempfile = NULL;
-	float bestscore =10000000, worstscore = 0, **tempscores = NULL;
-	int *tempsourcetreetag = NULL, countedout =0, *temp_incidence = NULL, taxaorder=0;
-	
-	
-	
-	temp_incidence = malloc(number_of_taxa*sizeof(int));
-	for(i=0; i<number_of_taxa; i++) temp_incidence[i] = 0;
-	
-	tempscores = malloc(Total_fund_trees*sizeof(float *));
-	for(i=0; i<Total_fund_trees; i++)
-		{
-		tempscores[i] = malloc(2*sizeof(float));
-		tempscores[i][0] = 0;
-		tempscores[i][1] = i;
-		}
-	tempsourcetreetag = malloc(Total_fund_trees*sizeof(int));
-	for(i=0; i<Total_fund_trees; i++) tempsourcetreetag[i] = sourcetreetag[i];
-	for(i=0; i<Total_fund_trees; i++)
-		if(tempsourcetreetag[i]) j++;
-	containstaxa = malloc(number_of_taxa*sizeof(char*));
-	for(i=0; i<number_of_taxa; i++)
-		{
-		containstaxa[i] = malloc(1000*sizeof(char));
-		containstaxa[i][0] = '\0';
-		}
-	temptree = malloc(TREE_LENGTH*sizeof(char));
-	temptree[0] = '\0';
-	for(i=0; i<num_commands; i++)
-		{
-		if(strcmp(parsed_command[i], "singlecopy") == 0)
-			{
-			mode[5] = TRUE;
-			}	
-		if(strcmp(parsed_command[i], "multicopy") == 0)
-			{
-			mode[6] = TRUE;
-			}
-		if(strcmp(parsed_command[i], "range") == 0)
-			{
-			mode[0] = TRUE;
-			start = toint(parsed_command[i+1])-1;
-			end = toint(parsed_command[i+2])-1;
-			if(start <0 || end > Total_fund_trees)
-				{
-				error = TRUE;
-				printf2("Error: the start of the range must not be less than 1 and the end of the range must no be greater than the number of source trees\n");
-				}
-			}
-		if(strcmp(parsed_command[i], "namecontains") == 0)
-			{
-			namecontains[0] = '\0';
-			strcpy(namecontains, parsed_command[i+1]);
-			mode[2] = TRUE;
-			}
-		if(strcmp(parsed_command[i], "containstaxa") == 0)
-			{
-			namecontains[0] = '\0';
-			if(taxachosen < number_of_taxa)
-				{
-				strcpy(containstaxa[taxachosen], parsed_command[i+1]);
-				taxachosen++;
-				}
-			else
-				{
-				printf2("Error: the number of taxa chosen os greater than the number of taxa in memory\n");
-				error = TRUE;
-				}
-			mode[3] = TRUE;
-			}
-		if(strcmp(parsed_command[i], "score") == 0)
-			{
-			mode[4] = TRUE;
-			bestscore = atof(parsed_command[i+1]);
-			worstscore = atof(parsed_command[i+2]);
-			if(worstscore < bestscore)
-				{
-				error = TRUE;
-				printf2("Error: the range must end with a larger or equal score to the start of the range\n");
-				}
-			}
-		if(strcmp(parsed_command[i], "size") == 0)
-			{
-			mode[1] = TRUE;
-			if(strcmp(parsed_command[i+1], "equalto") == 0)
-				{
-				equalto = toint(parsed_command[i+2]);
-				
-				if(equalto > number_of_taxa)
-					{
-					error = TRUE;
-					printf2("Error in size \"equalto\"\n\n");
-					}
-				}
-			else
-				{
-				if(strcmp(parsed_command[i+1], "greaterthan") == 0)
-					{
-					greaterthan = toint(parsed_command[i+2]);
-					
-					}
-				else
-					{
-					if(strcmp(parsed_command[i+1], "lessthan") == 0)
-						{
-						lessthan = toint(parsed_command[i+2]);
-						
-
-						}
-					else
-						{
-						printf2("Error: %s not valid option for \"size\"\n", parsed_command[i+1]);
-						error = TRUE;
-						}
-					}
-				}
-			}
-
-
-			
-		}
-	if(mode[4]) /* Look for trees that meet a particular score */
-		{
-		if(trees_in_memory == 0)
-			{
-			printf2("Error: There are no saved supertrees in memory from which to calculate scores\n");
-			error = TRUE;
-			}
-		}
-	if(mode[4])
-		{
-		if(trees_in_memory == 0)
-			{
-			printf2("Error: There are no saved supertrees in memory from which to calculate scores\n");
-			error = TRUE;
-			}
-		}
 
 
 
-			
-	if(!error)
-		{
-		if(mode[0])
-			{
-			for(i=start-1; i<=end; i++)
-				{
-				tempsourcetreetag[i] = FALSE;
-				countedout++;
-				}
-			}
-			
-		if(mode[1])
-			{
-			for(i=0; i<Total_fund_trees; i++)
-				{
-				strcpy(temptree, fundamentals[i]);
-				returntree(temptree);
-				/* build the tree in memory */
-				/****** We now need to build the Supertree in memory *******/
-				if(tree_top != NULL)
-					{
-					dismantle_tree(tree_top);
-					tree_top = NULL;
-					}
-				temp_top = NULL;
-				tree_build(1, temptree, tree_top, 1, -1, 0);
-
-				tree_top = temp_top;
-				temp_top = NULL;
-				
-				/* check how many taxa are on the tree */
-				taxa_count = count_taxa(tree_top, 0);
-				
-				if(equalto != -1)
-					{
-					if(taxa_count == equalto)
-						{
-						tempsourcetreetag[i] = FALSE;
-						countedout++;
-						}
-					}
-				else
-					{
-					if(taxa_count < lessthan || taxa_count > greaterthan)
-						{
-						tempsourcetreetag[i] = FALSE;
-						countedout++;
-						}
-					}
-				}
-			}
-		if(mode[2])
-			{
-			for(i=0; i<Total_fund_trees; i++)
-				{
-				if(strstr(tree_names[i], namecontains) != NULL)
-					{
-					tempsourcetreetag[i] = FALSE;
-					countedout++;
-					}
-				}
-			}
-		if(mode[3])
-			{
-			for(i=0; i<Total_fund_trees; i++)
-				{
-				strcpy(temptree, fundamentals[i]);
-				returntree(temptree);
-				/* build the tree in memory */
-				/****** We now need to build the Supertree in memory *******/
-				if(tree_top != NULL)
-					{
-					dismantle_tree(tree_top);
-					tree_top = NULL;
-					}
-				temp_top = NULL;
-				tree_build(1, temptree, tree_top, 1, -1, 0);
-
-				tree_top = temp_top;
-				temp_top = NULL;
-				
-
-				found = TRUE;
-				for(j=0; j<taxachosen; j++)
-					{
-					if(found == TRUE)
-						found = find_taxa(tree_top, containstaxa[j]); 
-					}
-				if(found)
-					{
-					tempsourcetreetag[i] = FALSE;
-					countedout++;
-					}
-				}
-			}
-
-		if(mode[4]) /* Look for trees that meet a particular score */
-			{
-			for(i=0; i<Total_fund_trees; i++)
-				{
-				if(bestscore != worstscore)
-					{
-					if(sourcetree_scores[i] >= bestscore || sourcetree_scores[i] <= worstscore)
-						{
-						tempsourcetreetag[i] = FALSE;
-						countedout++;
-						}
-					}
-				else
-					{
-					if(sourcetree_scores[i] > bestscore-0.000001 && sourcetree_scores[i] < worstscore+0.000001)
-						{
-						tempsourcetreetag[i] = FALSE;
-						countedout++;
-						}
-					}
-				}
-			}
-		if(mode[5] || mode[6]) /* Look for trees that are single copy of multicopy */
-			{
-			for(l=0; l<Total_fund_trees; l++)
-				{
-				i=0;
-				for(k=0; k<number_of_taxa; k++)
-					{
-					/* count how many taxa are present more than once in each tree */
-					if(presence_of_taxa[l][k] > 1) i++;
-					}
-				if(mode[5] && i==0) tempsourcetreetag[l] = FALSE; /*exlude the singlecopy*/
-				if(mode[6] && i!=0) tempsourcetreetag[l] = FALSE; /*exlude the multicopy*/	
-				}	
-			}
 
 
-/*
-		if(mode[0] || mode[1] || mode[2] || mode[3] || mode[4] || mode[5] || mode[6])
-			{
-			for(i=0; i<number_of_taxa; i++) temp_incidence[i] = 0;
-			for(i=0; i<Total_fund_trees; i++)
-				{
-				if(tempsourcetreetag[i])
-					{
-					strcpy(temptree, fundamentals[i]);
-					returntree(temptree);
-				*/	/* build the tree in memory */
-					/****** We now need to build the Supertree in memory *******/
-				/*	if(tree_top != NULL)
-						{
-						dismantle_tree(tree_top);
-						tree_top = NULL;
-						}
-					temp_top = NULL;
-					tree_build(1, temptree, tree_top, 1, -1, 0);
-
-					tree_top = temp_top;
-					temp_top = NULL;
-					
-					for(j=0; j<number_of_taxa; j++)
-							temp_incidence[j] += find_taxa(tree_top, taxa_names[j]); 
-					}
-				}
-			l=0;
-			for(i=0; i<number_of_taxa; i++)
-				{
-				if(temp_incidence[i] == 0) l++;
-				}
-				*/
-			l=1;
-			if(l> 0)
-				{
-				/*printf("\nWarning: %d Taxa are no longer represented in the included source trees\nThese taxa are as follows:\n", l);
-				for(i=0; i<number_of_taxa; i++)
-					{
-					if(temp_incidence[i] == 0)
-						printf2("\t%s\n", taxa_names[i]);
-					}
-				command = malloc(10000*sizeof(char));
-				printf2("This will permenantly remove these trees from memory\nAre you sure you wish to continue: (yes/no) ");
-				xgets(command);
-				if(strcmp(command, "y") == 0 || strcmp(command, "Y") == 0 || strcmp(command, "yes") == 0 || strcmp(command, "Yes") == 0)
-					{
-				*/	tempfile = fopen("tempclannfile164.chr", "w");
-					tmp[0] = '\0';
-					countedout = 0;
 
 
-					for(j=0; j<Total_fund_trees; j++)
-					        {
-					        if(tempsourcetreetag[j])
-								{
-						        if(tree_top != NULL) dismantle_tree(tree_top);  /* Dismantle any trees already in memory */
-						        tree_top = NULL;
-						        
-						        temp_top = NULL;
-						        taxaorder=0;
-						        strcpy(temptree, fundamentals[j]);
-								returntree_fullnames(temptree, j);
-			                    basic_tree_build(1, temptree, tree_top, TRUE);
-
-						       /*  tree_build(1, fundamentals[j], tree_top, 0, j, 0); build the tree passed to the function */
-
-						        tree_top = temp_top;
-						        temp_top = NULL;
-						        reset_tree(tree_top);
-
-						        shrink_tree(tree_top);    /* Shrink the pruned tree by switching off any internal nodes that are not needed */
-						        temptree[0] = '\0'; /* initialise the string */
-						        if(print_pruned_tree(tree_top, 0, temptree, TRUE, j) >1)
-						            {
-						            tmp[0] = '\0';
-						            strcpy(tmp, "(");
-						            strcat(tmp, temptree);
-						            strcat(tmp, ")");
-						            strcpy(temptree, tmp);
-						            }
-						        strcat(temptree, ";");
-
-						        if(strcmp(tree_names[j], "") != 0)
-						        	fprintf(tempfile, "%s[%s]\n", temptree, tree_names[j]);
-						        else
-						        	fprintf(tempfile, "%s[%d]\n", temptree, j);
-						        countedout++;
-						        }
-							else
-								{
-								if(sourcetreetag[i]) counter++;
-								}
-							}
-
-		/*			for(i=0; i<Total_fund_trees; i++)
-						{
-						if(tempsourcetreetag[i])
-							{
-							temptree[0] = '\0';
-							strcpy(temptree, fundamentals[i]);
-							returntree(temptree);
-							strcpy(tmp, "");
-							strncpy(tmp, temptree, strlen(temptree)-1);
-							tmp[strlen(temptree)-1] = '\0';
-							strcpy(temptree, tmp);
-							fprintf(tempfile, "%s", temptree);
-							fprintf(tempfile, " [%f]; [ %s]\n", tree_weights[i], tree_names[i]);
-							countedout++;
-							}
-						else
-							{
-							if(sourcetreetag[i]) counter++;
-							}
-						}  */ /* Old printing code, before implementation of delimited names input */
-					fclose(tempfile);
-					for(i=0; i<number_of_taxa; i++)
-						{
-						taxa_incidence[i] = 0;
-						for(j=0; j<number_of_taxa; j++)
-							{
-							Cooccurrance[i][j] = 0;
-							}
-						}
-					execute_command("tempclannfile164.chr", do_all);
-					remove("tempclannfile164.chr");
-				/*	}
-				else
-					{
-					printf2("\nAction aborted\n");
-					error = TRUE;
-					} */
-				}
-			else
-				{
-				counter = 0;
-				for(i=0; i<Total_fund_trees; i++)
-					{
-					if(tempsourcetreetag[i]== FALSE && sourcetreetag[i] == TRUE)
-						{
-						sourcetreetag[i] = FALSE;
-						counter++;
-						}
-					}
-				countedout = 0;
-				for(i=0; i<Total_fund_trees; i++)
-					{
-					if(sourcetreetag[i])
-						countedout++;
-					}
-				/*num_excluded_trees +=counter; */
-				
-				for(i=0; i<number_of_taxa; i++)
-					{
-					taxa_incidence[i] = 0;
-					for(j=0; j<number_of_taxa; j++)
-						{
-						Cooccurrance[i][j] = 0;
-						}
-					for(k=0; k<Total_fund_trees; k++)	
-						{
-						if(sourcetreetag[k])
-							{
-							if(presence_of_taxa[k][i] > 0)
-								taxa_incidence[i]++;
-							}
-						}
-					for(j=0; j<number_of_taxa; j++)
-						{
-						for(k=0; k<Total_fund_trees; k++)
-							{
-							if(sourcetreetag[k])
-								{
-								if(presence_of_taxa[k][i] > 0)
-									{
-									if(presence_of_taxa[k][j] > 0)
-										Cooccurrance[i][j]++;
-									}
-								}
-							}
-						}
-					}
-				input_file_summary(do_all);
-				}
-			if(!error)
-				{
-				printf2("\n%d source trees were excluded, %d trees remain in memory\n", counter, countedout );	
-				}
-			/*} */
-		}
-	
-	free(temptree);
-	free(tmp);
-	for(i=0; i<Total_fund_trees; i++)
-		free(tempscores[i]);
-	for(i=0; i<number_of_taxa; i++)
-		free(containstaxa[i]);
-	free(tempscores);
-	free(containstaxa);
-	free(tempsourcetreetag);
-	free(temp_incidence);
-
-	free(command);
-
-	}
-#endif /* exclude: moved to tree_io.c */
-
-/* returntree: moved to tree_io.c */
-#if 0
-void returntree(char *temptree) /* returns the tree with the names of the taxa included */
-	{
-	char string_num[10];
-	char *string = malloc(TREE_LENGTH * sizeof(char));
-	int i=0, j=0, k=0, l=0, num;
-
-	if(!string) { printf2("Error: out of memory in returntree\n"); return; }
-	string[0] = '\0';
-	strcpy(string, temptree);
-	strcpy(temptree, "");
-	string_num[0] = '\0';
-	j=0; k=0;
-	while(string[j] != ';')
-		{
-		switch(string[j])
-			{
-			case ')':
-				temptree[k] = ')';
-				j++; k++;
-				while(string[j] != '(' && string[j] != ')' && string[j] != ',' && string[j] != ';' && string[j] != ':')
-					{
-					temptree[k] = string[j];
-					j++; k++;
-					}
-				break;
-			case '(':
-			case ',':
-				temptree[k] = string[j];
-				j++; k++;
-				break;
-			case ':':
-				while(string[j] != '(' && string[j] != ')' && string[j] != ',' && string[j] != ';')
-					{
-					temptree[k] = string[j];
-					j++; k++;
-					}
-				break;
-			default:
-				for(l=0; l<10; l++) string_num[l] = '\0';
-				l=0;
-				while(string[j] != '(' && string[j] != ')' && string[j] != ',' && string[j] != ';' && string[j] != ':')
-					{
-					string_num[l] = string[j];
-					l++; j++;
-					}
-				string_num[l] = '\0';
-				num = atoi(string_num);
-				l=0;
-				while(taxa_names[num][l] != '\0')
-					{
-					temptree[k] = taxa_names[num][l];
-					k++;
-					l++;
-					}
-				break;
-			}
-		}
-	temptree[k] = ';';
-	temptree[k+1] = '\0';
-	free(string);
-
-	}
-#endif /* returntree: moved to tree_io.c */
-
-/* returntree_fullnames: moved to tree_io.c */
-#if 0
-void returntree_fullnames(char *temptree, int treenum) /* returns the tree with the names of the taxa included */
-	{
-	char string_num[10];
-	char *string = malloc(TREE_LENGTH * sizeof(char));
-	int i=0, j=0, k=0, l=0, num, taxaorder=0;
-
-	if(!string) { printf2("Error: out of memory in returntree_fullnames\n"); return; }
-	string[0] = '\0';
-	strcpy(string, temptree);
-	strcpy(temptree, "");
-	string_num[0] = '\0';
-	taxaorder=0;
-	j=0; k=0;
-	while(string[j] != ';')
-		{
-		switch(string[j])
-			{
-			case ')':
-				temptree[k] = ')';
-				j++; k++;
-				while(string[j] != '(' && string[j] != ')' && string[j] != ',' && string[j] != ';' && string[j] != ':')
-					{
-					temptree[k] = string[j];
-					j++; k++;
-					}
-				break;
-			case '(':
-			case ',':
-				temptree[k] = string[j];
-				j++; k++;
-				break;
-			case ':':
-				while(string[j] != '(' && string[j] != ')' && string[j] != ',' && string[j] != ';')
-					{
-					temptree[k] = string[j];
-					j++; k++;
-					}
-				break;
-			default:
-				for(l=0; l<10; l++) string_num[l] = '\0';
-				l=0;
-				while(string[j] != '(' && string[j] != ')' && string[j] != ',' && string[j] != ';' && string[j] != ':')
-					{
-					string_num[l] = string[j];
-					l++; j++;
-					}
-				string_num[l] = '\0';
-				num = atoi(string_num);
-				l=0;
-				
-				while(fulltaxanames[treenum][taxaorder][l] != '\0')
-					{
-					temptree[k] = fulltaxanames[treenum][taxaorder][l];
-					k++;
-					l++;
-					}
-				taxaorder++;
-				break;
-			}
-		}
-	temptree[k] = ';';
-	temptree[k+1] = '\0';
-	free(string);
-
-	}
-#endif /* returntree_fullnames: moved to tree_io.c */
-
-
-/* include: moved to tree_io.c */
-#if 0
-void include(int do_all)
-	{
-	int worst = -2, best = -2,savetrees = FALSE, found = TRUE, taxachosen = 0, counter = 0, mode[5] = {FALSE, FALSE, FALSE, FALSE, FALSE}, start = 0, end = Total_fund_trees, error = FALSE, i=0, j=0, k=0, l=0, num=0, equalto = -1, greaterthan =number_of_taxa, lessthan = 3, taxa_count = 0;
-	char *temptree, string_num[10], namecontains[100], **containstaxa = NULL, savedfile[100];
-	FILE *showfile = NULL;
-	float bestscore =10000000, worstscore = 0, **tempscores = NULL;
-	int *tempsourcetreetag = NULL, countedout =0;
-	
-	
-	tempscores = malloc(Total_fund_trees*sizeof(float *));
-	for(i=0; i<Total_fund_trees; i++)
-		{
-		tempscores[i] = malloc(2*sizeof(float));
-		tempscores[i][0] = 0;
-		tempscores[i][1] = i;
-		}
-	tempsourcetreetag = malloc(Total_fund_trees*sizeof(int));
-	for(i=0; i<Total_fund_trees; i++) tempsourcetreetag[i] = sourcetreetag[i];
-
-	containstaxa = malloc(number_of_taxa*sizeof(char*));
-	
-	for(i=0; i<number_of_taxa; i++)
-		{
-		containstaxa[i] = malloc(1000*sizeof(char));
-		containstaxa[i][0] = '\0';
-		}
-	temptree = malloc(TREE_LENGTH*sizeof(char));
-	temptree[0] = '\0';
-	for(i=0; i<num_commands; i++)
-		{
-		if(strcmp(parsed_command[i], "range") == 0)
-			{
-			mode[0] = TRUE;
-			start = toint(parsed_command[i+1]);
-			end = toint(parsed_command[i+2]);
-			if(start <0 || end > Total_fund_trees)
-				{
-				error = TRUE;
-				printf2("Error: the start of the range must not be less than 1 and the end of the range must no be greater than the number of source trees\n");
-				}
-			}
-		if(strcmp(parsed_command[i], "namecontains") == 0)
-			{
-			namecontains[0] = '\0';
-			strcpy(namecontains, parsed_command[i+1]);
-			mode[2] = TRUE;
-			}
-		if(strcmp(parsed_command[i], "containstaxa") == 0)
-			{
-			namecontains[0] = '\0';
-			if(taxachosen < number_of_taxa)
-				{
-				strcpy(containstaxa[taxachosen], parsed_command[i+1]);
-				taxachosen++;
-				}
-			else
-				{
-				printf2("Error: the number of taxa chosen os greater than the number of taxa in memory\n");
-				error = TRUE;
-				}
-			mode[3] = TRUE;
-			}
-		if(strcmp(parsed_command[i], "score") == 0)
-			{
-			mode[4] = TRUE;
-			bestscore = atof(parsed_command[i+1]);
-			worstscore = atof(parsed_command[i+2]);
-			if(worstscore < bestscore)
-				{
-				error = TRUE;
-				printf2("Error: the range must end with a larger score than the start of the range\n");
-				}
-			}
-		if(strcmp(parsed_command[i], "size") == 0)
-			{
-			mode[1] = TRUE;
-			if(strcmp(parsed_command[i+1], "equalto") == 0)
-				{
-				equalto = toint(parsed_command[i+2]);
-				
-				if(equalto < 4 || equalto > number_of_taxa)
-					{
-					error = TRUE;
-					printf2("Error in size \"equalto\"\n\n");
-					}
-				}
-			else
-				{
-				if(strcmp(parsed_command[i+1], "greaterthan") == 0)
-					{
-					greaterthan = toint(parsed_command[i+2]);
-					
-					if(greaterthan >= number_of_taxa)
-						{
-						error = TRUE;
-						printf2("Error in size \"greaterthan\"\n\n");
-						}
-					}
-				else
-					{
-					if(strcmp(parsed_command[i+1], "lessthan") == 0)
-						{
-						lessthan = toint(parsed_command[i+2]);
-						
-						if(lessthan < 5)
-							{
-							error = TRUE;
-							printf2("Error in size \"lessthan\"\n\n");
-							}
-						}
-					else
-						{
-						printf2("Error: %s not valid option for \"size\"\n", parsed_command[i+1]);
-						error = TRUE;
-						}
-					}
-				}
-			}
-
-
-			
-		}
-	if(mode[4]) /* Look for trees that meet a particular score */
-		{
-		if(trees_in_memory == 0)
-			{
-			printf2("Error: There are no saved supertrees in memory from which to calculate scores\n");
-			error = TRUE;
-			}
-		}
-			
-	if(!error)
-		{
-		if(mode[0])
-			{
-			for(i=start-1; i<end; i++)
-				{
-				tempsourcetreetag[i] = TRUE;
-				countedout++;
-				}
-			}
-			
-		if(mode[1])
-			{
-			for(i=0; i<Total_fund_trees; i++)
-				{
-				strcpy(temptree, fundamentals[i]);
-				returntree(temptree);
-				/* build the tree in memory */
-				/****** We now need to build the Supertree in memory *******/
-				if(tree_top != NULL)
-					{
-					dismantle_tree(tree_top);
-					tree_top = NULL;
-					}
-				temp_top = NULL;
-				tree_build(1, temptree, tree_top, 1, -1, 0);
-
-				tree_top = temp_top;
-				temp_top = NULL;
-				
-				/* check how many taxa are on the tree */
-				taxa_count = count_taxa(tree_top, 0);
-				
-				if(equalto != -1)
-					{
-					if(taxa_count == equalto)
-						{
-						tempsourcetreetag[i] = TRUE;
-						countedout++;
-						}
-					}
-				else
-					{
-					if(taxa_count < lessthan || taxa_count > greaterthan)
-						{
-						tempsourcetreetag[i] = TRUE;
-						countedout++;
-						}
-					}
-				}
-			}
-		if(mode[2]) /* Looks for trees with a particular name, or part of name */
-			{
-			for(i=0; i<Total_fund_trees; i++)
-				{
-				if(strstr(tree_names[i], namecontains) != NULL)
-					{
-					tempsourcetreetag[i] = TRUE;
-					countedout++;
-					}
-				}
-			}
-		if(mode[3])
-			{
-			for(i=0; i<Total_fund_trees; i++)
-				{
-				strcpy(temptree, fundamentals[i]);
-				returntree(temptree);
-				/* build the tree in memory */
-				/****** We now need to build the Supertree in memory *******/
-				if(tree_top != NULL)
-					{
-					dismantle_tree(tree_top);
-					tree_top = NULL;
-					}
-				temp_top = NULL;
-				tree_build(1, temptree, tree_top, 1, -1, 0);
-
-				tree_top = temp_top;
-				temp_top = NULL;
-				
-
-				found = TRUE;
-				for(j=0; j<taxachosen; j++)
-					{
-					if(found == TRUE)
-						found = find_taxa(tree_top, containstaxa[j]); 
-					}
-				if(found)
-					{
-					tempsourcetreetag[i] = TRUE;
-					countedout++;
-					}
-				}
-			}
-		if(mode[4]) /* Look for trees that meet a particular score */
-			{
-			for(i=0; i<Total_fund_trees; i++)
-				{
-				if(bestscore != worstscore)
-					{
-					if(sourcetree_scores[i] >= bestscore || sourcetree_scores[i] <= worstscore)
-						{
-						tempsourcetreetag[i] = TRUE;
-						countedout++;
-						}
-					}
-				else
-					{
-					if(sourcetree_scores[i] > bestscore-0.000001 && sourcetree_scores[i] < worstscore+0.000001)
-						{
-						tempsourcetreetag[i] = TRUE;
-						countedout++;
-						}
-					}
-				}
-			}
-
-
-		for(i=0; i<Total_fund_trees; i++)
-			{
-			if(tempsourcetreetag[i]== TRUE && sourcetreetag[i] == FALSE)
-				{
-				sourcetreetag[i] = TRUE;
-				counter++;
-				}
-			}
-		countedout = 0;
-		for(i=0; i<Total_fund_trees; i++)
-			{
-			if(sourcetreetag[i])
-				countedout++;
-			}
-		/*num_excluded_trees -=counter; */
-		
-		}
-	l = 0;
-	for(i=0; i<number_of_taxa; i++)
-		{
-		taxa_incidence[i] = 0;
-		for(j=0; j<number_of_taxa; j++)
-			{
-			Cooccurrance[i][j] = 0;
-			}
-		for(k=0; k<Total_fund_trees; k++)	
-			{
-			if(sourcetreetag[k])
-				{
-				if(presence_of_taxa[k][i] > 0)
-					taxa_incidence[i]++;
-				}
-			}
-		for(j=0; j<number_of_taxa; j++)
-			{
-			for(k=0; k<Total_fund_trees; k++)
-				{
-				if(sourcetreetag[k])
-					{
-					if(presence_of_taxa[k][i] > 0)
-						{
-						if(presence_of_taxa[k][j] > 0)
-							Cooccurrance[i][j]++;
-						}
-					}
-				}
-			}
-		}
-	if(!error)
-		{
-		input_file_summary(do_all);
-		printf2("\n%d source trees were re-included, %d trees remain in memory\n", counter, countedout );	
-		}
-	
-	free(temptree);
-	for(i=0; i<Total_fund_trees; i++)
-		free(tempscores[i]);
-	for(i=0; i<number_of_taxa; i++)
-		free(containstaxa[i]);
-	free(tempscores);
-	free(containstaxa);
-	free(tempsourcetreetag);
-	}
-#endif /* include: moved to tree_io.c */
 
 void sourcetree_dists(void)
 	{
@@ -16190,216 +9208,11 @@ void sourcetree_dists(void)
 	free(string);
 	}
 
-/* exclude_taxa: moved to tree_io.c */
-#if 0
-void exclude_taxa(int do_all)
-	{
-	char *temptree, *pruned_tree = NULL, *tmp = malloc(TREE_LENGTH * sizeof(char)), *command = NULL, tmpfilename[10000], previnputfilename[10000];
-	if(!tmp) { printf2("Error: out of memory in exclude_taxa\n"); return; }
-	int i=0, j=0, q=0, error = FALSE, taxachosen = 0, found = FALSE, *tobeexcluded = NULL, k=0, l=0, done = FALSE, num_left = 0, min_taxa = 4;
-	FILE *tempfile = NULL;
-	
-	tmp[0] = '\0';
-	tmpfilename[0] = '\0';
-	previnputfilename[0] = '\0';
-	pruned_tree = malloc(TREE_LENGTH*sizeof(char));
-
-	tobeexcluded = malloc(number_of_taxa*sizeof(int));
-
-	temptree = malloc(TREE_LENGTH*sizeof(char));
-	temptree[0] = '\0';
-
-	for(i=0; i<number_of_taxa; i++) tobeexcluded[i] = FALSE;
-	for(i=0; i<num_commands; i++)
-		{
-		if(strcmp(parsed_command[i], "deletetaxa") == 0)
-			{
-			
-			for(k=i+1; k<num_commands; k++)
-				{
-				if(strcmp(parsed_command[k], "mintaxa") == 0)
-					{
-					min_taxa = toint(parsed_command[k+1]);
-					if(min_taxa < 1) 
-						{
-						printf2("Error the minimum number of taxa cannot be set below 1\n");
-						error = TRUE;
-						}
-					k = k+1;
-					}
-				else
-					{
-					found = FALSE;
-					for(j=0; j<number_of_taxa; j++)
-						{
-						if(strcmp(taxa_names[j], parsed_command[k]) == 0)
-							{
-							found = TRUE;
-							tobeexcluded[j] = TRUE;
-							}
-						}
-					if(!found)
-						{
-						printf2("Error: Cannot find any taxa that match the string \"%s\"\n", parsed_command[k]);
-						error = TRUE;
-						}
-					else
-						q++;
-					}
-				}
-			i=k;
-			}
-			
-		}
-
-	if(k == 0)
-		{
-		printf2("Error: you must specify the name of at least one taxa to delete\n");
-		error = TRUE;
-		}
-	else
-		printf2("\n%d taxa will be permanently deleted from the source trees\n", q);
-
-
-		/*** go through the names given and identify the taxa ***/
-	if(!error)
-		{
-		strcpy(previnputfilename, inputfilename);
-		strcpy(tmpfilename, inputfilename);
-		strcat(tmpfilename, ".tempclann.chr");
-		tempfile = fopen(tmpfilename, "w");
-		command = malloc(10000*sizeof(char));
-		command[0] = '\0';
-	/*	printf2("\nWarning: This command will permenantly delete any chosen taxa from each tree in memory\nThis will also delete any trees that contain less than 4 taxa after the pruning\n\nAre you sure you wish to continue? (yes/no): ");
-		xgets(command);
-		if(strcmp(command, "n") == 0 || strcmp(command, "no") == 0 || strcmp(command, "NO") == 0 || strcmp(command, "N") == 0 || strcmp(command, "No") == 0)
-			error = TRUE;
-	*/	free(command);
-		}
-	if(!error)
-		{
-		j=0;
-		for(i=0; i<number_of_taxa; i++)
-			{
-			if(tobeexcluded[i]) j++;
-			}
-		for(i=0; i<Total_fund_trees; i++)
-			{
-			if(sourcetreetag[i])
-				{
-				l =0;
-				/***   check that this tree when pruned will still have more than 3 taxa **/
-				for(j=0; j<number_of_taxa; j++)
-					if(presence_of_taxa[i][j] > 0 && !tobeexcluded[j]) l+=presence_of_taxa[i][j];
-				
-				/* if there will be more than 3 taxa **/
-				if(l>= min_taxa)
-					{
-					num_left++;
-					strcpy(temptree, fundamentals[i]);
-					returntree_fullnames(temptree, i);
-					/*printf("%s\n", temptree); */
-					
-					/***  build the sourcetree in memory ***/
-					if(tree_top != NULL)
-                        {
-                        dismantle_tree(tree_top);
-                        tree_top = NULL;
-                        }
-                    temp_top = NULL;
-                    basic_tree_build(1, temptree, tree_top, TRUE);
-                    tree_top = temp_top;
-                    temp_top = NULL;
-                   
-
-					
-					/***  prune the sourcetree of any of the taxa **/
-					prune_taxa_for_exclude(tree_top, tobeexcluded);
-					shrink_tree(tree_top);    /* Shrink the pruned tree by switching off any internal nodes that are not needed */
-
-					for(j=0; j<TREE_LENGTH; j++)
-						{
-						pruned_tree[j] = '\0'; /* initialise the string */
-						tmp[j] = '\0';
-						}
-					/*get_taxa_details(tree_top);
-                   printf2("--\n"); */
-					
-					if(print_pruned_tree(tree_top, 0, pruned_tree, TRUE, i) >1)
-						{
-						tmp[0] = '\0';
-						strcpy(tmp, "(");
-						strcat(tmp, pruned_tree);
-						strcat(tmp, ")");
-						strcpy(pruned_tree, tmp);
-						}
-					
-					fprintf(tempfile, "%s", pruned_tree);
-					fprintf(tempfile, " [%f]; [ %s]\n", tree_weights[i], tree_names[i]);
-					}
-				else
-					{
-					if(!done)printf2("\n\nThe following trees have been deleted from memory because they now contain less than 4 taxa\nTree Number\tTree name\n");
-					done = TRUE;
-					printf2("%-10d\t%s\n", i+1, tree_names[i]);
-					}
-				}  
-			}
-		}
-
-		
-	free(tobeexcluded);
-	free(pruned_tree);
-	free(temptree);
-	free(tmp);
-
-	if(!error)
-		{
-		fclose(tempfile);
-		if(num_left == 0)
-			printf2("\nError: This will delete all trees from memory..... aborting deletetaxa\n");
-		else
-			execute_command(tmpfilename, do_all);
-		strcpy(inputfilename, previnputfilename);
-		remove(tmpfilename);
-		}
-
-	}
-#endif /* exclude_taxa: moved to tree_io.c */
 
 	/* Prune tree: This is a recursive function that is called for every node position of the supertree
 	it then checks to see if any of the siblings on this node are not contained in the fundamental tree, these siblings are then turned off.
 	This only turns off taxa, pointer siblings will have to be turned off using a separate program */
 
-/* prune_taxa_for_exclude: moved to tree_io.c */
-#if 0
-void prune_taxa_for_exclude(struct taxon * super_pos, int *tobeexcluded)
-	{
-
-	
-	/* Traverse the supertree, visiting every taxa and checking if that taxa is on the fundamental tree */
-	
-	while(super_pos != NULL)
-		{
-		
-		if(super_pos->daughter != NULL) prune_taxa_for_exclude(super_pos->daughter, tobeexcluded);  /* If this is pointer sibling, move down the tree */
-	
-		if(super_pos->name != -1) /* If there is an actual taxa on this sibling */
-			{	
-			/* Check to see if that taxa is on the fundamental tree */
-			
-			if(tobeexcluded[super_pos->name] == TRUE)  /* presence of taxa is an array that is filled in as the fundamental trees are inputted */		
-				{  /* if its not there */
-				super_pos->tag = FALSE;
-				}
-			}
-		
-		super_pos = super_pos->next_sibling;
-		
-		}	
-	
-	}
-#endif /* prune_taxa_for_exclude: moved to tree_io.c */
 
 void spr_dist(void)
 	{
@@ -17712,4619 +10525,122 @@ void neighbor_joining(int brlens, char *tree, int names)
 	free(tmp);
 	}
 
-/* nj: moved to reconcile.c */
-#if 0
-void nj(void)
-	{
-	int i, j, missing_method = 1, error = FALSE;
-	char *tree = NULL, useroutfile[100], *fakefilename = NULL;
-	FILE *outfile = NULL;
-	int *saved_tags = NULL;  /* for single-copy auto-filter */
-	
-	useroutfile[0] = '\0';
-	strcpy(useroutfile, "NJ-tree.ph");
-    for(i=0; i<num_commands; i++)
-        {
-        if(strcmp(parsed_command[i], "missing") == 0)
-			{
-			if(strcmp(parsed_command[i+1], "4point") == 0)
-				missing_method = 1;
-			else
-				{
-				if(strcmp(parsed_command[i+1], "ultrametric") == 0)
-					missing_method = 0;
-				else
-					{
-					printf2("Error: '%s' is an invalid method to be assigned to missing\n", parsed_command[i+1]);
-					missing_method = 1;
-					error = TRUE;
-					}
-				}
-			}
-			
-		if(strcmp(parsed_command[i], "savetrees") == 0)
-			strcpy(useroutfile, parsed_command[i+1]);
-		}
-		
-	if(!error)
-		{
-		if((outfile = fopen(useroutfile, "w")) == NULL)
-			{
-			printf2("Error opening file named %s\n", useroutfile);
-			error = TRUE;
-			}
-		}
-
-	if(!error)
-		{
-		fakefilename = malloc(100*sizeof(char));
-		fakefilename[0] = '\0';
-		tree = malloc(TREE_LENGTH*sizeof(char));
-		printf2("\n\nNeighbor-joining settings:\n\tDistance matrix generation by average consensus method\n\tEstimation of missing data using ");
-		if(missing_method == 1)
-			printf2("4 point condition distances\n");
-		if(missing_method == 0)
-			printf2("ultrametric distances\n");
-		printf2("\tresulting tree saved to file %s\n\n\n", useroutfile);
-
-		saved_tags = apply_singlecopy_filter();
-
-		average_consensus(0, missing_method, fakefilename, NULL);
-		neighbor_joining(TRUE, tree, TRUE);
-		fprintf(outfile, "%s\n", tree);
-		tree_coordinates(tree, TRUE, TRUE, FALSE, -1);
-		
-		for(i=0; i<number_retained_supers; i++)
-			{
-			strcpy(retained_supers[i], "");
-			scores_retained_supers[i] = -1;
-			}
-		retained_supers[0] = realloc(retained_supers[0], (strlen(tree)+10)*sizeof(char));
-		strcpy(retained_supers[0], tree);
-		scores_retained_supers[0] = 0;
-		trees_in_memory = 1;
-		restore_singlecopy_filter(saved_tags);
-		fclose(outfile);
-		free(tree);
-		}
-
-	}
-#endif
 
 
-/* reroot_tree: moved to tree_ops.c */
-#if 0
-void reroot_tree(struct taxon *outgroup)
-	{
-	struct taxon *newbie = NULL, *temp_treetop = NULL, *position = NULL, *temp = NULL, *start = NULL, *parent_start = NULL, *next = NULL, *parent = NULL, *pointer = NULL;
-	char *temptree = NULL;
-	temptree = malloc(TREE_LENGTH*sizeof(char));
-	temptree[0] = '\0';
-	newbie = make_taxon();
-	temp_treetop = newbie;
-	/* every sibling must become a descendent and every descentdent as sibling of that level */
-	/*** Assign newbie to point to any siblings of outgroup as a daughter **/
-	position = outgroup;
-	if(outgroup->prev_sibling != NULL)
-		{
-		while(position->prev_sibling != NULL) position = position->prev_sibling;
-		}
-	else
-		position = position->next_sibling;
 	
-	start = position;
-	newbie->daughter = start;
-	
-	/***2: extract the ougroup ***/
-	if(outgroup->next_sibling != NULL)(outgroup->next_sibling)->prev_sibling = outgroup->prev_sibling;
-	if(outgroup->prev_sibling != NULL)(outgroup->prev_sibling)->next_sibling = outgroup->next_sibling;
-	if(outgroup->prev_sibling == NULL && outgroup->parent != NULL)
-		{
-		(outgroup->parent)->daughter = outgroup->next_sibling;
-		(outgroup->next_sibling)->parent = outgroup->parent;
-		outgroup->parent = NULL;
-		}
-	outgroup->next_sibling = NULL;
-	outgroup->prev_sibling = NULL;
-	
-	if(start!=NULL)parent = start->parent;
-	else parent=NULL;
-	
-	/** create new pointer on first level */
-	pointer = make_taxon();
-	position = start;
-	while(position->next_sibling != NULL) position = position->next_sibling;
-	position->next_sibling = pointer;
-	pointer->prev_sibling = position;
-	
-	while(parent != NULL)
-		{
-		position = parent;
-		while(position->prev_sibling != NULL) position = position->prev_sibling;
-		parent_start = position;
-		pointer->daughter = parent_start;
-		next = parent_start->parent;
-		parent_start->parent = pointer;
-		pointer = parent;
-		start = parent_start;
-		parent = next;
-		
-		}
-	pointer->daughter = NULL;
-	
-	(newbie->daughter)->parent = newbie;
-	
-	/* now make outgroup a siblig to newbie */
-	newbie->next_sibling = outgroup;
-	outgroup->prev_sibling = newbie;
-	
-	temp_top = temp_treetop;
-	/**** Now we need to remove any pointer taxa that are nolonger pointing to anything **/
-	clean_pointer_taxa(temp_top);
-	/*** Finally we need to put an extra node at the top */
-/*	newbie = make_taxon();
-	newbie->daughter = temp_top;
-	temp_top->parent = newbie;
-	temp_top = newbie; */
-	free(temptree);
-	}
-#endif
-	
-/* clean_pointer_taxa: moved to tree_ops.c */
-#if 0
-void clean_pointer_taxa(struct taxon *position)
-	{
-	
-	struct taxon *start = position, *tmp = NULL;
-	int i=0;
-	
-	while(position != NULL)
-		{
-		if(position->daughter != NULL) clean_pointer_taxa(position->daughter);
-		position = position->next_sibling;
-		}
-	position = start;
-	
-	/*** Check to see if there are any pointer taxa not going anywhere ***/
-	
-	while(position != NULL)
-		{
-		if(position->name == -1 && position->daughter == NULL)
-			{
-			if(start->parent != NULL) 
-				{
-				if(strcmp(position->weight, "") != 0) strcpy((start->parent)->weight, position->weight); /* copy weight to parent ponter node */
-				}
-			tmp = position->next_sibling;
-			if(position->next_sibling != NULL) (position->next_sibling)->prev_sibling = position->prev_sibling;
-			if(position->prev_sibling != NULL) (position->prev_sibling)->next_sibling = position->next_sibling;
-			if(position->parent != NULL)
-				{
-				if(position->next_sibling != NULL)
-					{
-					start = position->next_sibling;
-					(position->parent)->daughter = position->next_sibling;
-					(position->next_sibling)->parent = position->parent;
-					}
-				else
-					(position->parent)->daughter = NULL;
-				position->parent = NULL;
-				}
-			if(position == temp_top)
-				 temp_top = position->next_sibling;
-			if(position == start) start = position->next_sibling;
-			free(position);
-			position = tmp;
-			}
-		else
-			if(position != NULL) position = position->next_sibling;
-		}
-	position = start;
-	
-	/*** Count the number of children of each pointer taxa, if any only have 1 then delete that pointer taxa and replace it with its daughter ***/
-	/** however if there are any weights (like branch lenghs or bootstraps) they need to be assigned to the parent of this level  (Aug 17)**/
-	
-	while(position != NULL)
-		{
-		if(position->daughter != NULL)
-			{
-			i=0;
-			tmp = position->daughter;
-			while(tmp != NULL)
-				{
-				i++;
-				tmp = tmp->next_sibling;
-				}
-			if(i == 1)
-				{
-				tmp = position->daughter;
-				if(position->prev_sibling != NULL)(position->prev_sibling)->next_sibling = position->daughter;
-				if(position->next_sibling != NULL)(position->next_sibling)->prev_sibling = position->daughter;
-				(position->daughter)->next_sibling = position->next_sibling;
-				(position->daughter)->prev_sibling = position->prev_sibling;
-				(position->daughter)->parent = position->parent;
-				if(position->parent != NULL) (position->parent)->daughter = position->daughter;
-				if(position == temp_top) temp_top = position->daughter;
-				if(position->fullname != NULL) free(position->fullname);
-				free(position);
-				position = tmp;
-				}
-			else
-				position = position->next_sibling;
-			}
-		else
-			position = position->next_sibling;
-		}
-		
-		
-	}
-#endif
 	
 
-/* get_branch: moved to tree_ops.c */
-#if 0
-struct taxon * get_branch(struct taxon *position, int name)
-	{
-	struct taxon *start = position, *answer = NULL;
-	
-	
-	while(position != NULL && answer == NULL)
-		{
-		if(position->daughter != NULL)
-			{
-			answer = get_branch(position->daughter, name);
-			}
-		position = position->next_sibling;
-		}
-	if(answer == NULL)
-		{
-		position = start;
-		while(position != NULL && answer == NULL)
-			{
-			if(position->tag == name)
-				{
-				answer = position;
-				
-				}
-			position = position->next_sibling;
-			}
-		}
-	return(answer);
-	}
-#endif
-
-/* get_taxa_details: moved to tree_ops.c */
-#if 0
-void get_taxa_details(struct taxon *position)
-	{
-	struct taxon *start = position;
-	
-	
-	while(position != NULL)
-		{
-		if(position->daughter != NULL)
-			{
-			get_taxa_details(position->daughter);
-			}
-		else
-			{
-			printf2("Taxon %d Fullname %s\n", position->name, position->fullname);
-			}
-		position = position->next_sibling;
-		}	
-	}
-#endif
-
-/* get_taxa_names: moved to tree_ops.c */
-#if 0
-void get_taxa_names(struct taxon *position, char **taxa_fate_names)
-	{
-	struct taxon *start = position;
-	
-	
-	while(position != NULL)
-		{
-		if(position->daughter != NULL)
-			{
-			get_taxa_names(position->daughter, taxa_fate_names);
-			}
-		else
-			{
-			strcpy(taxa_fate_names[position->tag2], position->fullname);
-			}
-		position = position->next_sibling;
-		}	
-	}
-#endif
 
 
-/* get_taxon: moved to tree_ops.c */
-#if 0
-struct taxon * get_taxon(struct taxon *position, int name)
-	{
-	struct taxon *start = position, *answer = NULL;
-	
-	while(position != NULL && answer == NULL)
-		{
-		if(position->daughter != NULL)
-			{
-			answer = get_taxon(position->daughter, name);
-			}
-		position = position->next_sibling;
-		}
-	if(answer == NULL)
-		{
-		position = start;
-		while(position != NULL && answer == NULL)
-			{
-			if(position->name == name && position->daughter == NULL)
-				{
-				answer = position;
-				}
-			position = position->next_sibling;
-			}
-		}
-	return(answer);
-	}
-#endif
 
-/* compress_tree: moved to tree_ops.c */
-#if 0
-int compress_tree (struct taxon * position)
-	{
-	int count = 0, tot = 0, done = FALSE;
-	struct taxon *pos = NULL;
-	
-	while(position != NULL)
-		{
-		done = FALSE;
-		if(position->daughter != NULL) 
-			{
-			tot = compress_tree(position->daughter);  /* tot will be equal to the number of daughters that this pointer has */
-			if(tot < 2)
-				{
-				pos = position->next_sibling;
-				done = TRUE;
-				if(position->next_sibling != NULL) (position->next_sibling)->prev_sibling = position->daughter;
-				if(position->prev_sibling != NULL) (position->prev_sibling)->next_sibling = position->daughter;
-				if(position->parent != NULL) 
-					{
-					(position->parent)->daughter = position->daughter;
-					(position->daughter)->parent = position->parent;
-					}
-				else
-					(position->daughter)->parent = NULL;
-				(position->daughter)->next_sibling = position->next_sibling;
-				(position->daughter)->prev_sibling = position->prev_sibling;
-				if(position == tree_top) tree_top = position->daughter;
-				if(position->donor != NULL) free(position->donor);
-				free(position);
-				position = pos;
-				
-				 /* if the number of daughters is less than 2, then we need to remove this pointer sibling */
-				count += tot;
-				}
-			else
-				count++;
-			}
-		else  /* else this is a taxa node */
-			{
-			if(position->tag) count++;  /* if this taxa is not switched off then increment count */
-			}				
-		if(!done) position = position->next_sibling;
-		}
-	return(count);
-	}
-#endif
 
-/* compress_tree1: moved to tree_ops.c */
-#if 0
-int compress_tree1 (struct taxon * position)
-	{
-	int count = 0, tot = 0, done = FALSE, i;
-	struct taxon *pos = NULL, *start = position;
-	while(position != NULL)
-		{
-		done = FALSE;
-		if(position->daughter != NULL) 
-			{
-			tot = compress_tree1(position->daughter);  /* tot will be equal to the number of daughters that this pointer has */
-			if(tot < 2)
-				{
-				pos = position->next_sibling;
-				done = TRUE;
-				if(position->donor != NULL)
-					{
-					for(i=0; i<num_gene_nodes; i++)
-						{
-						if(position->donor[i] == TRUE) (position->daughter)->donor[i] = TRUE;
-						}
-					}
-				if(position->next_sibling != NULL) (position->next_sibling)->prev_sibling = position->daughter;
-				if(position->prev_sibling != NULL) (position->prev_sibling)->next_sibling = position->daughter;
-				if(position->parent != NULL) 
-					{
-					(position->parent)->daughter = position->daughter;
-					(position->daughter)->parent = position->parent;
-					}
-				else
-					(position->daughter)->parent = NULL;
-				(position->daughter)->next_sibling = position->next_sibling;
-				(position->daughter)->prev_sibling = position->prev_sibling;
-				if(position == tree_top) tree_top = position->daughter;
-				if(position->donor != NULL) free(position->donor);
-				free(position);
-				position = pos;
-				
-				 /* if the number of daughters is less than 2, then we need to remove this pointer sibling */
-				count += tot;
-				}
-			else
-				count++;
-			}
-		else  /* else this is a taxa node */
-			{
-			count++;  /* if this taxa is not switched off then increment count */
-			}				
-		if(!done) position = position->next_sibling;
-		}
-	if(start == tree_top && count == 1 && start->daughter != NULL) /* then this is the top node and we need to delete it here and now */
-		{
-		tree_top = start->daughter;
-		(start->daughter)->parent = NULL;
-		if(start->donor != NULL)
-			{
-			for(i=0; i<num_gene_nodes; i++)
-				{
-				if(start->donor[i] == TRUE) (start->daughter)->donor[i] = TRUE;
-				}
-			free(start->donor);
-			start->donor = NULL;
-			}
-		free(start);
-		start = NULL;
-		}
-	return(count);
-	}
-#endif
 
-/* isittagged: moved to reconcile.c */
-#if 0
-void isittagged(struct taxon * position)
-	{
-	while(position != NULL)
-		{
-		if(position->tag2 == TRUE) printf2("found\n");
-		if(position->daughter != NULL)
-			{
-			isittagged(position->daughter);
-			}
-		position = position->next_sibling;
-		}
-	}
-#endif
 
-/* duplicate_tree: moved to tree_ops.c */
-#if 0
-void duplicate_tree(struct taxon * orig_pos, struct taxon * prev_dup_pos)
-	{
-	struct taxon *sibling = NULL, *dup_pos = NULL;
-	int done = FALSE, i;
-	
-	if(orig_pos->parent == NULL) done = TRUE;
-	
-	while(orig_pos != NULL)
-		{
-		dup_pos = make_taxon();
-		if(done)
-			{
-			temp_top = dup_pos;
-			done = FALSE;
-			}
-		dup_pos->name = orig_pos->name;
-		if(orig_pos->fullname != NULL)
-			{
-			dup_pos->fullname = malloc((strlen(orig_pos->fullname)+10)*sizeof(char));
-			dup_pos->fullname[0] = '\0';
-			strcpy(dup_pos->fullname, orig_pos->fullname);
-			}
-		
-		dup_pos->tag = orig_pos->tag;
-		dup_pos->tag2 = orig_pos->tag2;
-		dup_pos->xpos = orig_pos->xpos;
-		dup_pos->ypos = orig_pos->ypos;
-		dup_pos->spr = orig_pos->spr;
-		strcpy(dup_pos->weight, orig_pos->weight);
-		dup_pos->loss = orig_pos->loss;
-		dup_pos->length = orig_pos->length;
-		if(orig_pos->donor != NULL)
-			{
-			dup_pos->donor = malloc(num_gene_nodes*sizeof(int));
-			for(i=0; i<num_gene_nodes; i++) dup_pos->donor[i] = orig_pos->donor[i];
-			}
-		if(orig_pos->prev_sibling != NULL)
-			{
-			dup_pos->prev_sibling = sibling;
-			sibling->next_sibling = dup_pos;
-			}
-		if(orig_pos->parent != NULL)
-			{
-			dup_pos->parent = prev_dup_pos;
-			prev_dup_pos->daughter = dup_pos;
-			}
-		sibling = dup_pos;
-		if(orig_pos->daughter != NULL) duplicate_tree(orig_pos->daughter, dup_pos);
-		orig_pos = orig_pos->next_sibling;
-		}
-	}
-#endif
+
+
 
 
 			
-/* tree_map: moved to reconcile.c */
-#if 0
-float tree_map(struct taxon * gene_top, struct taxon * species_top, int print)
-	{
-	int xnum =0, *presence = NULL, i, j, num_dups = 0, num_losses = 0, best = 0;
-	char *temptree = NULL, reconfilename[100], *treetmp = NULL;
-
-	treetmp = malloc(TREE_LENGTH*sizeof(int));
-	treetmp[0] = '\0';
-	
-	presence = malloc(2*number_of_taxa*sizeof(int));
-	for(i=0; i<2*number_of_taxa; i++)
-		presence[i] = FALSE;
-	
-	/** 1) Label all internal and external taxa on the species tree ****/
-
-	xnum = number_tree1(species_top, number_of_taxa);
-	xnum--;
-	
-	/****2) label all the gene tree nodes (and taxa) with their equivalent on the species tree **/
-	label_gene_tree(gene_top, species_top, presence, xnum);
-	/*** 3) From the bottom-up, Identify those duplications at positions where the id of a pointer taxon is that same as any of its daughters **/
-	num_dups = reconstruct_map(gene_top, species_top);
-	/**** 4) we need to add the bits of the trees that are missing ****/
-	add_losses(gene_top, species_top);
-	join_losses(gene_top);
-	num_losses = count_losses(gene_top);
-	free(presence);
-	free(treetmp);
-
-	if(print)fprintf(distributionreconfile, "%d\t%d\n", num_dups, num_losses);
-	return((dup_weight*(float)num_dups)+(loss_weight*(float)num_losses));
-	}
-#endif
-
-
-/* printnamesandtags: moved to tree_ops.c */
-#if 0
-void printnamesandtags(struct taxon *position)
-	{
-	while(position != NULL)
-		{
-		if(position->daughter != NULL) 
-			{
-			printf2(" ->%d", position->tag);
-			printnamesandtags(position->daughter);
-			printf2(":");
-			}
-		else printf2(" %d", position->name);
-		position=position->next_sibling;
-		}
-	}
-#endif
-
-/* find_same: moved to tree_ops.c */
-#if 0
-struct taxon * find_same(struct taxon * position, int tofind)
-	{
-	struct taxon *answer = NULL;
-	while(position != NULL && answer == NULL)
-		{
-		if(position->tag == tofind)
-			{
-			answer = position;
-			}
-		if(position->daughter != NULL && position->tag2 == TRUE && answer == NULL)
-			answer = find_same(position->daughter, tofind);
-		position = position->next_sibling;
-		}	
-	return(answer);
-	}
-#endif
-
-
-/* resolve_tricotomies: moved to reconcile.c */
-#if 0
-void resolve_tricotomies(struct taxon *position, struct taxon *species_tree)
-	{
-	struct taxon *start = position, *copy = NULL, *best1 = NULL, *best2 = NULL, **thislevel = NULL, *previous = position->parent, *pos1 = NULL, *pos2 = NULL, *newbie = NULL, *lastsibling = NULL;
-	int i=0, j=0, k=0, l=0, x=0, y=0, multiples = FALSE, topoftree = FALSE, *found = NULL, num_dups = 0, num_losses = 0, *presence = NULL, possible_internal = 0, donestuff = TRUE, smallest = 2*number_of_taxa, result, nope = TRUE;
-	float best_score = -1;
-	char *pruned_tree = NULL;
-	
-	
-	presence = malloc((2*number_of_taxa)*sizeof(int));
-	found = malloc((2*number_of_taxa)*sizeof(int));
-	for(j=0; j<2*number_of_taxa; j++)
-		{
-		presence[j] = 0;
-		found[j] = 0;
-		}	
-	/* go down to the bottom of the gene tree */
-	
-	
-	while(position != NULL)
-		{
-		i++;
-		if(position->daughter != NULL)
-			{
-			resolve_tricotomies(position->daughter, species_tree);
-			found[position->tag]++;
-			}
-		else
-			found[position->name]++;
-		position = position->next_sibling;
-		}
-	position = start;
-	/* work out any tricotomies containing multiples at this level */
-	if(start->parent == NULL)
-		{
-		topoftree=TRUE;
-		}
-
-/*	if( i > 2 && start->parent != NULL ) *//*if there are more than two siblings at this level, and there is at least one more than once */
-	
-	if( (i > 2 && !topoftree) || ( i>3 && topoftree)) /*if there are more than two siblings at this level, and there is at least one more than once */
-		{
-		l = i;
-		while(donestuff && ((l > 2 && !topoftree) || ( l>3 && topoftree)))
-			{
-			while(donestuff && ((l > 2 && !topoftree) || ( l>3 && topoftree)))
-				{
-				
-				donestuff = FALSE;
-				/* Step 1: Identify sister taxa and put them together (while marking new internal nodes as such )*/
-				pos1=start;
-				x=0;
-				
-				while(pos1 != NULL && ((l > 2 && !topoftree) || ( l>3 && topoftree)))
-					{
-					pos2 = pos1->next_sibling;
-					y=x+1;
-					while(pos2 != NULL && ((l > 2 && !topoftree) || ( l>3 && topoftree)))
-						{
-						if((possible_internal = are_siblings(species_tree, pos1->tag, pos2->tag)) != FALSE)
-							{
-						
-							/* put them together */
-							newbie = make_taxon();
-							newbie->tag = possible_internal;
-							newbie->daughter = pos1;
-							newbie->tag2 = TRUE;
-							if(pos1->prev_sibling == NULL)
-								{
-								if(pos1->parent != NULL)
-									(pos1->parent)->daughter = newbie;
-								newbie->parent = pos1->parent;
-								start = newbie;
-								}
-							if(pos1->next_sibling != NULL) (pos1->next_sibling)->prev_sibling = newbie;
-							if(pos1->prev_sibling != NULL) (pos1->prev_sibling)->next_sibling = newbie;
-							pos1->parent = newbie;
-							newbie->next_sibling = pos1->next_sibling;
-							newbie->prev_sibling = pos1->prev_sibling;
-							pos1->next_sibling = pos2;
-							pos1->prev_sibling = NULL;
-							
-							
-							if(pos2->next_sibling != NULL) (pos2->next_sibling)->prev_sibling = pos2->prev_sibling;
-							if(pos2->prev_sibling != NULL) (pos2->prev_sibling)->next_sibling = pos2->next_sibling;
-							
-							pos2->next_sibling = NULL;
-							pos2->prev_sibling = pos1;
-							
-							pos1 = start;
-							pos2 = pos1->next_sibling;
-							if(topoftree && newbie->prev_sibling == NULL) temp_top2 = newbie;
-							newbie = NULL;
-							l--;
-							donestuff = TRUE;
-							/*printf("done siblings\n");*/
-							}
-						else
-							{
-							pos2 = pos2->next_sibling;
-							y++;
-							}
-						}
-					pos1 = pos1->next_sibling;
-					x++;
-					}
-				
-				if(((l > 2 && !topoftree) || ( l>3 && topoftree)) )
-					{
-					/* Step 2: Join together any that are the same */
-					pos1=start;
-					x=0;
-					while((pos1 != NULL && ((l > 2 && !topoftree) || ( l>3 && topoftree)))  )
-						{
-						nope = TRUE;
-						pos2 = pos1->next_sibling;
-						y=x+1;
-						while((pos2 != NULL && ((l > 2 && !topoftree) || ( l>3 && topoftree))) )
-							{
-							if(pos1->tag == pos2->tag)
-								{
-								newbie = make_taxon();
-								newbie->tag = pos1->tag;
-								newbie->daughter = pos1;
-								newbie->tag2=TRUE;
-								if(pos1->prev_sibling == NULL)
-									{
-									if(pos1->parent != NULL)
-										(pos1->parent)->daughter = newbie;
-									newbie->parent = pos1->parent;
-									start = newbie;
-									}
-								if(pos1->next_sibling != NULL) (pos1->next_sibling)->prev_sibling = newbie;
-								if(pos1->prev_sibling != NULL) (pos1->prev_sibling)->next_sibling = newbie;
-								pos1->parent = newbie;
-								newbie->next_sibling = pos1->next_sibling;
-								newbie->prev_sibling = pos1->prev_sibling;
-								pos1->next_sibling = pos2;
-								pos1->prev_sibling = NULL;
-								
-								
-								if(pos2->next_sibling != NULL) (pos2->next_sibling)->prev_sibling = pos2->prev_sibling;
-								if(pos2->prev_sibling != NULL) (pos2->prev_sibling)->next_sibling = pos2->next_sibling;
-								
-								pos2->next_sibling = NULL;
-								pos2->prev_sibling = pos1;
-								pos1 = start;
-								pos2 = pos1->next_sibling;
-								if(topoftree && newbie->prev_sibling == NULL) temp_top2 = newbie;
-								newbie = NULL;
-								l--;
-								donestuff = TRUE;
-								/*printf("done easy same\n");*/
-								}
-							else
-								{
-								pos2 = pos2->next_sibling;
-								y++;
-								}
-							}
-						if(nope) /* if we haven't found any taxa the same as pos 1 , go down through the pairings already made */
-							{
-							
-							pos2 = NULL;
-							copy = start;
-							y=0;
-							while(copy != NULL && pos2 == NULL)
-								{
-								if(copy->daughter != NULL && copy != pos1 && copy->tag2 == TRUE)
-									pos2 = find_same(copy->daughter, pos1->tag);
-								copy = copy->next_sibling;
-								y++;
-								}
-							if(pos2 != NULL && pos2 != pos1)
-								{
-								newbie = make_taxon();
-								newbie->tag = pos1->tag;
-								newbie->daughter = pos1;
-								newbie->tag2=TRUE;
-								if(pos1->prev_sibling == NULL)
-									{
-									if(pos1->parent != NULL )
-										(pos1->parent)->daughter = pos1->next_sibling;
-									(pos1->next_sibling)->parent = pos1->parent;
-									start = pos1->next_sibling;
-									}							
-								if(pos1->next_sibling != NULL) (pos1->next_sibling)->prev_sibling = pos1->prev_sibling;
-								if(pos1->prev_sibling != NULL) (pos1->prev_sibling)->next_sibling = pos1->next_sibling;
-								pos1->parent = newbie;
-								newbie->next_sibling = pos2->next_sibling;
-								newbie->prev_sibling = pos2->prev_sibling;
-								if(pos2->next_sibling != NULL) (pos2->next_sibling)->prev_sibling = newbie;
-								if(pos2->prev_sibling != NULL) (pos2->prev_sibling)->next_sibling = newbie;
-								if(pos2->prev_sibling == NULL)
-									{
-									if(pos2->parent != NULL)
-										(pos2->parent)->daughter = newbie;
-									newbie->parent = pos2->parent;
-									pos2->parent = NULL;
-									if(start == pos2) start = newbie;
-									}
-								pos1->next_sibling = pos2;
-								pos2->prev_sibling = pos1;
-								
-								pos1->prev_sibling = NULL;
-								pos2->next_sibling = NULL;
-								l--;
-								donestuff = TRUE;
-								
-								pos1 = start;
-								newbie = NULL;
-								
-								/*printf("done hard same\n");*/
-								}
-							}
-						pos1 = pos1->next_sibling;
-						}				
-					}
-				}
-				/* Step 3: reconstruct the LCAs of remaining branches */
-			donestuff = FALSE;
-			if(((l > 2 && !topoftree) || ( l>3 && topoftree)))
-				{
-				smallest = 2*number_of_taxa;
-				pos1 = start;
-				pos2 = pos1->next_sibling;
-				x=0;
-				while(pos1 != NULL)
-					{
-					while(pos2 != NULL)
-						{
-						y=x+1;
-						for(j=0; j<2*number_of_taxa; j++)
-							presence[j] = 0;
-						presence[pos1->tag] = TRUE;
-						presence[pos2->tag] = TRUE;
-						result =  get_min_node(species_tree, presence, 2*number_of_taxa-2);
-						if(result <= smallest)
-							{
-							smallest = result;
-							best1 = pos1;
-							best2 = pos2;
-							}
-						pos2 = pos2->next_sibling;
-						y++;
-						}
-					pos1 = pos1->next_sibling;
-					x++;
-					}
-				
-				pos1=best1;
-				pos2 = best2;
-
-				newbie = make_taxon();
-				newbie->tag = smallest;
-				newbie->daughter = pos1;
-				newbie->tag2 = TRUE;
-				if(pos1->prev_sibling == NULL)
-					{
-					if(pos1->parent != NULL)
-						(pos1->parent)->daughter = newbie;
-					newbie->parent = pos1->parent;
-					start = newbie;
-					}
-				if(pos1->next_sibling != NULL) (pos1->next_sibling)->prev_sibling = newbie;
-				if(pos1->prev_sibling != NULL) (pos1->prev_sibling)->next_sibling = newbie;
-				pos1->parent = newbie;
-				newbie->next_sibling = pos1->next_sibling;
-				newbie->prev_sibling = pos1->prev_sibling;
-				pos1->next_sibling = pos2;
-				pos1->prev_sibling = NULL;
-				
-				if(pos2->next_sibling != NULL) (pos2->next_sibling)->prev_sibling = pos2->prev_sibling;
-				if(pos2->prev_sibling != NULL) (pos2->prev_sibling)->next_sibling = pos2->next_sibling;
-				
-				pos2->next_sibling = NULL;
-				pos2->prev_sibling = pos1;
-				
-				pos1 = start;
-				pos2 = pos1->next_sibling;
-				if(topoftree && newbie->prev_sibling == NULL) temp_top2 = newbie;
-				newbie = NULL;
-				l--;
-				donestuff = TRUE;				
-				/*printf("done lca\n");*/
-				}
-			}
-		
-		/* label copy with the number of copies of taxa present */
-		
-
-		
-		
-				
-		}
-	
-	
-	free(presence);
-	free(found);
-	}
-#endif
-
-/* are_siblings: moved to tree_ops.c */
-#if 0
-int are_siblings(struct taxon *position, int first, int second)
-	{
-	struct taxon *start = position;
-	int i=0, answer = FALSE;
-	while(position != NULL)
-		{
-		if(position->tag == first || position->tag == second || position->name == first || position->name == second)
-			{
-			i++;
-			}
-		position=position->next_sibling;
-		}
-	if(i == 2)
-		{
-		 answer = start->parent->tag;
-		}
-	if(!answer)
-		{
-		position = start;
-		while(position != NULL)
-			{
-			if(position->daughter != NULL) answer = are_siblings(position->daughter, first, second);
-			position=position->next_sibling;
-			}
-		}
-	return(answer);
-	}
-#endif
-
-
-/* number_tree1: moved to tree_ops.c */
-#if 0
-int number_tree1(struct taxon * position, int num)
-	{
-	struct taxon * start = position;
-	int i =0;
-	
-	
-	while(position != NULL)
-		{
-		if(position->daughter != NULL)
-			num = number_tree1(position->daughter, num);
-		position = position->next_sibling;
-		}
-	position = start;
-	while(position != NULL)
-		{
-		if(position->daughter != NULL)
-			{
-			position->tag = num;
-			num++;
-			}
-		else
-			{
-			position->tag = position->name;
-			}
-		position = position->next_sibling;
-		}
-	return(num);
-	}
-#endif
-
-/* number_tree2: moved to tree_ops.c */
-#if 0
-int number_tree2(struct taxon * position, int num)
-	{
-	struct taxon * start = position;
-	int i =0;
-	
-	
-	while(position != NULL)
-		{
-		if(position->daughter != NULL)
-			num = number_tree2(position->daughter, num);
-		position = position->next_sibling;
-		}
-	position = start;
-	while(position != NULL)
-		{
-		if(position->daughter == NULL)
-			{
-			position->tag2 = num;
-			num++;
-			}
-		position = position->next_sibling;
-		}
-	return(num);
-	}
-#endif
 
 
 
-/* print_tree_labels: moved to reconcile.c */
-#if 0
-void print_tree_labels(struct taxon *position, int **results, int treenum, struct taxon *species_tree)
-	{
-	int onetoone;
-	while(position != NULL)
-		{
-		if(position->loss >= 1) 
-			{
-			results[1][position->tag]++;
-			if(strcmp(position->weight, "") != 0) results[5][position->tag]++;
-			}
-		else
-			{
-			if(position->loss == -1) results[2][position->tag]++;
-			else 
-				{
-				results[0][position->tag]++;
-				/** now check to see if what follows is a 1:1 ortholog **/
-				if(position->daughter != NULL)
-					{
-					onetoone = isit_onetoone(position->daughter, 2);
-					if(onetoone == 1)
-						{
-						fprintf(onetoonefile, "Tree num:%d\tName:%s\tBranch:", treenum, tree_names[treenum]);
-						check_tree(species_tree, position->tag, onetoonefile);
-						fprintf(onetoonefile, "\n");
-						results[3][position->tag]++;
-						print_onetoone_names(position->daughter, 1);
-						fprintf(onetoonefile, "\n");
-						}
-					if(onetoone == 2)
-						{
-						fprintf(onetoonefile, "Tree num:%d\tName:%s\tBranch:", treenum, tree_names[treenum]);
-						check_tree(species_tree, position->tag, onetoonefile);
-						fprintf(onetoonefile, "\n");
-						fprintf(strictonetoonefile, "Tree num:%d\tName:%s\tBranch:", treenum, tree_names[treenum]);
-						check_tree(species_tree, position->tag, strictonetoonefile);
-						fprintf(strictonetoonefile, "\n");
-						results[3][position->tag]++;
-						results[4][position->tag]++;
-						print_onetoone_names(position->daughter, 2);
-						fprintf(onetoonefile, "\n");
-						fprintf(strictonetoonefile, "\n");
-						}
-					}
-				}
-			}
-		if(position->daughter != NULL)
-			{
-			if(position->loss != -1) print_tree_labels(position->daughter, results, treenum, species_tree);
-			}
-			
-		position = position->next_sibling;
-		}
-	}
-#endif
 
 
 
-/* print_onetoone_names: moved to tree_ops.c */
-#if 0
-void print_onetoone_names(struct taxon *position, int onetoone)
-	{
-    while(position != NULL)
-		{
-		if(position->daughter != NULL)
-			{
-			print_onetoone_names(position->daughter, onetoone);
-			}
-		if(position->fullname != NULL)
-			{
-			fprintf(onetoonefile, "%s\t", position->fullname);
-			if(onetoone == 2) fprintf(strictonetoonefile, "%s\t", position->fullname);
-			}
-		position=position->next_sibling;
-		}
-	}
-#endif
-			
-/* isit_onetoone: moved to tree_ops.c */
-#if 0
-int isit_onetoone(struct taxon *position, int onetoone)  /* This will return 0 if not a 1:1, 1 if it was a relaxed 1:1 and 2 if it was a strict 1:1 */
-	{
-	while(position != NULL && onetoone != 0)
-		{
-		if(position->loss >= 1)
-			{
-			if(position->daughter != NULL) onetoone = 0;
-			else onetoone = 1;
-			}
-		else
-			{
-			if(position->loss == -1)
-				{
-				if(position->daughter != NULL) onetoone = 0;
-				else onetoone = 1;
-				}
-			}
-		if(position->daughter != NULL && onetoone != 0)
-			{
-			if(position->loss != -1) onetoone = isit_onetoone(position->daughter, onetoone);
-			}
-		position = position->next_sibling;
-		}
-	return(onetoone);
-	}
-#endif
+
+
+
+
+
+
+
 
 
 			
-/* label_gene_tree: moved to reconcile.c */
-#if 0
-void label_gene_tree(struct taxon * gene_position, struct taxon * species_top, int *presence, int xnum)
-	{
-	struct taxon * position = gene_position, *tmp = NULL;
-	int i =0, j=0, latest = -1;
-/*	printf2("in Label_gene_tree\n");*/
-	while(position != NULL)
-		{
-		if(position->daughter != NULL) 
-			{
-	/*		printf2("daughter\n"); */
-			label_gene_tree(position->daughter, species_top, presence, xnum);
-			for(i=0; i<2*number_of_taxa; i++) presence[i] = FALSE;
-			tmp = position->daughter;
-			j=0;
-			while(tmp != NULL)
-				{
-				if(tmp->name != -1)
-					{
-					if(presence[tmp->name] == FALSE) j++;
-					presence[tmp->name] = TRUE;
-					latest = tmp->name;
-					}
-				else
-					{
-					if(presence[tmp->tag] == FALSE) j++;
-					presence[tmp->tag] = TRUE;
-					latest = tmp->tag;
-					}
-				tmp = tmp->next_sibling;
-				}
-			if(j>1)
-				{
-				for(i=0; i<2*number_of_taxa; i++) presence[i] = FALSE;
-				descend(position->daughter, presence);
-				position->tag = get_min_node(species_top, presence, xnum);
-				}
-			else
-				position->tag = latest;
-				
-			}
-		else
-			position->tag = position->name;
-		position = position->next_sibling;
-		}
-	}
-#endif
 
-/* descend: moved to reconcile.c */
-#if 0
-void descend(struct taxon * position, int *presence)
-	{
-	
-	while(position != NULL)
-		{
-		if(position->daughter != NULL) descend(position->daughter, presence);
-		else presence[position->name] = TRUE;
-		position = position->next_sibling;
-		}
-	}
-#endif
-			
-/* get_min_node: moved to tree_ops.c */
-#if 0
-int get_min_node(struct taxon * position, int *presence, int num)
-	{
-	struct taxon * start = position;
-	int *tmp, i, ans;
-	
-	tmp = malloc(number_of_taxa*sizeof(int));
-	
-	while(position != NULL)
-		{
-		if(position->daughter != NULL)
-			{
-			num = get_min_node(position->daughter, presence, num);
-			for(i=0; i<number_of_taxa; i++) tmp[i] = presence[i];
-			subtree_id(position->daughter, tmp);
-			ans = TRUE;
-			for(i=0; i<number_of_taxa; i++)
-				{
-				if(tmp[i] == TRUE) ans = FALSE;
-				}
-			if(ans == TRUE && position->tag < num) num = position->tag;
-			}
-		position = position->next_sibling;
-		}
-	free(tmp);
-	return(num);
-	}
-#endif
-			
-	
-/* subtree_id: moved to reconcile.c */
-#if 0
-void subtree_id(struct taxon * position, int *tmp)
-	{
-	while(position != NULL)
-		{
-		if(position->name != -1) tmp[position->name] = FALSE;
-		else
-			{
-			subtree_id(position->daughter, tmp);
-			}
-		position = position->next_sibling;
-		}
-	}
-#endif
-	
-	
-/* reconstruct_map: moved to reconcile.c */
-#if 0
-int reconstruct_map(struct taxon *position, struct taxon *species_top)
-	{
-	struct taxon *start = NULL, *tmp = NULL, *spec_pointer= NULL, *daug_pointer = NULL, *newbie = NULL;
-	int found = FALSE, num_dups = 0;
-	
-	while(position != NULL)
-		{
-		if(position->daughter != NULL)
-			{
-			num_dups += reconstruct_map(position->daughter, species_top);
-			
-			/** Check to see if any of the daughters of this pointer taxa have the same id (or name) as its id **/
-			tmp = position->daughter;
-			found = FALSE;
-			while(tmp != NULL)
-				{
-				if(tmp->name == -1)
-					{
-					if(tmp->tag == position->tag) found = TRUE;
-					}
-				else
-					{
-					if(tmp->name == position->tag) found = TRUE;
-					}
-				tmp = tmp->next_sibling;
-				}
-			
-			if(found) /* if position is the site of a duplication event **/
-				{
-				position->loss = 2;
-				num_dups++;
-				found = FALSE;
-				/*** now check to see if any of positions' daughters are not the same as pointer ***/
-				tmp = position->daughter;
-				while(tmp != NULL)
-					{
-					if(tmp->tag != position->tag && tmp->name != position->tag) /** we need to add parts to the tree ***/
-						{
-						newbie = make_taxon();					
-						newbie->tag = position->tag;
-						newbie->daughter = tmp;
-						newbie->next_sibling = tmp->next_sibling;
-						newbie->prev_sibling = tmp->prev_sibling;
-						newbie->parent = tmp->parent;
-						if(tmp->parent != NULL) (tmp->parent)->daughter = newbie;
-						if(tmp->prev_sibling != NULL) (tmp->prev_sibling)->next_sibling = newbie;
-						if(tmp->next_sibling != NULL) (tmp->next_sibling)->prev_sibling = newbie;
-						tmp->next_sibling = NULL;
-						tmp->prev_sibling = NULL;
-						tmp->parent = newbie;
-						}
-					tmp = tmp->next_sibling;
-					}
-				}
-			}
-		position = position->next_sibling;
-		}
-	
-	
-	
-	return(num_dups);
-	}
-#endif
-
-
-/* add_losses: moved to reconcile.c */
-#if 0
-void add_losses(struct taxon * position, struct taxon *species_top)
-	{
-	struct taxon * start = position, *spec_equiv = NULL, *tmp1 = NULL, *pos = NULL, *pos2 = NULL, *pos3 = NULL;
-	int *presence = NULL, i;
-	
-	presence = malloc((2*number_of_taxa)*sizeof(int));
-	for(i=0; i<2*number_of_taxa; i++) presence[i] = FALSE;
-	
-	/** Go down the gene tree to the bottom */
-	while(position != NULL)
-		{
-		if(position->daughter != NULL) 
-			{
-			add_losses(position->daughter, species_top);
-			/* now for the position we are at, find the equivalent position in the species tree */
-			if((position->daughter)->tag != position->tag)  /* there is nothing to do if this is where we have reconstructed a duplication, all the relevant part have already been put in */
-				{
-				spec_equiv = get_branch(species_top, position->tag);
-				
-				tmp1 = position->daughter;
-				tmp1->parent = NULL;
-				position->daughter = NULL;
-				
-				/* record the nodes (and taxa) that are direct sibilngs to tmp1 */
-				for(i=0; i<(2*number_of_taxa); i++) presence[i] = FALSE;
-				pos = tmp1;
-				while(pos != NULL)
-					{
-					presence[pos->tag] = TRUE;
-					pos = pos->next_sibling;
-					}
-				/* From our position in the species tree, travel down to the bottom, repilicating what we find along the way (except for the parts that already exist and pointed to by tmp1) */
-				tmp1 = construct_tree(spec_equiv->daughter, position, presence, tmp1);
-				}
-			
-			
-			}
-		position = position->next_sibling;
-		}	
-	free(presence);
-	presence = NULL;
-	}
-#endif
-
-
-
-/* construct_tree: moved to reconcile.c */
-#if 0
-struct taxon * construct_tree(struct taxon * spec_pos, struct taxon *gene_pos, int *presence, struct taxon *extra_gene)
-	{
-	int first = TRUE, i, count;
-	struct taxon * start = spec_pos, *position = NULL, *tmp = gene_pos, *tmp1 = NULL, *newbie = NULL;
-	
-	while(spec_pos != NULL)
-		{
-		if(presence[spec_pos->tag])  /* This already existed on the gene tree so we need to splice it back in here */
-			{
-			
-			/*** Find the position on the gene tree extra */
-			position = extra_gene;
-			count = 0;
-			while(position != NULL && position->tag != spec_pos->tag)
-					position = position->next_sibling;
-			if(position == NULL)
-				{
-				/* Tag not found — should not happen in a consistent reconciliation; skip this species node */
-				spec_pos = spec_pos->next_sibling;
-				continue;
-				}
-
-			/*** uncouple this from extra_gene and place in the gene tree ***/
-			if(position == extra_gene)
-				extra_gene = position->next_sibling;
-			if(position->prev_sibling != NULL) (position->prev_sibling)->next_sibling = position->next_sibling;
-			if(position->next_sibling != NULL) (position->next_sibling)->prev_sibling = position->prev_sibling;
-			}
-		else /* if it doesn't already exist */
-			{
-			position = make_taxon();
-			if(spec_pos->name != -1) position->tag = spec_pos->name;
-			else position->tag = spec_pos->tag;
-			position->name = spec_pos->name;
-			if(position->name != -1) position->loss = -1;
-			}
-		if(first)
-			{
-			tmp->daughter = position;
-			position->parent = tmp;
-			position->next_sibling = NULL;
-			position->prev_sibling = NULL;
-			tmp = position;
-			first = FALSE;
-			}
-		else
-			{
-			tmp->next_sibling = position;
-			position->prev_sibling = tmp;
-			position->next_sibling = NULL;
-			tmp = position;
-			}
-			
-		if(spec_pos->daughter != NULL && !presence[spec_pos->tag]) extra_gene = construct_tree(spec_pos->daughter, tmp, presence, extra_gene);
-		
-		spec_pos = spec_pos->next_sibling;
-		}
-	
-	
-	return(extra_gene);
-	}
-#endif
-	
-/* join_losses: moved to reconcile.c */
-#if 0
-int join_losses(struct taxon * position)
-	{
-	int loss = TRUE;
-	
-	while(position != NULL)
-		{
-		if(position->daughter != NULL)
-			{
-			if(join_losses(position->daughter))
-				position->loss = -1;
-			else
-				loss = FALSE;
-			}
-		else
-			{
-			if(position->loss != -1) loss = FALSE;
-			}
-		position = position->next_sibling;
-		}
-	return(loss);
-	}
-#endif
-
-/* count_losses: moved to reconcile.c */
-#if 0
-int count_losses(struct taxon * position)
-	{
-	int count = 0;
-	while(position != NULL)
-		{
-		if(position->loss == -1) count++;
-		else
-			{
-			if(position->daughter != NULL) count += count_losses(position->daughter);
-			}
-		position = position->next_sibling;
-		}
-	return(count);
-	}
-#endif
-
-/* find: moved to tree_ops.c */
-#if 0
-void find(struct taxon * position)
-	{
-	while(position != NULL)
-		{
-		if(position->daughter != NULL) find(position->daughter);
-		if(position->tag2 == TRUE)
-			printf2("!%d\n", position->tag);
-		position = position->next_sibling;
-		}
-	}
-#endif
-
-
-/* find_remaining: moved to tree_ops.c */
-#if 0
-struct taxon * find_remaining(struct taxon * position)  /* This looks for the next tagged branch in the tree down from here and returns a pointer to it, otherwise it returns null pointer */
-	{
-	struct taxon * start = position, *pos = NULL, *found = NULL;
-	int i = 0;
-	
-	while(position != NULL && found == NULL)
-		{
-		if(position->tag == TRUE) 
-			{
-			found = position;			
-			}
-		position = position->next_sibling;
-		}
-	position = start;
-	while(position != NULL && found == NULL)
-		{
-		if(position->daughter != NULL) found = find_remaining(position->daughter);
-		position = position->next_sibling;
-		}
-	return(found);
-	}
-#endif
 
 			
 
-/* find_tagged: moved to tree_ops.c */
-#if 0
-void find_tagged(struct taxon * position, int *thispresence)
-	{
-	struct taxon * start = position, *pos = NULL;
-	int i = 0;
-	
-	while(position != NULL)
-		{
-		if(position->daughter != NULL) find_tagged(position->daughter, thispresence);
-		
-		if(position->tag2 == TRUE) 
-			{
-			/* Mark this as being present */
-			thispresence[position->tag] = TRUE;
-			if(position->daughter != NULL) down_tree(position->daughter, position, thispresence);
-			/**** count how many siblings on this level are not "lost"   */
-			pos = start;
-			i=0;
-			down_tree(start, position, thispresence);
-						
-			}
-		position = position->next_sibling;
-		}
-	}
-#endif
-
-
-/* up_tree: moved to tree_ops.c */
-#if 0
-void up_tree(struct taxon * position, int * presence)
-	{
-	int i=0;
-	struct taxon * prev = position , *start = NULL;
-	presence[position->tag] = TRUE;
-	
-	while(position->next_sibling != NULL) position = position->next_sibling;
-	while(position != NULL)
-		{
-		if(position->loss != -1) i++;
-		start = position;
-		position = position->prev_sibling;
-		}
-	position = start;	
-	if(i<2)
-		{
-		if(position->parent != NULL) up_tree(position->parent, presence);
-		while(position != NULL)
-			{
-			presence[position->tag] = TRUE;
-			if(position != prev && position->daughter != NULL) down_tree(position->daughter, position, presence);
-			position =position->next_sibling;
-			}
-		}
-	}
-#endif
-
-/* down_tree: moved to tree_ops.c */
-#if 0
-void down_tree(struct taxon * position, struct taxon *prev, int * presence)
-	{
-	int i=0;
-	struct taxon *start = position;
-	while(position != NULL)
-		{
-		if(position->loss == -1)
-			{
-			presence[position->tag] = TRUE;
-			if(position->daughter != NULL) down_tree(position->daughter, position, presence);
-			}
-		else
-			i++;
-		position = position->next_sibling;
-		}
-	if(i < 2)
-		{
-		position = start;
-		if(start->parent != NULL && start->parent != prev) up_tree(start->parent, presence);
-		while(position != NULL)
-			{
-			if(position->loss != -1 && position->tag2 != TRUE)
-				{
-				presence[position->tag] = TRUE;
-				if(position->daughter != NULL) down_tree(position->daughter, position, presence);
-				}
-			position = position->next_sibling;
-			}
-		}
-	}
-#endif
-
-
-/* mapunknowns: moved to reconcile.c */
-#if 0
-void mapunknowns()
-	{
-	struct taxon *position = NULL, *species_tree = NULL, *gene_tree = NULL, *best_mapping = NULL, *unknown_fund = NULL, *pos = NULL,*copy = NULL;
-	int i, j, k, l,  *presence = NULL, basescore = 1;
-	float *overall_placements = NULL, biggest = -1, total, best_total = -1;
-	char *temptree, *temptree1 = malloc(TREE_LENGTH * sizeof(char));
-	if(!temptree1) { printf2("Error: out of memory in mapunknowns\n"); return; }
-	temptree = malloc(TREE_LENGTH*sizeof(char));
-	temptree[0] = '\0';
-	temptree1[0] = '\0';
-
-
-
-	presence = malloc(2*number_of_taxa*sizeof(int));
-	overall_placements = malloc(2*number_of_taxa*sizeof(float));
-	for(i=0; i<2*number_of_taxa; i++)
-		overall_placements[i] = 0;
-
-	
-	/**** BUILD THE SPECIES TREE *****/
-	strcpy(temptree, fundamentals[0]);
-	returntree(temptree);
-	/* build the tree in memory */
-	/****** We now need to build the Supertree in memory *******/
-	temp_top = NULL;
-	tree_build(1, temptree, species_tree, 1, -1, 0);
-	species_tree = temp_top;
-	temp_top = NULL;
-	/** add an extra node to the top of the tree */
-	temp_top = make_taxon();
-	temp_top->daughter = species_tree;
-	species_tree->parent = temp_top;
-	species_tree = temp_top;
-	temp_top = NULL;
-	
-	
-	
-	
-	for(l=1; l<Total_fund_trees; l++)
-		{
-		temp_top = NULL;
-		strcpy(temptree, "");
-		strcpy(temptree, fundamentals[l]);
-		returntree(temptree);
-		/* build the tree in memory */
-		/****** We now need to build the Supertree in memory *******/
-		temp_top = NULL;
-		tree_build(1, temptree, gene_tree, 1, -1, 0);
-		gene_tree = temp_top;
-		temp_top = NULL;
-		strcpy(temptree1, temptree);
-		
-		k=0;
-		while(presence_of_taxa[0][k] >0 || presence_of_taxa[l][k] == FALSE) k++;  /* fundamental [0] is the species tree, so whatever is not in there is an unknown */
-		/* k is now the number of the unkown taxa */
-		printf2("unknown to be mapped: %s\n", taxa_names[k]);
-		position = get_taxon(gene_tree, k);
-
-		/** this is an unknown. we need to remove it, but mark its neighbors */
-		pos = position;
-		while(pos->prev_sibling != NULL) pos = pos->prev_sibling;
-		while(pos != NULL)
-			{
-			pos->tag2 = TRUE;
-			pos = pos->next_sibling;
-			}
-		
-		/*** remove the unknown ****/
-		if(position->next_sibling != NULL) (position->next_sibling)->prev_sibling = position->prev_sibling;
-		if(position->prev_sibling != NULL) (position->prev_sibling)->next_sibling = position->next_sibling;
-		if(position->parent != NULL) 
-			{
-			(position->parent)->daughter = position->next_sibling;
-			(position->next_sibling)->parent = position->parent;
-			}
-		
-		free(position);
-		position = NULL;
-		compress_tree(gene_tree);
-
-		if(presence_of_trichotomies(gene_tree)) gene_tree = do_resolve_tricotomies(gene_tree, species_tree, basescore);
-		
-		duplicate_tree(gene_tree, NULL);
-		copy = temp_top;
-		tree_top = NULL;
-		i = number_tree(gene_tree, 0);
-		best_total = -1;
-		for(j=0; j<i; j++)
-			{
-			
-			position = get_branch(gene_tree, j);
-			tree_top = gene_tree;
-			reroot_tree(position);
-			gene_tree = tree_top;
-			tree_top = NULL;
-			printf2("a==\n");
-			total = tree_map(gene_tree, species_tree,0);
 			
 			
-			if(total < best_total || best_total == -1)
-				{
-				best_total = total;
-				if(best_mapping != NULL)
-					{
-					dismantle_tree(best_mapping);
-					best_mapping = NULL;
-					}
-				best_mapping = gene_tree;
-				gene_tree = NULL;
-				}
-			else
-				{
-				dismantle_tree(gene_tree);
-				gene_tree = NULL;
-				}
-			temp_top = NULL;
-			tree_top = NULL;
-			duplicate_tree(copy, NULL);
-			gene_tree = temp_top;
-			temp_top = NULL;
-			tree_top = NULL;
-			number_tree(gene_tree, 0);
-			}
+	
+	
+	
+
+
+
+
+
+	
+
+
+
+
+
 			
-		printf2("best reconstruction with a score of %f\n", best_total);
-		tree_top = best_mapping;
-		tree_coordinates(temptree, TRUE, FALSE, FALSE, -1);
-		
-		for(i=0; i<2*number_of_taxa; i++)
-			presence[i] = FALSE;
-			
-		find_tagged(best_mapping, presence);
-		j=0;
-		for(i=0; i<2*number_of_taxa; i++)
-			if(presence[i]) j++;
-		for(i=0; i<2*number_of_taxa; i++)
-			{
-			if(presence[i]) overall_placements[i] += (float)1/(float)j;
-			}
-		if(copy != NULL)
-			{
-			dismantle_tree(copy);
-			copy = NULL;
-			}
-		
-		if(gene_tree != NULL)
-			{
-			dismantle_tree(gene_tree);
-			gene_tree = NULL;
-			}
-		if(best_mapping != NULL)
-			{
-			dismantle_tree(best_mapping);
-			best_mapping = NULL;
-			}
-		}
-	
-	biggest = -1;
-	for(i=0; i<2*number_of_taxa; i++)
-		{
-		if(overall_placements[i] > biggest) biggest = overall_placements[i];
-		}
-	
-	for(i=0; i<2*number_of_taxa; i++)
-		overall_placements[i] = overall_placements[i]/biggest;
-	put_in_scores(species_tree, overall_placements);
-	
-	tree_top = species_tree;
-	tree_coordinates(temptree, TRUE, FALSE, TRUE, -1);
-	
-	if(species_tree != NULL)
-		{
-		dismantle_tree(species_tree);
-		species_tree = NULL;
-		}
-	
-		
-	tree_top = NULL;
-	free(temptree);
-	free(temptree1);
-	free(presence);
-	free(overall_placements);
-	}
-#endif
-
-/* get_recon_score: moved to reconcile.c */
-#if 0
-float get_recon_score(char *giventree, int numspectries, int numgenetries)
-	{
-	struct taxon *position = NULL, *species_tree = NULL, *gene_tree = NULL, *best_mapping = NULL, *copy = NULL, *temp_top1 = NULL, *temp_top2 = NULL, *spec_copy = NULL;
-	int i, j, k, l, m, q, r, spec_start=0, spec_end, gene_start, gene_end, num_species_internal = 0, error = FALSE, num_species_roots = 0, basescore = 1, rand1=0, rand2=0, dospecrand = 1, dogenerand=1, taxaorder=0;
-	float *overall_placements = NULL, biggest = -1, total, best_total = -1, sum_of_totals = 0, rooting_score = -1;
-	char *temptree, *temptree1 = malloc(TREE_LENGTH * sizeof(char));
-	if(!temptree1) { printf2("Error: out of memory in get_recon_score\n"); return -1; }
-
-	temptree = malloc(TREE_LENGTH*sizeof(char));
-	temptree[0] = '\0';
-	temptree1[0] = '\0';
 
 
 
-		/**** BUILD THE SPECIES TREE *****/
-		strcpy(temptree,giventree);
-		returntree(temptree);
-		/* build the tree in memory */
-		/****** We now need to build the Supertree in memory *******/
-		temp_top = NULL;
-		tree_build(1, temptree, species_tree, 1, -1, 0);
-		species_tree = temp_top;
-		temp_top = NULL;
 
-		num_species_roots = number_tree1(species_tree, number_of_taxa);
 
-		duplicate_tree(species_tree, NULL);
-		spec_copy = temp_top;
-		temp_top2 = NULL;
-		
-		
-		if(numspectries == -1)
-			{
-			dospecrand = FALSE;
-			numspectries = 1;
-			}
-		if(numgenetries == -1)
-			{
-			dospecrand = FALSE;
-			numgenetries = 1;
-			}
+
+
+
+
+
 			
 			
-		for(q=0; q<numspectries; q++)
-			{
-			if(dospecrand > 0)
-				{
-				spec_start = (int)fmod(rand(), num_species_roots);
-				spec_end = spec_start +1;
-				}
-			else
-				{
-				spec_start = 0;
-				spec_end = num_species_roots;
-				}
-/*		for(m=0; m<num_species_roots; m++) */ /* for every rooting of the species tree */
-			for(m=spec_start; m<spec_end; m++) 
-				{
-			
-				position = get_branch(species_tree, m);
-				temp_top = species_tree;
-				/*printf("1\n");*/
-				reroot_tree(position);
-				species_tree = temp_top;
-				temp_top = NULL;
-
-				for(l=0; l<Total_fund_trees; l++)  /* for every gene tree */
-					{
-					temp_top1 = NULL;
-					strcpy(temptree, "");
-					strcpy(temptree, fundamentals[l]);
-					unroottree(temptree);
-					
-					returntree(temptree);
-					/* build the tree in memory */
-					/****** We now need to build the genetree in memory *******/
-					temp_top = NULL;
-					taxaorder=0;
-					tree_build(1, temptree, gene_tree, 1, l, 0);
-					gene_tree = temp_top;
-					temp_top = NULL;
-					strcpy(temptree1, temptree);
-
-					if(presence_of_trichotomies(gene_tree)) gene_tree = do_resolve_tricotomies(gene_tree, species_tree, basescore);	
-				/*	else printf2("no resolving needed\n"); */
-
-
-					duplicate_tree(gene_tree, NULL);
-					copy = temp_top;
-					temp_top2 = NULL;
-					i = number_tree(gene_tree, 0);
-					best_total = -1;
-					for(r=0; r<numgenetries; r++)
-						{
-						if(dogenerand > 0)
-							{
-							gene_start = (int)fmod(rand(), i);
-							gene_end = gene_start +1;
-							}
-						else
-							{
-							gene_start = 0;
-							gene_end = i;
-							}						
-						rand2 = (int)fmod(rand(), i);
-					/*	for(j=0; j<i; j++)  */ /* For every rooting of the genetree */
-						for(j=gene_start; j<gene_end; j++)   
-							{
-							position = get_branch(gene_tree, j);
-							temp_top = gene_tree;
-							/*printf("2\n"); */
-							reroot_tree(position);
-							gene_tree = temp_top;
-							temp_top = NULL;
-							total = tree_map(gene_tree, species_tree,0);
-							if(total < best_total || best_total == -1)
-								{
-								best_total = total;
-								if(best_mapping != NULL)
-									{
-									dismantle_tree(best_mapping);
-									best_mapping = NULL;
-									}
-								best_mapping = gene_tree;
-								gene_tree = NULL;
-								}
-							else
-								{
-								dismantle_tree(gene_tree);
-								gene_tree = NULL;
-								}
-							temp_top1 = NULL;
-							temp_top = NULL;
-							duplicate_tree(copy, NULL);
-							gene_tree = temp_top;
-							temp_top1 = NULL;
-							temp_top = NULL;
-							number_tree(gene_tree, 0);
-							}
-						}
-					if(copy != NULL)
-						{
-						dismantle_tree(copy);
-						copy = NULL;
-						}
-					
-					if(gene_tree != NULL)
-						{
-						dismantle_tree(gene_tree);
-						gene_tree = NULL;
-						}
-					if(best_mapping != NULL)
-						{
-						dismantle_tree(best_mapping);
-						best_mapping = NULL;
-						}
-					sum_of_totals+=best_total;
-					}
-				if(sum_of_totals < rooting_score || rooting_score == -1)
-					{
-					rooting_score = sum_of_totals;
-					}
-				sum_of_totals = 0;
-				dismantle_tree(species_tree);
-				duplicate_tree(spec_copy, NULL);
-				species_tree = temp_top;
-				temp_top2 = NULL;
-
-				}
-			}
-	if(spec_copy != NULL)
-		{
-		dismantle_tree(spec_copy);
-		spec_copy = NULL;
-		}
-	if(species_tree != NULL)
-		{
-		dismantle_tree(species_tree);
-		species_tree = NULL;
-		}
-	free(temptree);
-	free(temptree1);
-	return(rooting_score);
-	}
-#endif
-
-/* print_descendents: moved to consensus.c */
-#if 0
-void print_descendents(struct taxon *position, FILE *outfile)
-	{
-	
-	while(position != NULL)
-		{
-		if(position->daughter != NULL)
-			{
-			fprintf(outfile, "%s\t", position->weight);
-			print_descendents(position->daughter, outfile);
-			}
-		else
-			{
-			fprintf(outfile, "%s\t", taxa_names[position->name]);
-			}
-		position = position->next_sibling;
-		}
-	}
-#endif
-
-/* do_descendents: moved to consensus.c */
-#if 0
-void do_descendents(struct taxon *position, FILE *outfile)
-	{
-	struct taxon *start = position;
-	
-	if(start->parent != NULL)  /*If we are not at the top of the tree */
-		{
-		while(position != NULL)
-			{
-			if(position->daughter != NULL)
-				{
-				fprintf(outfile, "%s\t", position->weight);
-				print_descendents(position->daughter, outfile);
-				}
-			else
-				{
-				fprintf(outfile, "%s\t", taxa_names[position->name]);
-				}
-			position = position->next_sibling;
-			}
-		}
-	position = start;
-	while(position != NULL)
-		{
-		if(position->daughter != NULL)
-			{
-			fprintf(outfile, "\n%s:\t", position->weight);
-			do_descendents(position->daughter, outfile);
-			}
-		position = position->next_sibling;
-		}
-	
-	
-	}
-#endif
-
-/* presence_of_trichotomies: moved to reconcile.c */
-#if 0
-int presence_of_trichotomies(struct taxon * position)
-	{
-	struct taxon *start = position;
-	int i=0, result = FALSE;
-	while(position != NULL)
-		{
-		i++;
-		position = position->next_sibling;
-		}
-	if(i > 2)
-		{
-		if(start->parent != NULL)
-			result = TRUE;
-		else
-			{
-			if(i > 3)
-				result = TRUE;
-			}
-		}
-
-	position = start;
-	while(position != NULL && result == FALSE)
-		{
-		if(position->daughter != NULL)	
-			{
-			if(presence_of_trichotomies(position->daughter))
-				result = TRUE;
-			}
-		position = position->next_sibling;
-		}
-	return(result);
-	}
-#endif
-			
-			
-/* do_resolve_tricotomies: moved to reconcile.c */
-#if 0
-struct taxon * do_resolve_tricotomies(struct taxon * gene_tree, struct taxon * species_tree, int basescore)
-	{
-	int i, j, xnum=0, *presence=NULL, **scores = NULL;
-	char *temper=NULL;
-	struct taxon * teeemp = NULL;
-	
-	temper = malloc(TREE_LENGTH*sizeof(int));
-	temper[0] = '\0';
-	
-	scores = malloc((2*number_of_taxa)*sizeof(int *));
-	for(i=0; i<2*number_of_taxa; i++)
-		{
-		scores[i] = malloc((2*number_of_taxa)*sizeof(int));
-		for(j=0; j<2*number_of_taxa; j++)
-			{
-			scores[i][j] = basescore;
-			}
-		}
-	
-	presence = malloc(2*number_of_taxa*sizeof(int));
-	for(i=0; i<(2*number_of_taxa); i++) presence[i] = FALSE;
-	/** 1) Label all internal and external taxa on the species tree ****/
-
-	xnum = number_tree1(species_tree, number_of_taxa);
-	xnum--;
-	/****2) label all the gene tree nodes (and taxa) with their equivalent on the species tree **/
-	label_gene_tree(gene_tree, species_tree, presence, xnum);
-	temp_top2 = gene_tree;
-	/** 3) calculate the distance between all the branches (internal nad external) on the species tree (using the number of nodes as the criterion) */
-	/* print out the species tree with the numbered labels on the internal branches */
-	print_tree_withinternals(species_tree, temper);
-	strcat(temper, ";");
-	/* calculate the pathdistance between the branches (internal nad external) on the species tree */
-	pathmetric_internals(temper, species_tree, scores);
-
-/*	for(i=0; i<2*number_of_taxa; i++)	
-		{
-		if(i<number_of_taxa)
-			printf2("\t%s", taxa_names[i]);
-		else
-			printf2("\t%d", i);
-		}
-	printf2("\n");
-	for(i=0; i<2*number_of_taxa; i++)	
-		{
-		if(i<number_of_taxa)
-			printf2("%s\t", taxa_names[i]);
-		else
-			printf2("%d\t", i);
-		for(j=0; j<2*number_of_taxa; j++)
-			printf2("%d\t", scores[i][j]);
-		printf2("\n");
-		}
-*/
-	/*resolve_tricotomies(gene_tree, species_tree);*/
-	temp_top2 = gene_tree;
-	resolve_tricotomies_dist(gene_tree, species_tree, scores);
-	gene_tree = temp_top2;
-	
-	/**** Unroot the tree -necessary as the rooting algorithm assumes an unrooted topology */
-	/*count the number of daughters at the top of the tree */
-	i=0;
-	teeemp = gene_tree;
-	while(teeemp != NULL)
-		{
-		i++;
-		teeemp = teeemp->next_sibling;
-		}
-	if(i < 3)
-		{
-		teeemp = NULL;
-		if(gene_tree->daughter != NULL)
-			{
-			temp_top2 = gene_tree->daughter;
-			(gene_tree->next_sibling)->next_sibling = temp_top2;
-			(gene_tree->next_sibling)->prev_sibling = NULL;
-			temp_top2->prev_sibling = (gene_tree->next_sibling);
-			temp_top2->parent = NULL;
-			temp_top2 = temp_top2->prev_sibling;
-			gene_tree->next_sibling = NULL;
-			gene_tree->daughter = NULL;
-			dismantle_tree(gene_tree);
-			gene_tree = temp_top2;
-			}
-		else
-			{
-			temp_top2 = (gene_tree->next_sibling)->daughter;
-			teeemp = gene_tree->next_sibling;
-			gene_tree->next_sibling = temp_top2;
-			temp_top2->prev_sibling = gene_tree;
-			teeemp->prev_sibling = NULL;
-			teeemp->daughter = NULL;
-			dismantle_tree(teeemp);
-			teeemp = NULL;
-			}
-		}
-	
-	free(presence);
-	free(temper);
-	for(i=0; i<2*number_of_taxa; i++)
-		free(scores[i]);
-	free(scores);
-	
-	return(gene_tree);
-	}
-#endif
-
-
-/* make_unrooted: moved to reconcile.c */
-#if 0
-void make_unrooted(struct taxon * position)
-	{
-	int i=0;
-	struct taxon * start = position;
-	while(position != NULL)
-		{
-		i++;
-		position = position->next_sibling;
-		}
-	if(i==1)
-		{
-		
-		}
-	}
-#endif
-
-/* reconstruct: moved to reconcile.c */
-#if 0
-void reconstruct(int print_settings)  /* Carry out gene-tree reconciliation of source trees against a species tree */
-	{
-	struct taxon *position = NULL, *species_tree = NULL, *gene_tree = NULL, *best_mapping = NULL, *unknown_fund = NULL, *pos = NULL, *copy = NULL, *newbie = NULL;
-	int i, j, k, l, xnum=0, *presence = NULL, **label_results = NULL, num_species_internal = 0, error = FALSE, printfiles = FALSE, how_many = 0, diff_overall =0, dorecon = FALSE, basescore = 1, taxaorder=0, species_source = 0, gene_tree_start = 0;
-	float *overall_placements = NULL, biggest = -1, total, best_total = -1;
-	char *temptree;
-	char *temptree1 = malloc(TREE_LENGTH * sizeof(char));
-	char *temptree2 = malloc(TREE_LENGTH * sizeof(char));
-	char reconfilename[100], otherfilename[100], *tmp1 = NULL, c = '\0', speciestree_file[1000];
-	if(!temptree1 || !temptree2) { free(temptree1); free(temptree2); printf2("Error: out of memory in reconstruct\n"); return; }
-	FILE *reconstructionfile = NULL, *descendentsfile = NULL, *genebirthfile = NULL;
-	
-	temptree = malloc(TREE_LENGTH*sizeof(char));
-	temptree[0] = '\0';
-	speciestree_file[0] = '\0';
-	temptree1[0] = '\0';
-	reconfilename[0] ='\0';
-	otherfilename[0] = '\0';
-	
-	tmp1 = malloc(TREE_LENGTH*sizeof(char));
-	tmp1[0] = '\0';
-	count_now = TRUE;
-
-    for(i=0; i<num_commands; i++)
-        {
-        if(strcmp(parsed_command[i], "printfiles") == 0)
-			{
-			if(strcmp(parsed_command[i+1], "yes") == 0)
-				printfiles = TRUE;
-			}
-		if(strcmp(parsed_command[i], "speciestree") == 0)
-			{
-			/* values: "memory", "first", or a filename */
-			if(strcmp(parsed_command[i+1], "memory") == 0)
-				species_source = 1;
-			else if(strcmp(parsed_command[i+1], "first") == 0)
-				species_source = 2;
-			else
-				{
-				species_source = 3;
-				strcpy(speciestree_file, parsed_command[i+1]);
-				}
-			}
-		if(strcmp(parsed_command[i], "showrecon") == 0)
-			{
-			if(strcmp(parsed_command[i+1], "yes") == 0)
-				dorecon = TRUE;
-			}
-		if(strcmp(parsed_command[i], "basescore") == 0)
-			{
-			basescore = atoi(parsed_command[i+1]);
-			}
-		}
-
-
-
-	/* If autoprunemono was active, swap original (unpruned) trees in for reconstruct */
-	int autoprunemono_swapped = FALSE;
-	if(autoprunemono_active && original_fundamentals != NULL)
-		{
-		for(i = 0; i < Total_fund_trees; i++)
-			{
-			if(original_fundamentals[i] != NULL)
-				{
-				char *tmp_swap = fundamentals[i];
-				fundamentals[i] = original_fundamentals[i];
-				original_fundamentals[i] = tmp_swap;
-				}
-			}
-		autoprunemono_swapped = TRUE;
-		printf2("(Using original unpruned trees for reconstruct)\n");
-		}
-
-	if(printfiles)
-		{
-		strcpy(reconfilename, inputfilename);
-		strcat(reconfilename, ".recon");
-		reconstructionfile =fopen(reconfilename, "w");
-		strcat(reconfilename, ".dist");
-		distributionreconfile = fopen(reconfilename, "w");
-		
-		strcpy(otherfilename, inputfilename);
-		strcat(otherfilename, ".species.decendents");
-		descendentsfile = fopen(otherfilename, "w");
-
-		strcpy(otherfilename, inputfilename);
-		strcat(otherfilename, ".gene.births");
-		genebirthfile = fopen(otherfilename, "w");	
-		
-		strcpy(otherfilename, inputfilename);
-		strcat(otherfilename, ".onetoone");
-		onetoonefile =  fopen(otherfilename, "w");
-
-		strcpy(otherfilename, inputfilename);
-		strcat(otherfilename, ".strict.onetoone");
-		strictonetoonefile =  fopen(otherfilename, "w");
-
-		
-		fprintf(distributionreconfile, "Duplications\tLosses\n");
-		}
-	presence = malloc(2*number_of_taxa*sizeof(int));
-	overall_placements = malloc(2*number_of_taxa*sizeof(float));
-	for(i=0; i<2*number_of_taxa; i++)
-		overall_placements[i] = 0;
-	
-	label_results = malloc(6*sizeof(int*));
-	for(i=0; i<6; i++)
-		{
-		label_results[i] = malloc((2*number_of_taxa)*sizeof(int));
-		for(j=0; j<(2*number_of_taxa); j++)
-			{
-			label_results[i][j] = 0;
-			}
-		}
-	
-	 for(i=0; i<num_commands; i++)
-		{
-
-		if(strcmp(parsed_command[i], "dups") == 0)
-			{
-			dup_weight = tofloat(parsed_command[i+1]);
-			if(dup_weight < 0)
-				{
-				printf2("Error: '%s' is an invalid value for dups\n", parsed_command[i+1]);
-				error = TRUE;
-				}
-			}
-		if(strcmp(parsed_command[i], "losses") == 0)
-			{
-			loss_weight = tofloat(parsed_command[i+1]);
-			if(loss_weight < 0)
-				{
-				printf2("Error: '%s' is an invalid value for losses\n", parsed_command[i+1]);
-				error = TRUE;
-				}
-			}
-		}
-	/* Resolve species tree source and validate */
-	if(species_source == 0)
-		{
-		if(trees_in_memory > 0)
-			species_source = 1;
-		else
-			{
-			printf2("Error: No supertree is in memory. Run 'hs', 'nj' or 'alltrees' first,\n");
-			printf2("       or specify a species tree with: reconstruct speciestree <file>\n");
-			error = TRUE;
-			}
-		}
-	if(species_source == 1 && trees_in_memory == 0)
-		{
-		printf2("Error: No supertree in memory for 'speciestree memory'.\n");
-		error = TRUE;
-		}
-	if(species_source == 3 && !error)
-		{
-		FILE *stcheck = fopen(speciestree_file, "r");
-		if(stcheck == NULL)
-			{
-			printf2("Error: Cannot open species tree file '%s'\n", speciestree_file);
-			error = TRUE;
-			}
-		else fclose(stcheck);
-		}
-	gene_tree_start = (species_source == 2) ? 1 : 0;
-	if(!error)
-		{
-		if(print_settings)printf2("\nReconstruction of Most likely Duplications and Losses\n\tDuplication weight = %f\n\tLosses weight = %f\n\nTree name:\tReconstruction score\n", dup_weight, loss_weight);
-		/**** BUILD THE SPECIES TREE *****/
-		if(species_source == 1)
-			{
-			/* Use supertree from memory -- already has actual taxon names */
-			strcpy(temptree, retained_supers[0]);
-			printf2("Using supertree in memory as species tree.\n");
-			}
-		else if(species_source == 3)
-			{
-			/* Read species tree from user-specified file */
-			FILE *stfile = fopen(speciestree_file, "r");
-			int si = 0; int sc;
-			while((sc = getc(stfile)) != EOF && sc != ';') { temptree[si++] = (char)sc; }
-			temptree[si++] = ';'; temptree[si] = '\0';
-			fclose(stfile);
-			printf2("Using species tree from file: %s\n", speciestree_file);
-			}
-		else
-			{
-			/* Legacy: use first source tree (fundamentals[0]) */
-			strcpy(temptree, fundamentals[0]);
-			returntree(temptree);
-			printf2("Using first source tree as species tree (legacy mode).\n");
-			}
-		/* build the tree in memory */
-		/****** We now need to build the Species tree in memory *******/
-		temp_top = NULL;
-		tree_build(1, temptree, species_tree, TRUE, -1, 0); 
-		species_tree = temp_top;
-		temp_top = NULL;
-		/** add an extra node to the top of the tree */
-		temp_top = make_taxon();
-		temp_top->daughter = species_tree;
-		species_tree->parent = temp_top;
-		species_tree = temp_top;
-		temp_top = NULL;
-		number_tree1(species_tree, number_of_taxa);
-		num_species_internal = count_internal_branches(species_tree, 0);
-		if(printfiles)
-			{
-			fprintf(reconstructionfile, "Tree name\t");
-			for(j=0; j<number_of_taxa+num_species_internal; j++)
-				{
-				check_tree(species_tree, j, reconstructionfile);
-				}
-			fprintf(reconstructionfile, "\n");
-			
-			fprintf(genebirthfile, "tree name\tgene birth\n");
-			/* print out the descendents of each internal branch of the tree */
-			do_descendents(species_tree, descendentsfile);
-			fclose(descendentsfile);
-			}
-		
-		
-		for(l=gene_tree_start; l<Total_fund_trees; l++)
-			{
-			temp_top = NULL;
-			strcpy(temptree, "");
-			strcpy(temptree, fundamentals[l]);
-			unroottree(temptree);
-			
-			/*returntree(temptree); */ /* add in the actual names in the tree */
-			/* build the tree in memory */
-			/****** We now need to build the gene tree in memory *******/
-			temp_top = NULL;
-			how_many++;
-			taxaorder=0;
-			tree_build(1, temptree, gene_tree, FALSE, l, 0);
-			gene_tree = temp_top;
-
-			temp_top = NULL;
-			strcpy(temptree1, temptree);
-			i = count_taxa(gene_tree, 0);
-			if(presence_of_trichotomies(gene_tree))
-				{
-				printf("Doing resolving of trichotomies\n");
-				gene_tree = do_resolve_tricotomies(gene_tree, species_tree, basescore);
-				}
-			tree_top = gene_tree;
-			compress_tree1(gene_tree);
-			gene_tree = tree_top;
-			temp_top = NULL;
-			duplicate_tree(gene_tree, NULL);
-			how_many++;
-			copy = temp_top;
-			tree_top = NULL;
-			i = number_tree(gene_tree, 0); /* number every branch of the gene tree so we can use this to reroot */
-			best_total = -1;
-
-			if(i>2) /* if there are more than two branches in this gene tree */
-				{
-				for(j=0; j<i; j++) /* For every possible rerooting of the gene tree */
-					{
-
-					malloc_check=0;
-					position = get_branch(gene_tree, j); /* find branch numbered j on the gene tree */ 
-					temp_top = gene_tree;
-					reroot_tree(position); /* reroot at this position */
-
-					/* add a node at the top of the re-rooted tree */
-					gene_tree = make_taxon();
-					gene_tree->daughter = temp_top;
-
-					
-					diff_overall -= malloc_check;
-					total = tree_map(gene_tree, species_tree, printfiles); 
-					diff_overall += malloc_check;
-					if(total < best_total || best_total == -1)
-						{
-						best_total = total;
-						if(best_mapping != NULL)
-							{
-							dismantle_tree(best_mapping);
-							how_many--;
-							best_mapping = NULL;
-							}
-						best_mapping = gene_tree;
-						gene_tree = NULL;
-						}
-					else
-						{
-						dismantle_tree(gene_tree);
-						how_many--;
-						gene_tree = NULL;
-						}
-					temp_top = NULL;
-					tree_top = NULL;
-					duplicate_tree(copy, NULL);
-					how_many++;
-					gene_tree = temp_top;
-					temp_top = NULL;
-					tree_top = NULL;
-					number_tree(gene_tree, 0);
-					another_check += malloc_check;
-					}
-				}
-			else
-				{
-				newbie = make_taxon();
-				newbie->daughter=gene_tree;
-				gene_tree->parent = newbie;
-				gene_tree = newbie;
-				newbie = NULL;
-				
-				total = tree_map(gene_tree, species_tree,printfiles);				
-				best_total = total;
-				best_mapping = gene_tree;
-				gene_tree = NULL;
-				}
-			if(strcmp(tree_names[l], "") == 0)
-				printf2("Tree number: %d\t%f\n", l, best_total);
-			else
-				printf2("%s\t%f\n", tree_names[l], best_total);
-			tree_top = best_mapping;
-			/** ADD IN PRINTFULLNAMED TREE HERE **/
-			temptree[0] = '\0';
-			print_fullnamed_tree(tree_top, temptree, l); 
-			/*print_named_tree(tree_top, temptree); */
-
-			if(dorecon == TRUE)
-				{
-				tree_coordinates(temptree, TRUE, FALSE, FALSE, l); /* char *tree, int bootstrap, int build, int mapping, int fundnum */
-				}
-			/******* PRINT_TREE_LABELS TEST *******/	
-			/****	label_results[0] = number of copies of the gene at this internal branch
-					label_results[1] = number of duplications at this internal branch
-					label_results[2] = number of losses at this internal branch
-					label_results[3] = number of 1:1 orthologs after this internal branch (allowing duplications and losses in external taxa)
-					label_results[4] = number of strict 1:1 orthologs after this internal branch (not allowing any duplications and losses)
-					label_results[5] = (added Aug 17) Number of Duplications at this internal branch supported by splits in the orignal gene tree (Does not include those inferred from polytomies)
-			****/
-
-			if(printfiles)
-				{	
-				for(i=0; i<6; i++)
-					{
-					for(j=0; j<(2*number_of_taxa); j++)
-						{
-						label_results[i][j] = 0;
-						}
-					}
-				
-				if(tree_top->tag == number_of_taxa+num_species_internal-1)
-					fprintf(genebirthfile, "%s\troot\n", tree_names[l]);
-				else
-					{
-					fprintf(genebirthfile, "%s\t", tree_names[l]);
-					check_tree(species_tree, tree_top->tag, genebirthfile);
-					fprintf(genebirthfile, "\n");
-					}
-					
-				print_tree_labels(tree_top, label_results, l, species_tree);
-				fprintf(reconstructionfile, "%10s\t", tree_names[l]);
-				for(j=0; j<(2*number_of_taxa)-1; j++)
-					{
-					
-					fprintf(reconstructionfile, "%5d (%5d+ %5d+S %5d- %5d 1:1 %5d 1:1S)\t", label_results[0][j], label_results[1][j], label_results[5][j], label_results[2][j], label_results[3][j], label_results[4][j]);
-					}
-				fprintf(reconstructionfile, "\n");
-				}
-			/******* END TEST ********/
-			for(i=0; i<2*number_of_taxa; i++)
-				presence[i] = FALSE;
-				
-			find_tagged(best_mapping, presence);
-			j=0;
-			for(i=0; i<2*number_of_taxa; i++)
-				if(presence[i]) j++;
-			for(i=0; i<2*number_of_taxa; i++)
-				{
-				if(presence[i]) overall_placements[i] += (float)1/(float)j;
-				}
-			if(copy != NULL)
-				{
-				dismantle_tree(copy);
-				copy = NULL;
-				}
-				how_many--;
-			
-			if(gene_tree != NULL)
-				{
-				dismantle_tree(gene_tree);
-				gene_tree = NULL;
-				}
-			how_many--;
-			if(best_mapping != NULL)
-				{
-				dismantle_tree(best_mapping);
-				best_mapping = NULL;
-				}
-				
-				
-			
-			how_many--;
-			how_many--;
-			}
-		
-		if(species_tree != NULL)
-			{
-			dismantle_tree(species_tree);
-			species_tree = NULL;
-			}
-		}
-	if(printfiles)
-		{
-		fclose(distributionreconfile);
-		fclose(reconstructionfile);	
-		fclose(genebirthfile);
-		fclose(onetoonefile);
-		fclose(strictonetoonefile);
-		}
-	tree_top = NULL;
-	free(temptree);
-	free(temptree1);
-	free(temptree2);
-	free(tmp1);
-	free(presence);
-	free(overall_placements);
-	if(label_results != NULL)
-		{
-		for(i=0; i<6; i++)
-			{
-			free(label_results[i]);
-			label_results[i] = NULL;
-			}
-		free(label_results);
-		label_results = NULL;
-		}
-
-	/* Swap original trees back so other commands (hs, etc.) continue to use pruned versions */
-	if(autoprunemono_swapped)
-		{
-		for(i = 0; i < Total_fund_trees; i++)
-			{
-			if(original_fundamentals[i] != NULL)
-				{
-				char *tmp_swap = fundamentals[i];
-				fundamentals[i] = original_fundamentals[i];
-				original_fundamentals[i] = tmp_swap;
-				}
-			}
-		}
-
-	count_now=FALSE;
-
-	}
-#endif
 
 
 
 
-/* put_in_scores: moved to reconcile.c */
-#if 0
-void put_in_scores(struct taxon * position, float * total)
-	{
-	while(position != NULL)
-		{
-		if(position->daughter != NULL) put_in_scores(position->daughter, total);
-		if(total[position->tag] == 0) position->loss = -1;
-		else position->loss = total[position->tag];
-		position = position->next_sibling;
-		}
-	}
-#endif
 
-/* reset_tag2: moved to tree_ops.c */
-#if 0
-void reset_tag2(struct taxon * position)
-	{
-	while(position != NULL)
-		{
-		position->tag2 = FALSE;
-		if(position->daughter != NULL) reset_tag2(position->daughter);
-		position = position->next_sibling;
-		}
-	}
-#endif
-	
-/* assign_hgtdonors: moved to reconcile.c */
-#if 0
-void assign_hgtdonors(struct taxon * position, int num, int part_num)
-	{
-	int i;
-	while(position != NULL)
-		{
-		if(position->daughter != NULL) assign_hgtdonors(position->daughter, num, part_num);
-		if(position->donor == NULL)
-			{
-			position->donor = malloc(num*sizeof(int));
-			for(i=0; i<num; i++) position->donor[i] = FALSE;
-			}
-		if(position->tag2 == TRUE)
-			{
-			position->donor[part_num] = TRUE;
-			}
-		position = position->next_sibling;
-		}
-	}
-#endif
 
-/* assign_tag2: moved to tree_ops.c */
-#if 0
-int assign_tag2(struct taxon * position, int num)
-	{
-	int found = FALSE, i;
-	while(position != NULL)
-		{
-		if(position->daughter != NULL)
-			{
-			if(assign_tag2(position->daughter, num)) found = TRUE;
-			}
-		if(position->donor == NULL)
-			{
-			position->donor = malloc(num_gene_nodes*sizeof(int));
-			for(i=0; i<num_gene_nodes; i++) position->donor[i] = FALSE;
-			}
-		if(position->donor[num] == TRUE)
-			{
-			position->tag2 = TRUE;
-			found = TRUE;
-			}
-		position = position->next_sibling;
-		}
-	return(found);
-	}
-#endif
 
-/* hgt_reconstruction: moved to reconcile.c */
-#if 0
-void hgt_reconstruction()
-	{
-	struct taxon *position = NULL, *species_tree = NULL, *gene_tree = NULL, *best_mapping = NULL, *best_mapping1 = NULL, *best_mapping2 = NULL, *unknown_fund = NULL, *posit = NULL,*copy = NULL, *copy1 = NULL, **parts = NULL, *test_part = NULL, *pos = NULL, *best_donor = NULL, *best_HGT = NULL, *attached = NULL;
-	int i, j, k, l,  *presence = NULL,*presence1 = NULL, *presence2 = NULL, hgt_receipient1, hgt_receipient2, **overall_presence = NULL, *overall_reconstruction = NULL, *overall_receptor = NULL, receptor, **tmp_presence1 = NULL, **tmp_presence2 = NULL, *before1 = NULL, *before2 = NULL, *after1 = NULL, *after2 = NULL, *temporary = NULL;
-	float *overall_placements = NULL, biggest = -1,  total, best_total = -1,  best_total1 = -1, best_total2 = -1, HGT1 = 0, HGT2 = 0, original = 0, best_HGT_recon = -1, best_reconstruction = -1, sum, HGT_score = -1, donor_score = -1, tmp_allow = FALSE;
-	char *temptree = NULL;
-	char *temptree1 = malloc(TREE_LENGTH * sizeof(char));
-	int **species_allowed = NULL, **dependent_species_allowed = NULL, *previous = NULL, xnum =0, x, y, z, partA, partB, q, r, s, allow_HGT1 = TRUE, allow_HGT2 = TRUE, numparts = 1,  place_marker = 1, found_better = FALSE, error = FALSE, taxaorder=0;
-	int basescore = 1; /** see reconstrution command **/
-
-	if(!temptree1) { printf2("Error: out of memory in recon_hgt\n"); return; }
-	temptree = malloc(TREE_LENGTH*sizeof(char));
-	temptree[0] = '\0';
-	temptree1[0] = '\0';
-	
-	for(i=0; i<num_commands; i++)
-		{
-		if(strcmp(parsed_command[i], "dupweight") == 0)
-			{
-			dup_weight = tofloat(parsed_command[i+1]);
-			}
-		if(strcmp(parsed_command[i], "lossweight") == 0)
-			{
-			loss_weight = tofloat(parsed_command[i+1]);
-			}
-		if(strcmp(parsed_command[i], "hgtweight") == 0)
-			{
-			hgt_weight = tofloat(parsed_command[i+1]);
-			}
-		
-		}
-	
-	printf2("Calculating best reconstruction of Duplications, losses and Horizontal gene transfers (HGT)\n\nDuplication weight set to %f\nLoss weight set to %f\nHGT weight set to %f\n\n", dup_weight, loss_weight, hgt_weight);
-	
-	tree_top = NULL;
-	
-	/**** First, take the species tree and calculate those part of the tree that would constitute travelling in time if a HGT was to occur (ie in ancestral or descendent branches) ***/
-	species_allowed = malloc((2*number_of_taxa)* sizeof(int*));
-	if(species_allowed == NULL) memory_error(120);
-	for(i=0; i<(2*number_of_taxa); i++)
-		{
-		species_allowed[i] = malloc((2*number_of_taxa)*sizeof(int));
-		if(species_allowed[i] == NULL) memory_error(121);
-		for(j=0; j<(2*number_of_taxa); j++) species_allowed[i][j] = TRUE;
-		}
-	
-	dependent_species_allowed = malloc((2*number_of_taxa)* sizeof(int*));
-	if(!dependent_species_allowed) memory_error(122);
-	for(i=0; i<(2*number_of_taxa); i++)
-		{
-		dependent_species_allowed[i] = malloc((2*number_of_taxa)*sizeof(int));
-		if(dependent_species_allowed[i] == NULL) memory_error(123);
-		for(j=0; j<(2*number_of_taxa); j++) dependent_species_allowed[i][j] = TRUE;
-		}
-	
-	temporary = malloc(2*number_of_taxa*sizeof(int));
-	presence = malloc(2*number_of_taxa*sizeof(int));
-	presence1 = malloc(2*number_of_taxa*sizeof(int));
-	presence2 = malloc(2*number_of_taxa*sizeof(int));
-	
-	previous = malloc((2*number_of_taxa)*sizeof(int));
-	for(i=0; i<2*number_of_taxa; i++) previous[i] = FALSE;
-	
-	before1 = malloc((2*number_of_taxa)*sizeof(int));
-	before2 = malloc((2*number_of_taxa)*sizeof(int));
-	after1 = malloc((2*number_of_taxa)*sizeof(int));
-	after2 = malloc((2*number_of_taxa)*sizeof(int));
-	for(i=0; i<2*number_of_taxa; i++)
-		{
-		before1[i] = before2[i] = after1[i] = after2[i] = FALSE;
-		}
-	
-	/**** BUILD THE SPECIES TREE *****/
-	strcpy(temptree, fundamentals[0]);
-	returntree(temptree);
-	/* build the tree in memory */
-	/****** We now need to build the Species tree in memory *******/
-	temp_top = NULL;
-	tree_build(1, temptree, species_tree, 1, -1, 0);
-	species_tree = temp_top;
-	temp_top = NULL;
-	/** add an extra node to the top of the tree */
-	temp_top = make_taxon();
-	temp_top->daughter = species_tree;
-	species_tree->parent = temp_top;
-	species_tree = temp_top;
-	temp_top = NULL;
-			printf2("2\n");
-
-	xnum = number_tree1(species_tree, number_of_taxa); /* label the internal and external branches of the species tree */
-	assign_ances_desc(species_tree, species_allowed, previous);
-	free(previous);
-	
-	
-	for(l=1; l<Total_fund_trees; l++)
-		{
-		best_reconstruction = -1;
-		best_donor = NULL;
-		best_HGT = NULL;
-		temp_top = NULL;
-		strcpy(temptree, "");
-		strcpy(temptree, fundamentals[l]);
-		returntree(temptree);
-		unroottree(temptree);  /* we need the gene tree to be unrooted when we are breaking it up */
-		/* build the tree in memory */
-		/****** We now need to build the genetree in memory *******/
-		temp_top = NULL;
-		taxaorder=0;
-		tree_build(1, temptree, gene_tree, 1, l, 0);
-		gene_tree = temp_top;
-		temp_top = NULL;
-			
-		strcpy(temptree1, temptree);
-	
-		/***** NOW THAT WE HAVE BUILT THE GENE TREE, WE NEED TO BREAK IT AT EVERY BRANCH IN TURN ****/
-
-		num_gene_nodes = number_tree(gene_tree, 0);
-		
-		overall_receptor = malloc(num_gene_nodes*sizeof(int));
-		for(i=0; i<num_gene_nodes; i++) overall_receptor[i] = -1;
-		
-		parts = malloc(num_gene_nodes*sizeof(struct taxon *));
-		for(i=0; i<num_gene_nodes; i++) parts[i] = NULL;
-		
-		overall_placements = malloc(num_gene_nodes*sizeof(float));
-		for(i=0; i<num_gene_nodes; i++)
-			overall_placements[i] = 0;
-		
-		tmp_presence1 = malloc(num_gene_nodes*sizeof(int *));
-		for(i=0; i<num_gene_nodes; i++) 
-			{
-			tmp_presence1[i] = malloc((2*number_of_taxa)*sizeof(int *));
-			for(j=0; j<2*number_of_taxa; j++) tmp_presence1[i][j] = FALSE;
-			}
-		
-		tmp_presence2 = malloc(num_gene_nodes*sizeof(int *));
-		for(i=0; i<num_gene_nodes; i++) 
-			{
-			tmp_presence2[i] = malloc((2*number_of_taxa)*sizeof(int *));
-			for(j=0; j<2*number_of_taxa; j++) tmp_presence2[i][j] = FALSE;
-			}
-		
-		overall_presence = malloc(num_gene_nodes*sizeof(int *));
-		for(i=0; i<num_gene_nodes; i++) 
-			{
-			overall_presence[i] = malloc((2*number_of_taxa)*sizeof(int *));
-			for(j=0; j<2*number_of_taxa; j++) overall_presence[i][j] = FALSE;
-			}
-
-		if(presence_of_trichotomies(gene_tree)) gene_tree = do_resolve_tricotomies(gene_tree, species_tree, basescore);
-
-		parts[0] = gene_tree;
-		gene_tree = NULL;
-		strcpy(temptree, "");
-		print_tree(parts[0], temptree);
-		
-		duplicate_tree(parts[0], NULL);
-		copy = tree_top;			
-		i = number_tree(copy, 0);
-		best_total = -1;
-		for(j=0; j<i; j++) /* for every node (internal and external) on the tree */
-			{
-			position = get_branch(copy, j);
-			tree_top = copy;
-			reroot_tree(position);
-		
-			copy = tree_top;
-			tree_top = NULL;
-			printf2("e\n");
-			total = tree_map(copy, species_tree,0);
-			if(total < best_total || best_total == -1) best_total = total;
-			dismantle_tree(copy);
-			copy = NULL;
-			temp_top = NULL;
-			tree_top = NULL;
-			duplicate_tree(parts[0], NULL);
-			copy = tree_top;
-			temp_top = NULL;
-			tree_top = NULL;
-			number_tree(copy, 0);
-			}  /* WE now know the cost for the best reconstruction of dups and losses on this tree WITHOUT any HGTs */
-		dismantle_tree(copy);
-		copy = NULL;
-		original = best_total;
-		overall_placements[0] = original;
-		numparts = 1;
-		for(k=0; k<numparts; k++)
-			{
-			printf2("ON part %d out of %d parts\n", k, numparts);
-			tree_top = parts[k];
-			compress_tree1(parts[k]);
-			parts[k] = tree_top;
-			best_reconstruction = overall_placements[k];
-			found_better = FALSE;
-			j=0;
-			while(parts[j] != NULL) j++;
-			place_marker = j;   /* THis is to tell us the next available spce in parts[], so that if there is a HGT found we know where to attach it */
-			reset_tag2(parts[k]);
-			/* calculate the cost for duplications and losses for the tree as it is given  (trying all rootings )*/
-			if(overall_placements[k] != 0 && overall_placements[k] > 1*hgt_weight)  /* If the best reconstruction of the unbroken tree requires no dups or losses, or if the cost of 1 HGT is greater than this score, we don't test for HGTs */
-				{
-				i = number_tree(parts[k], 0);
-				for(j=0; j<i; j++) /* go through all the parts of the tree and for each part break it into two at every point and look for new hgts */
-					{
-					partA = partB = TRUE;
-					/* Duplicate this tree (or part of), that we are at, and use this to find the best place to break the tree ***/
-
-					tree_top = NULL;
-					duplicate_tree(parts[k], NULL);
-					copy = tree_top;
-					
-					number_tree(copy, 0);
-					position = get_branch(copy, j); /* this is the branch at which we are going to break the tree :-) */
-					if(position != NULL) /* no point in seperating at the top node of the tree (which in reality doesn't exist ) */
-						{
-						
-						test_part = position;
-						if(position == copy) copy = position->next_sibling;
-						/* mark the position where this was removed from */
-						posit = position;
-						if(position->next_sibling != NULL) attached = position->next_sibling;
-						else attached = position->prev_sibling;
-						while(posit->prev_sibling != NULL) posit = posit->prev_sibling;
-						while(posit != NULL)
-							{
-							posit->tag2 = TRUE;
-							posit = posit->next_sibling;
-							}
-						
-						/* remove this node from the tree */
-						if(position->parent != NULL)
-							{
-							(position->parent)->daughter = position->next_sibling;
-							(position->next_sibling)->parent = position->parent;
-							position->parent = NULL;
-							}
-						if(position->next_sibling != NULL) (position->next_sibling)->prev_sibling = position->prev_sibling;
-						if(position->prev_sibling != NULL) (position->prev_sibling)->next_sibling = position->next_sibling;
-						position->next_sibling = NULL;
-						position->prev_sibling = NULL;
-						/* now we need to compress the tree we just pruned to make sure that there are no unnecessary pointer taxa */
-						tree_top = copy;
-						compress_tree1(copy);
-						copy = tree_top;
-						tree_top = test_part;
-						compress_tree1(test_part);
-						test_part = tree_top;
-						
-						
-						/* now reconstruct the duplications and losses of "copy" and or "test_part" seperately to see if this helped the reconsctruction */
-						/* Either "copy" or "test part"  could be the HGT part. We must treat both as the HGT part in turn and pick which one has the best dup+loss reconstruction */
-						/* Whichever is being treated as the HGT cannot be rerooted because if this is the HGT part then where we broke the tree is when the HGT joined the new lineage */
-						/* The other half is treated as the "donor" and can be rerooted to find the best rooting for dup+loss reconstruction */
-						for(q=0; q<2*number_of_taxa; q++)
-							{
-							presence1[q] = FALSE;
-							presence2[q] = FALSE;
-							}
-						
-						/* first calculate the dup+loss score for the two parts, this is the score for each as if both were the HGT part, "test_part" doesn't have to be rerooted, but "copy" does, at the point that "test_part" was attached */
-						if(k == 0)  /* we only need to assume "copy" was the HGT if k == 0, otherwise it must be the donor */
-							{
-							tree_top = NULL;
-							duplicate_tree(copy, NULL);
-							copy1 = tree_top;
-							
-							tree_top = copy;
-							if(copy != attached) reroot_tree(attached);
-							else
-								{
-								posit = make_taxon();
-								posit->daughter = tree_top;
-								tree_top->parent = posit;
-								tree_top = posit;
-								posit = NULL;
-								} 
-							copy = tree_top;  
-							printf2("f\n");
-							HGT1 = tree_map(copy, species_tree,0); /* HGT1 no has the score for the tree "copy" */
-							hgt_receipient1 = copy->tag;  /* if this is the HGT part, then this is the hypothesised node on the species tree that received the HGT */
-
-							dismantle_tree(copy);
-							copy = copy1;
-							copy1 = NULL;
-							}
-						
-						/* If k != 0 then we don't reroot the tree before figuring out where the HGT was attached, if k != 0 then test_part cannot be the donor! (because this would mean we would have to reroot parts[k], which is a HGT already and as such is rooted :-) */
-						tree_top = NULL;
-						duplicate_tree(copy, NULL);
-						copy1 = tree_top;
-						printf2("g\n");
-						best_total1 = tree_map(copy1, species_tree,0);
-						find_tagged(copy1, presence1);
-						best_mapping1 = copy1; /* this will be used later for checking HGT compatibilities (( this version is only used if k != 0 ))*/
-						copy1 = NULL;
-						
-						tree_top = NULL;
-						duplicate_tree(test_part, NULL);
-						copy1 = tree_top;
-						printf2("h\n");
-						HGT2 = tree_map(copy1, species_tree,0); /* HGT2 no has the score for the tree "test_part" */
-						hgt_receipient2 = copy1->tag; /* if this is the HGT part, then this is the hypothesised node on the species tree that received the HGT */
-						/*find_tagged(copy1, presence2); This is commented out because if k != 0 then test_part cannot be the donor */
-						dismantle_tree(copy1);
-						copy1 = NULL;
-						tree_top = NULL;
-						/*** Next calculate the best rerooting of each tree in terms of dups+losses ***/
-						
-						if(k == 0) /* we can only reroot the original part of the tree, any subsequent ones are rooted because they are the HGTs */
-							{
-							dismantle_tree(best_mapping1);
-							best_mapping1 = NULL;
-							for(z=0; z<2; z++)
-								{
-								/**** CHECK TO SEE IF BREAKING THE TREE AT THIS POINT MAKES THE HGT "TRAVEL IN TIME" also calculate the best dups+loss reconstruction for each tree  */
-								tree_top = NULL;
-								if(z == 0) duplicate_tree(copy, NULL);
-								else duplicate_tree(test_part, NULL);
-								copy1 = tree_top;
-								tree_top = NULL;
-								tree_top = copy1;
-								compress_tree1(copy1);
-								copy1 = tree_top;
-								
-								x = number_tree(copy1, 0);
-								best_total = -1;
-								if(x >3)
-									{
-									for(y=0; y<x; y++)
-										{
-										position = get_branch(copy1, y);
-										tree_top = copy1;
-										if(copy1 != position) reroot_tree(position);
-										else
-											{
-											if(z == 0)
-												{
-												posit = tree_top;
-												q=0;
-												while(posit != NULL)
-													{
-													q++;
-													posit = posit->next_sibling;
-													}
-												posit = NULL;
-												if(q != 1)
-													{
-													reroot_tree(tree_top);
-													}
-												}
-											} 
-										copy1 = tree_top;
-										tree_top = NULL;
-										
-										printf2("I\n");
-										total = tree_map(copy1, species_tree,0);
-										if(total < best_total || best_total == -1)
-											{
-											best_total = total;
-											if(best_mapping != NULL)
-												{
-												dismantle_tree(best_mapping);
-												best_mapping = NULL;
-												}
-											best_mapping = copy1;
-											copy1 = NULL;
-											}
-										else
-											{
-											dismantle_tree(copy1);
-											copy1 = NULL;
-											}
-										temp_top = NULL;
-										tree_top = NULL;
-										if(z == 0) duplicate_tree(copy, NULL);
-										else duplicate_tree(test_part, NULL);
-										copy1 = tree_top;
-										temp_top = NULL;
-										tree_top = copy1;
-										compress_tree1(copy1);
-										copy1 = tree_top;
-										tree_top = NULL;
-										number_tree(copy1, 0);
-										}
-									}
-								else
-									{
-									printf2("j\n");
-									best_total = tree_map(copy1, species_tree,0);
-									best_mapping = copy1;
-									copy1 = NULL;
-									}
-								if(z==0) best_total1 = best_total;
-								else best_total2 = best_total;
-								
-								
-								for(q=0; q<2*number_of_taxa; q++)
-									{
-									if(z == 0) presence1[q] = FALSE;
-									else presence2[q] = FALSE;
-									}
-
-								if(z == 0) find_tagged(best_mapping, presence1);  /* so after this function "presence" will have all the possible positions that the other part of the tree (if it was a HGT) could have come from. */
-								else find_tagged(best_mapping, presence2);
-								
-								if(z==0) best_mapping1 = best_mapping;
-								else best_mapping2 = best_mapping;
-								best_mapping = NULL;
-								
-								if(copy1 != NULL)
-									{
-									dismantle_tree(copy1);
-									copy1 = NULL;
-									}
-								}
-							}
-						
-						/**** WE NOW HAVE THE FOLLOWING VALUES:  */
-						/**** HGT1 = reconstruction cost of "copy" as it if was the HGT **/
-						/**** HGT2 = reconstruction cost of "test_part" as it if was the HGT **/
-						/**** best_total1 = reconstruction cost of "copy" as if it was the donor part */
-						/**** best_total2 = reconstruction cost of "test_part" as if it was the donor part */
-						/**** presence1 = contains the possible donor nodes if "copy" was the donor */
-						/**** presence2 = contains the possible donor nodes if "test_part" was the donor */
-						/**** hgt_receipient1 = is the node number of the receipient if "copy" wat the HGT part */
-						/**** hgt_receipient2 = is the node number of the receipient if "test_part" wat the HGT part */
-						/****/
-						/**** With these we need to now test 1) if hypothesising if either was a HGT causes them to travel beack in time **/
-						/**** 2) Whichever passes the above test must then have a reconstruction cost that is better than the original tree without ANY HGT hypothesised */
-						/**** If both pass the first test and both have the same reconstruction cost which is better than the original tree, we arbitrarily choose one over the other (not sure how else to deal with ths :-) */
-						
-						/* First see if the placements of either contradicts the species tree array we made earlier */ 
-						/* If the donor could have been the same as the receipient, then we don't allow the HGT */
-						allow_HGT1 = allow_HGT2 = TRUE;
-						if(presence1[hgt_receipient2] == TRUE) allow_HGT1 = FALSE;
-						if(presence2[hgt_receipient1] == TRUE) allow_HGT2 = FALSE;  /* If we are able to hypothesise that the donor and the receipient was the same then we disregard the HGT */	
-						
-						if(k!= 0) allow_HGT2 = FALSE;	/* WE cannot reroot this if it isnot the original part of the tree (ie k == 0) and we already know that this is a HGT part, so it can only be a donor for a hgt event, so copy HAS TO BE the donor */
-																												
-						/* Test to see if any of the hypothesised HGTs would have conflicted with the structure of the Species tree */
-						if(allow_HGT1 == TRUE || allow_HGT2 == TRUE)
-							{
-							s = FALSE;
-							r = FALSE;
-							for(q=0; q<(2*number_of_taxa); q++)
-								{
-								if(presence1[q] == TRUE && species_allowed[q][hgt_receipient2] == TRUE) s = TRUE;
-								if(presence2[q] == TRUE && species_allowed[q][hgt_receipient1] == TRUE) r = TRUE;
-								}
-							if(s == FALSE) allow_HGT1 = FALSE;
-							if(r == FALSE) allow_HGT2 = FALSE;
-							}
-						/*** NOW SEE IF THIS CONFLICTS WITH ANY PREVIOUS HGTS!!!!!!!****/
-						
-						if(numparts > 1) /* no point checking this if it is the first hgt defined */
-							{
-							for(q=0; q<num_gene_nodes; q++)
-								{
-								for(r=0; r<2*number_of_taxa; r++)
-									{
-									tmp_presence1[q][r] = FALSE;
-									tmp_presence2[q][r] = FALSE;
-									}
-								}
-							
-							/* See if either of these two possible HGTs conflict with previous HGTs */
-							
-							if(allow_HGT1)
-								{
-								/* check both copy and test_part for any previous HGTs donor sites and then check what the possible donors are now, given the new HGT found */
-								/* HGT1 assumes that copy is the donor and test_part is the HGT */
-								/* we will use the best rooting of copy to calculate the possible donor positions of any hgts defined earlier, these will be saved in tmp_presence1 */
-								/* best_mapping1  holds the optimal mapping of Copy as the donor */
-								for(q=1; q<numparts; q++)
-									{
-									reset_tag2(best_mapping1);
-									if(assign_tag2(best_mapping1, q))
-										{
-										find_tagged(best_mapping1, tmp_presence1[q]);
-										}
-									else
-										{
-										for(r=0; r<2*number_of_taxa; r++)
-											{
-											tmp_presence1[q][r] = overall_presence[q][r];
-											}
-										}
-									}
-								
-								for(s=0; s<(2*number_of_taxa); s++)  /* initialise this to include the timetravelling HGTs that occur from the shape of the tree */
-									{
-									for(r=0; r<(2*number_of_taxa); r++) dependent_species_allowed[s][r] = species_allowed[s][r];
-									}	
-								
-								/* NOW check to see if the new HGT causes any conflicts with the previous HGTs */
-								
-								for(q=1; q<numparts; q++)
-									{
-									
-									 /* check to see if this HGT conflicts with any previously assigned ((not needed for the first hgt)) */
-									
-									if(allow_HGT1)
-										{
-										/* identify the nodes above and below the donor and receptor sites so cross hgts can be defined as being not allowed */
-										for(r=0; r<(2*number_of_taxa); r++) before1[r]  = after1[r] = before2[r] = after2[r]= FALSE;
-										for(r=0; r<2*number_of_taxa; r++) previous[r] = FALSE;
-										for(r=0; r<(2*number_of_taxa); r++)
-											{
-											if(tmp_presence1[q][r] == TRUE)
-												assign_before_after(species_tree, previous, before1, after1, r, FALSE);
-											}
-										for(r=0; r<(2*number_of_taxa); r++)
-											{
-											if(tmp_presence1[q][r] == TRUE) before1[r] = after1[r] = FALSE;
-											}
-										for(r=0; r<2*number_of_taxa; r++) previous[r] = FALSE;
-										assign_before_after(species_tree, previous, before2, after2, overall_receptor[q], FALSE);
-										before2[overall_receptor[q]] = after2[overall_receptor[q]] = FALSE;
-										
-										/** assign the new cross-hgt rules to the array dependent_species_allowed */
-										for(r=0; r<2*number_of_taxa; r++)
-											{
-											if(before1[r] == TRUE)
-												{
-												for(s=0; s<2*number_of_taxa; s++)
-													{
-													if(after2[s] == TRUE)
-														{
-														dependent_species_allowed[r][s] = FALSE;
-														dependent_species_allowed[s][r] = FALSE;
-														}
-													}
-												}
-											}
-										for(r=0; r<2*number_of_taxa; r++)
-											{
-											if(before2[r] == TRUE)
-												{
-												for(s=0; s<2*number_of_taxa; s++)
-													{
-													if(after1[s] == TRUE)
-														{
-														dependent_species_allowed[r][s] = FALSE;
-														dependent_species_allowed[s][r] = FALSE;
-														}
-													}
-												}
-											}
-										}
-									
-									/* check this new HGT against each of the older hgts as they are added  */
-									tmp_allow = FALSE;
-									
-									for(r=0; r<(2*number_of_taxa); r++)
-										{
-										if(presence1[r] == TRUE && dependent_species_allowed[r][hgt_receipient2] == TRUE)
-											tmp_allow = TRUE;
-										if(presence1[r] == TRUE && dependent_species_allowed[r][hgt_receipient2] == FALSE)
-											presence1[r] = FALSE;
-										}
-									if(tmp_allow == FALSE)
-										{
-										allow_HGT1 = FALSE;
-										q = (2*number_of_taxa);
-										}
-									/* this previous section checks the  newhgt against the rules put in place by previous HGTs and asks if this new HGT violates these rules */
-									/* We need one other check. There is a chance that this new HGT may not conflict with any of the rules put in place by previous HGTs, but by its addition it causes some previous HGTs to violate the rules */
-									/* this is what needs to be checked next */
-									
-									if(q>1)
-										{
-										/* dependent_species_allowed has all the rules imposed by each of the HGTs examined so far */
-										
-										for(s=1; s<q; s++)
-											{
-											tmp_allow = FALSE;
-											for(r=0; r<(2*number_of_taxa); r++)
-												{
-												if(tmp_presence1[s][r] == TRUE)
-													{
-													if(dependent_species_allowed[r][overall_receptor[s]] == TRUE) tmp_allow = TRUE;
-													}
-												}
-											if(tmp_allow == FALSE)
-												{
-												allow_HGT1 = FALSE;
-												s = q;
-												}
-											}
-										}
-									
-									} 
-										
-								}
-							if(allow_HGT2)
-								{
-								/* check both copy and test_part for any previous HGTs donor sites and then check what the possible donors are now, given the new HGT found */
-								/* HGT2 assumes that test_part is the donor and copy is the HGT */
-								/* we will use the best rooting of copy to calculate the possible donor positions of any hgts defined earlier, these will be saved in tmp_presence2 */
-								/* best_mapping2  holds the optimal mapping of Copy as the donor */
-								for(q=1; q<numparts; q++)
-									{
-									reset_tag2(best_mapping2);
-									if(assign_tag2(best_mapping2, q))
-										{
-										find_tagged(best_mapping2, tmp_presence2[q]);
-										}
-									else
-										{
-										for(r=0; r<2*number_of_taxa; r++)
-											{
-											tmp_presence2[q][r] = overall_presence[q][r];
-											}
-										}
-									}
-								
-								for(s=0; s<(2*number_of_taxa); s++)  /* initialise this to include the timetravelling HGTs that occur from the shape of the tree */
-									{
-									for(r=0; r<(2*number_of_taxa); r++) dependent_species_allowed[s][r] = species_allowed[s][r];
-									}	
-								
-								/* NOW check to see if the new HGT causes any conflicts with the previous HGTs */
-								
-								for(q=1; q<numparts; q++)
-									{
-									
-									 /* check to see if this HGT conflicts with any previously assigned ((not needed for the first hgt)) */
-									
-									if(allow_HGT2)
-										{
-										/* identify the nodes above and below the donor and receptor sites so cross hgts can be defined as being not allowed */
-										for(r=0; r<(2*number_of_taxa); r++) before1[r]  = after1[r] = before2[r] = after2[r]= FALSE;
-										for(r=0; r<2*number_of_taxa; r++) previous[r] = FALSE;
-										for(r=0; r<(2*number_of_taxa); r++)
-											{
-											if(tmp_presence2[q][r] == TRUE)
-												assign_before_after(species_tree, previous, before1, after1, r, FALSE);
-											}
-										for(r=0; r<(2*number_of_taxa); r++)
-											{
-											if(tmp_presence2[q][r] == TRUE) before1[r] = after1[r] = FALSE;
-											}
-										for(r=0; r<2*number_of_taxa; r++) previous[r] = FALSE;
-										assign_before_after(species_tree, previous, before2, after2, overall_receptor[q], FALSE);
-										before2[overall_receptor[q]] = after2[overall_receptor[q]] = FALSE;
-										
-										/** assign the new cross-hgt rules to the array dependent_species_allowed */
-										for(r=0; r<2*number_of_taxa; r++)
-											{
-											if(before1[r] == TRUE)
-												{
-												for(s=0; s<2*number_of_taxa; s++)
-													{
-													if(after2[s] == TRUE)
-														{
-														dependent_species_allowed[r][s] = FALSE;
-														dependent_species_allowed[s][r] = FALSE;
-														}
-													}
-												}
-											}
-										for(r=0; r<2*number_of_taxa; r++)
-											{
-											if(before2[r] == TRUE)
-												{
-												for(s=0; s<2*number_of_taxa; s++)
-													{
-													if(after1[s] == TRUE)
-														{
-														dependent_species_allowed[r][s] = FALSE;
-														dependent_species_allowed[s][r] = FALSE;
-														}
-													}
-												}
-											}
-										}
-									
-									/* check this new HGT against each of the older hgts as they are added  */
-									tmp_allow = FALSE;
-									
-									for(r=0; r<(2*number_of_taxa); r++)
-										{
-										if(presence2[r] == TRUE && dependent_species_allowed[r][hgt_receipient1] == TRUE)
-											tmp_allow = TRUE;
-										if(presence2[r] == TRUE && dependent_species_allowed[r][hgt_receipient1] == FALSE)
-											presence2[r] = FALSE;
-										}
-									if(tmp_allow == FALSE)
-										{
-										allow_HGT2 = FALSE;
-										q = (2*number_of_taxa);
-										}
-									/* this previous section checks the  newhgt against the rules put in place by previous HGTs and asks if this new HGT violates these rules */
-									/* We need one other check. There is a chance that this new HGT may not conflict with any of the rules put in place by previous HGTs, but by its addition it causes some previous HGTs to violate the rules */
-									/* this is what needs to be checked next */
-									
-									if(q>1)
-										{
-										/* dependent_species_allowed has all the rules imposed by each of the HGTs examined so far */
-										
-										for(s=1; s<q; s++)
-											{
-											tmp_allow = FALSE;
-											for(r=0; r<(2*number_of_taxa); r++)
-												{
-												if(tmp_presence2[s][r] == TRUE)
-													{
-													if(dependent_species_allowed[r][overall_receptor[s]] == TRUE) tmp_allow = TRUE;
-													}
-												}
-											if(tmp_allow == FALSE)
-												{
-												allow_HGT2 = FALSE;
-												s = q;
-												}
-											}
-										}
-									
-									} 
-										
-								}							
-							
-							}
-						
-						if(best_mapping1 != NULL) dismantle_tree(best_mapping1);
-							best_mapping1 = NULL;
-						if(best_mapping2 != NULL) dismantle_tree(best_mapping2);
-							best_mapping2 = NULL;
-						
-						/***************************************************************/
-						/* now see if the reconstruction cost of either of the HGTs that are still allowed would be less than (or equal to?) the best so far (which may be the original) */
-						if(allow_HGT1 && allow_HGT2)
-							{
-							
-							if(best_total1 + HGT2 + (1*hgt_weight) < best_total2 + HGT1 + (1*hgt_weight) && best_total1 + HGT2 + (1*hgt_weight) < best_reconstruction)
-								{
-								found_better = TRUE;
-								best_reconstruction = best_total1 + HGT2 + (1*hgt_weight);
-								donor_score = best_total1;
-								receptor = hgt_receipient2;
-								HGT_score = HGT2;
-								if(best_donor != NULL) dismantle_tree(best_donor);
-								if(best_HGT != NULL) dismantle_tree(best_HGT);
-								best_donor = copy;
-								copy = NULL;
-								best_HGT = test_part;
-								test_part = NULL;
-								for(q=0; q<2*number_of_taxa; q++) presence[q] = presence1[q];
-								for(q=1; q<numparts; q++)
-									{
-									for(r=0; r<2*number_of_taxa; r++) overall_presence[q][r] = tmp_presence1[q][r];
-									}
-								}
-							else
-								{
-								if(best_total2 + HGT1 + (1*hgt_weight) <= best_total1 + HGT2 + (1*hgt_weight) && best_total2 + HGT1 + (1*hgt_weight) < best_reconstruction)
-									{
-									found_better = TRUE;
-									best_reconstruction = best_total2 + HGT1 + (1*hgt_weight);
-									donor_score = best_total2;
-									receptor = hgt_receipient1;
-									HGT_score = HGT1;
-									if(best_donor != NULL) dismantle_tree(best_donor);
-									if(best_HGT != NULL) dismantle_tree(best_HGT);
-									best_donor = test_part;
-									test_part = NULL;
-									best_HGT = copy;
-									copy = NULL;
-									for(q=0; q<2*number_of_taxa; q++) presence[q] = presence2[q];
-									for(q=1; q<numparts; q++)
-										{
-										for(r=0; r<2*number_of_taxa; r++) overall_presence[q][r] = tmp_presence2[q][r];
-										}
-									}
-								
-								}
-							}
-						else
-							{
-							if(allow_HGT1) /* this assumes that "copy" is the donor and "test_part" is the HGT */
-								{
-								if(best_total1 + HGT2 + (1*hgt_weight) < best_reconstruction)
-									{ /*do something */
-									found_better = TRUE;
-									best_reconstruction = best_total1 + HGT2 + (1*hgt_weight) ;
-									donor_score = best_total1;
-									receptor = hgt_receipient2;
-									HGT_score = HGT2;
-									if(best_donor != NULL) dismantle_tree(best_donor);
-									if(best_HGT != NULL) dismantle_tree(best_HGT);
-									best_donor = copy;
-									copy = NULL;
-									best_HGT = test_part;
-									test_part = NULL;
-									for(q=0; q<2*number_of_taxa; q++) presence[q] = presence1[q];
-									for(q=1; q<numparts; q++)
-										{
-										for(r=0; r<2*number_of_taxa; r++) overall_presence[q][r] = tmp_presence1[q][r];
-										}
-									}
-								}
-							if(allow_HGT2) /* this assumes that "test_part" is the donor and "copy" is the HGT */
-								{
-								if(best_total2 + HGT1 + (1*hgt_weight) < best_reconstruction)
-									{ /*do something */
-									found_better = TRUE;
-									best_reconstruction = best_total2 + HGT1 + (1*hgt_weight);
-									donor_score = best_total2;
-									receptor = hgt_receipient1;
-									HGT_score = HGT1;
-									if(best_donor != NULL) dismantle_tree(best_donor);
-									if(best_HGT != NULL) dismantle_tree(best_HGT);
-									best_donor = test_part;
-									test_part = NULL;
-									best_HGT = copy;
-									copy = NULL;
-									for(q=0; q<2*number_of_taxa; q++) presence[q] = presence2[q];
-									for(q=1; q<numparts; q++)
-										{
-										for(r=0; r<2*number_of_taxa; r++) overall_presence[q][r] = tmp_presence2[q][r];
-										}
-									}
-								}
-							}
-						}
-					if(copy != NULL) dismantle_tree(copy);
-					copy = NULL;
-					if(test_part != NULL) dismantle_tree(test_part);
-					test_part = NULL;
-					}
-				}
-			if(found_better == TRUE) /* if we have found a better reconstruction that includes a HGT for this part of the tree */
-				{
-				/* dismantle the tree at parts[k] */
-				printf2("HGT%d\n", numparts);
-				overall_receptor[place_marker] = receptor;
-				overall_placements[k] = donor_score;
-				overall_placements[place_marker] = HGT_score;
-				if(parts[k] != NULL) dismantle_tree(parts[k]);
-				if(parts[place_marker] != NULL) dismantle_tree(parts[place_marker]);
-				parts[k] = best_donor;
-				best_donor = NULL;
-				strcpy(temptree, "");
-				print_tree(parts[k], temptree);
-				printf2("donor:\n%s\n", temptree);
-				parts[place_marker] = best_HGT;
-				strcpy(temptree, "");
-				print_tree(parts[place_marker], temptree);
-				printf2("hgt:\n%s\n", temptree);
-
-				best_HGT = NULL;
-				assign_hgtdonors(parts[k], num_gene_nodes, place_marker);
-				for(q=0; q<2*number_of_taxa; q++) overall_presence[place_marker][q] = presence[q]; /* record the possible donor nodes for this HGT */
-				
-				numparts++;
-				k--; /* we need to re-evaluate the donor again to see if removing this HGT means that another HGT becomes apparant */
-				}
-			
-			}
-		printf2("\n\nprinting results\n");
-			
-		/**** print out the results */
-		i=0;
-		while(parts[i] != NULL && i < num_gene_nodes)
-			{
-			printf2("part %d\nScore = %f\nReceptor Node:%d\nPossible Donors: ",i,overall_placements[i], overall_receptor[i] );
-			for(j=0; j<2*number_of_taxa; j++) printf2("%d,", overall_presence[i][j]);
-			printf2("\n");
-			strcpy(temptree, "");
-			strcpy(temptree, "");
-			print_tree(parts[i], temptree);
-			printf2("parts[%d] %s\n",i, temptree);
-			printf2("\n");
-			/*print_tree(parts[i], temptree);
-			tree_coordinates(temptree, TRUE, FALSE, FALSE);
-			*/
-			i++;
-			}
-		
-			
-		if(copy != NULL)
-			{
-			dismantle_tree(copy);
-			copy = NULL;
-			}
-		if(gene_tree != NULL)
-			{
-			dismantle_tree(gene_tree);
-			gene_tree = NULL;
-			}
-		if(best_mapping != NULL)
-			{
-			dismantle_tree(best_mapping);
-			best_mapping = NULL;
-			}
-		for(i=0; i<num_gene_nodes; i++)
-			{
-			if(parts[i] != NULL) dismantle_tree(parts[i]);
-			parts[i] = NULL;
-			}
-		
-		free(parts);
-		parts = NULL;
-		free(overall_receptor);
-		overall_receptor = NULL;
-		for(i=0; i<num_gene_nodes; i++)
-			{
-			free(tmp_presence1[i]);
-			tmp_presence1[i] = NULL;
-			free(tmp_presence2[i]);
-			tmp_presence2[i] = NULL;
-			free(overall_presence[i]);
-			overall_presence[i] = NULL;
-			}
-		
-		free(overall_presence);
-		overall_presence = NULL;
-		free(tmp_presence1);
-		tmp_presence1 = NULL;
-		free(tmp_presence2);
-		tmp_presence2 = NULL;
-		
-		free(overall_placements);
-		overall_placements = NULL;
-		}
-	
-	for(i=0; i<(2*number_of_taxa); i++) free(species_allowed[i]);
-	free(species_allowed);
-	species_allowed = NULL;
-	for(i=0; i<(2*number_of_taxa); i++) free(dependent_species_allowed[i]);
-	free(dependent_species_allowed);
-	dependent_species_allowed = NULL;
-	
-	free(before1); 
-	free(before2); 
-	free(after1); 
-	free(after2);
 
 	
-	if(species_tree != NULL)
-		{
-		dismantle_tree(species_tree);
-		species_tree = NULL;
-		}
-	
-	if(gene_tree != NULL)
-		{
-		dismantle_tree(gene_tree);
-		gene_tree = NULL;
-		}
-	
-	tree_top = NULL;
-	free(temptree);
-	free(temptree1);
-	free(presence);
-	free(presence1);
-	free(presence2);
-	free(temporary);
 
 
 
-	}
-#endif
-
-
-/* assign_before_after: moved to reconcile.c */
-#if 0
-void assign_before_after(struct taxon *position, int *previous, int *before, int *after, int num, int found)
-	{
-	int i=0;
-	
-	while(position != NULL)
-		{
-		if(position->tag == num)
-			{
-			for(i=0; i<(2*number_of_taxa); i++)
-				before[i] = previous[i];  
-			found = TRUE;
-			}
-		else
-			{
-			if(found) after[position->tag] = TRUE;
-			}
-			
-		if(position->daughter != NULL)
-			{
-			previous[position->tag] = TRUE;
-			assign_before_after(position->daughter,previous, before, after, num, found);
-			previous[position->tag] = FALSE;
-			}
-		if(position->tag == num) found = FALSE;
-		position = position->next_sibling;
-		}
-	}
-#endif
 
 
 
-/* assign_ances_desc: moved to reconcile.c */
-#if 0
-void assign_ances_desc(struct taxon *position, int ** allowed_species, int * previous)
-	{
-	int i=0;
-	
-	while(position != NULL)
-		{
-		if(position->daughter != NULL)
-			{
-			previous[position->tag] = TRUE;
-			assign_ances_desc(position->daughter, allowed_species, previous);
-			previous[position->tag] = FALSE;
-			}
-		allowed_species[position->tag][position->tag] = FALSE;
-		for(i=0; i<(2*number_of_taxa); i++)
-			{
-			if(previous[i])
-				{
-				allowed_species[i][position->tag] = FALSE;
-				allowed_species[position->tag][i] = FALSE;
-				}
-			}
-		position = position->next_sibling;
-		}
-	}
-#endif
+
 
 
 
 /* function for Konrad to automatically collapse clades that have an average branch length of less than X (user defined), it is to leave one randomly chosen taxa to represent the clade. */
 
-/* random_prune: moved to prune.c */
-#if 0
-void random_prune(char *fund_tree)
-	{
-	float user_limit;
-	int i=0, j=0;
-	int *to_delete = NULL;
-	char *prunecommand = NULL;
-	FILE *rp_outfile = NULL;
-	rp_outfile = fopen("prunedtaxa.txt", "w");
-	
-	prunecommand = malloc(1000000*sizeof(char));
-	prunecommand[0] = '\0';
-	
-	to_delete = malloc(number_of_taxa*sizeof(int));
-	for(i=0; i<number_of_taxa; i++) to_delete[i] = FALSE;
-	
-	for(i=0; i<num_commands; i++)
-		{
-		if(strcmp(parsed_command[i], "brlen") == 0)
-			user_limit = atof(parsed_command[i+1]);
-		}
-	if(tree_top != NULL) dismantle_tree(tree_top);
-	tree_top = NULL;
-	
-	temp_top = NULL;
-	tree_build(1, fund_tree, tree_top, 0, -1, 0);
-	tree_top = temp_top;
-	temp_top = NULL;
-	
-	collapse_clades(tree_top, user_limit, to_delete, rp_outfile);
-	strcpy(prunecommand, "deletetaxa ");
-	for(i=0; i<number_of_taxa; i++)
-		{
-		if(to_delete[i] == TRUE)
-			{
-			j++;
-			strcat(prunecommand, taxa_names[i]);
-			strcat(prunecommand, " ");
-			
-			}
-		}
-	if(j > 0)
-		{
-		num_commands = parse_command(prunecommand);
-		exclude_taxa(FALSE);
-		strcpy(prunecommand, "showtrees savetrees=yes display=no filename=prunedtree.ph");
-		num_commands = parse_command(prunecommand);
-		showtrees(FALSE);
-		printf2("\n\tSummary of pruned taxa writtin to file prunedtaxa.txt\n");
-		}
-	else
-		{
-		printf2("0 clades met the criteria specified\n");
-		}
-	
-	fclose(rp_outfile);
-	}
-#endif
-
-/* collapse_clades: moved to prune.c */
-#if 0
-void collapse_clades(struct taxon * position, float user_limit, int * to_delete, FILE *rp_outfile)
-	{
-	float total = 0;
-	int count = 0, keep = 0, taxa_count = 0;
-	
-	
-	while(position != NULL)
-		{
-		if(position->daughter != NULL)
-			{
-			total =0; count = 0;
-			taxa_count = get_brlens(position->daughter, &total, &count);
-			if(total/count <= user_limit)
-				{
-				/* collect names of taxa in clade for collapsing */
-				keep = (int)fmod(rand(), taxa_count);
-				print_keep(position->daughter, keep, 0, rp_outfile);
-				untag_taxa(position->daughter, to_delete, keep, 0, rp_outfile);
-				fprintf(rp_outfile, "\n");
-				}
-			else
-				collapse_clades(position->daughter, user_limit, to_delete, rp_outfile);
-			}
-		position = position->next_sibling;
-		}
-	
-	}
-#endif
-
-/* get_brlens: moved to prune.c */
-#if 0
-int get_brlens(struct taxon * position, float *total, int *count)
-	{
-	int taxa_count = 0, tmpcount = 0;
-	while(position != NULL)
-		{
-		if(position->daughter != NULL)
-			{
-			taxa_count += get_brlens(position->daughter, total, count);
-			}
-		else
-			{
-			taxa_count++;
-			}
-		*total += return_length(position->weight);
-		tmpcount ++;
-		position = position->next_sibling;
-		}
-	*count+=tmpcount;
-	return(taxa_count);
-	}
-#endif
-
-/* return_length: moved to prune.c */
-#if 0
-float return_length(char *string)
-	{
-	int i=0, j=0;
-	float length = 0;
-	char *flt_length = malloc(TREE_LENGTH * sizeof(char));
-	if(!flt_length) { printf2("Error: out of memory in return_length\n"); return 0; }
-
-	while(i < strlen(string) && string[i] != ':' ) i++;
-	
-	if(i < strlen(string))
-		{
-		i++;
-		j=0;
-		while(string[i] != '\0')
-			{
-			flt_length[j] = string[i];
-			j++;
-			i++;
-			}
-		flt_length[j] = '\0';
-		length = atof(flt_length);
-		}
-	free(flt_length);
-	return(length);
-	}
-#endif
 
 
-/* print_keep: moved to prune.c */
-#if 0
-int print_keep(struct taxon *position, int keep, int count, FILE *rp_outfile)
-	{
-	while(position != NULL)
-		{
-		if(position->daughter != NULL)	
-			count = print_keep(position->daughter, keep, count, rp_outfile);
-		else
-			{
-			if(count == keep)
-				{
-				fprintf(rp_outfile, "%s:\t", taxa_names[position->name]);
-				}
-			count++;
-			}
-		position = position->next_sibling;
-		}
-	return(count);	
-	}
-#endif
+
+
+
 	
 	
-/* untag_taxa: moved to prune.c */
-#if 0
-int untag_taxa(struct taxon *position, int * to_delete, int keep, int count, FILE *rp_outfile)
-	{
-	
-	
-	while(position != NULL)
-		{
-		if(position->daughter != NULL)
-			count = untag_taxa(position->daughter, to_delete, keep, count, rp_outfile);
-		else
-			{
-			if(count != keep)
-				{
-				to_delete[position->name] = TRUE;
-				fprintf(rp_outfile, "%s, ", taxa_names[position->name]);
-				}
-			count++;
-			}
-		position = position->next_sibling;
-		}
-	return(count);
-	}
-#endif
 	
 			
-/* resolve_tricotomies_dist: moved to reconcile.c */
-#if 0
-void resolve_tricotomies_dist (struct taxon *gene_tree, struct taxon *species_tree, int ** scores)
-	{
-	struct taxon *position = gene_tree, *start = gene_tree, *position2 = NULL, *new = NULL, *first = NULL, *second = NULL;
-	int i=0, j, minscore, *presence = NULL;
-	
-	presence = malloc(number_of_taxa*sizeof(int));
-	for(i=0; i<number_of_taxa; i++) presence[i] = FALSE;
-	i=0;
-	while(position != NULL)
-		{
-		i++;
-		/* go though looking for internal branches and follow them down */
-		if(position->daughter != NULL)
-			resolve_tricotomies_dist(position->daughter, species_tree, scores);
-		position = position->next_sibling;
-		}
-	
-	/* for trichotomies at this level, idenfiy the internal branch on the species tree that best matches */
-	while((temp_top2 != start && i > 2) || (temp_top2 == start && i > 3))
-		{
-		position = start;
-		minscore=-1; first = NULL; second = NULL; 
-		/* identify the branches at this level with the minimum distance between them */
-		while(position->next_sibling != NULL)
-			{
-			position2 = position->next_sibling;
-			while(position2 != NULL)
-				{
-				if(minscore==-1 || scores[position->tag][position2->tag] < minscore)
-					{
-					minscore = scores[position->tag][position2->tag];
-					first = position;
-					second = position2;
-					}
-				else
-					{
-					if((first->tag >= number_of_taxa || second->tag >= number_of_taxa) && (position->tag < number_of_taxa && position2->tag < number_of_taxa) && (scores[position->tag][position2->tag] == minscore))
-						{
-						minscore = scores[position->tag][position2->tag];
-						first = position;
-						second = position2;						
-						}
-					}
-				position2=position2->next_sibling;
-				}
-			position = position->next_sibling;
-			}
-		position= first;
-		position2= second;
-		/* having identified the parts with the minimum distance, put them together */
-		/* create a new internal branch */
-		new = make_taxon();
-		/* make the two min branches daughters of the new node */
-		if(position->next_sibling != NULL) (position->next_sibling)->prev_sibling = position->prev_sibling;
-		if(position->prev_sibling != NULL) (position->prev_sibling)->next_sibling = position->next_sibling;
-		if(position->prev_sibling == NULL)
-			{
-			start = position->next_sibling;
-			if(position->parent == NULL) 
-				temp_top2 = start;
-			else 
-				(position->parent)->daughter = position->next_sibling;
-			(position->next_sibling)->parent = position->parent;
-			
-			}
-		position->parent = new;
-		new->daughter = position;
-		position->next_sibling = position2;
-		position->prev_sibling = NULL;
-		
-		if(position2->next_sibling != NULL) (position2->next_sibling)->prev_sibling = position2->prev_sibling;
-		if(position2->prev_sibling != NULL) (position2->prev_sibling)->next_sibling = position2->next_sibling;
-		if(position2->prev_sibling == NULL)
-			{
-			start = position2->next_sibling;
-			if(position2->parent == NULL)
-				temp_top2 = start;
-			else
-				{
-				(position2->parent)->daughter = position2->next_sibling;
-				(position2->next_sibling)->parent = position2->parent;
-				position2->parent = NULL;
-				}
-			
-			
-			}
-		position2->prev_sibling = position;
-		position2->next_sibling = NULL;
-		/* put "new" into the tree at the present position (after the first) */
-		if(start->next_sibling != NULL) (start->next_sibling)->prev_sibling = new;
-		new->prev_sibling = start;
-		new->next_sibling = start->next_sibling;
-		start->next_sibling = new;
-		
-		/* Find the label for the new internal brnach from the species tree */
-		if(position->tag == position2->tag)
-			new->tag = position->tag;
-		else
-			{
-			for(j=0; j<number_of_taxa; j++) presence[j] = FALSE;
-			get_taxa(new->daughter, presence);
-			new->tag = get_best_node(species_tree, presence, -1);
-			
-			}
-		i--;
-		}
-	free(presence);
-	}
-#endif
 		
 
-/* get_taxa: moved to tree_ops.c */
-#if 0
-void get_taxa(struct taxon *position, int *presence)
-	{
-	while(position != NULL)
-		{
-		if(position->daughter != NULL) 
-			get_taxa(position->daughter, presence);
-		else
-			presence[position->name] = TRUE;
-		
-		position = position->next_sibling;
-		}
-	}
-#endif
 			
 	
 	
-/* get_best_node: moved to tree_ops.c */
-#if 0
-int get_best_node(struct taxon * position, int *presence, int num)
-	{
-	struct taxon * start = position;
-	int *tmp, *tmp1, i, ans, ans1, num1;
-	
-	tmp = malloc(number_of_taxa*sizeof(int));
-	tmp1 = malloc(number_of_taxa*sizeof(int));
-	while(position != NULL)
-		{
-		if(position->daughter != NULL)
-			{
-			num = get_best_node(position->daughter, presence, num);
-			for(i=0; i<number_of_taxa; i++)
-				{
-				tmp[i] = presence[i];
-				if(presence[i] == TRUE ) tmp1[i] = FALSE;
-				else tmp1[i] = TRUE;
-				}
-			subtree_id(position->daughter, tmp);
-			subtree_id(position->daughter, tmp1);
-			ans = TRUE; ans1=TRUE;
-			for(i=0; i<number_of_taxa; i++)
-				{
-				if(tmp[i] == TRUE) ans = FALSE;
-				if(tmp1[i] == TRUE) ans1 = FALSE;
-				}
-			if(ans == TRUE && (num == -1 || position->tag < num)) 
-				num = position->tag;
-			else
-				{
-				if(num == -1)
-					{
-					if(ans1 == TRUE && position->tag > num)
-						num = position->tag;
-					}
-				}
-			}
-		position = position->next_sibling;
-		}
-	free(tmp);
-	free(tmp1);
-	return(num);
-	}
-#endif
 
-/* check_treeisok: moved to tree_ops.c */
-#if 0
-void check_treeisok(struct taxon *position)
-	{
-	struct taxon *start = position;
-	
-	if(position->parent != NULL) printf2("^^ position->parent %d\n", position->parent->tag);
-	while(position != NULL)
-		{
-		if(position->prev_sibling != NULL) printf2("[prev %d\t", position->prev_sibling->tag);
-		else printf2("[no prev\t");
-		if(position->parent != NULL) printf2("^^ parent = %d ^^\t ", position->parent->tag);
-		if(position->daughter != NULL)
-			printf2("pointer vv%d (daughter = %d)\t", position->tag, position->daughter->tag);
-		else
-			printf2("taxa %d\t", position->name);
-		if(position->next_sibling != NULL) printf2("\tnext %d]\t", position->next_sibling->tag);
-		else printf2("no next]\n");
-		position = position->next_sibling;
-		}
-	position = start;
-	while(position != NULL)
-		{
-		if(position->daughter != NULL) check_treeisok(position->daughter);
-		position = position->next_sibling;
-		}
-	}
-#endif
 
 
 
 /* function for Karen to automatically collapse clades that have all of the same taxa in them, keeping only the one with the longest sequence (found in the full name) */
 
-/* prune_monophylies: moved to prune.c */
-#if 0
-void prune_monophylies(void)
-    {
-    int i=0, j=0, k=0, l=0, num_nodes=0, trees_included=0, trees_excluded=0, numt=0, *taxa_fate = NULL, clannID =0, report=FALSE, taxaorder=0;
-    char *pruned_tree = NULL, *tmp = NULL, filename2[10000];
-    char *temptree = malloc(TREE_LENGTH * sizeof(char));
-    char filename3[10000], **taxa_fate_names = NULL;
-    FILE *pm_outfile = NULL;
-    if(!temptree) { printf2("Error: out of memory in prune_monophylies\n"); return; }
-    select_longest=FALSE;
-    filename2[0]= filename3[0] = '\0';
-    temptree[0] = '\0';
-    strcpy(filename2, "prunedtrees.txt");
-    strcpy(filename3, "prunedtrees_info.txt");
+
+
+
+
+
+
+
+
+
     
-    tmp = malloc(TREE_LENGTH*sizeof(char));
-    tmp[0] = '\0';
-    pruned_tree = malloc(TREE_LENGTH*sizeof(char));
-    pruned_tree[0] = '\0';
-
-    for(i=0; i<num_commands; i++)
-        {
-        if(strcmp(parsed_command[i], "selection") == 0)
-            {       
-            if(strcmp(parsed_command[i+1], "length")==0) select_longest=TRUE; 
-            }
-        if(strcmp(parsed_command[i], "filename") == 0)
-            {       
-            strcpy(filename2, parsed_command[i+1]); 
-            strcpy(filename3, filename2);
-            strcat(filename3, "_info.txt");
-            }
-
-        }
-
-    pm_outfile = fopen(filename2, "w");
-    tempoutfile = fopen(filename3, "w");
-
-
-    printf2("input trees will be pruned where clans of single species exist\nOne remaining representative will be chosen by ");
-    if(select_longest == TRUE) printf2 ("the length of the sequence (in the name, after the species (delimited with a \"%c\")\n", delimiter_char);
-        else printf2("random\n");
-
-    for(j=0; j<Total_fund_trees; j++)
-        {
-        if(tree_top != NULL) dismantle_tree(tree_top);  /* Dismantle any trees already in memory */
-        tree_top = NULL;
-        
-        temp_top = NULL;
-        taxaorder=0;
-        strcpy(temptree, fundamentals[j]);
-		returntree_fullnames(temptree, j);
-
-		/***  build the sourcetree in memory ***/
-		if(tree_top != NULL)
-	        {
-	        dismantle_tree(tree_top);
-	        tree_top = NULL;
-	        }
-	    temp_top = NULL;
-	    basic_tree_build(1, temptree, tree_top, TRUE);
-
-       /* tree_build(1, fundamentals[j], tree_top, 0, j, 0);  build the tree passed to the function */
-        tree_top = temp_top;
-        temp_top = NULL;
-        reset_tree(tree_top);
-      /*  fprintf(tempoutfile, "\nTree # %d [ %s ]\n\t", j, tree_names[j]); */
-
-        /* Number all taxa in the tree for tracing which taxa were deleted or retained and record the number of taxa in the variable numt */
-        numt=0; clannID=0;
-        numt = number_tree2(tree_top, numt);
-        /* alloc an arrary to hold all the names of hte taxa in the order they are found on the tree */
-        taxa_fate_names = malloc(numt*sizeof(char*));
-        for(k=0; k<numt; k++)
-        	{
-        	taxa_fate_names[k] = malloc(NAME_LENGTH*sizeof(char));
-        	taxa_fate_names[k][0] = '\0';
-        	}
-        get_taxa_names(tree_top, taxa_fate_names); /* copy names into the array taxa_fate_names */
-
-        /* Define an array to record the species that are pruned (and kept) in this tree */
-        taxa_fate = malloc(numt*sizeof(int));
-        for(k=0; k<numt; k++)
-    		{
-    		taxa_fate[k]=0;
-    		}
-
-        clannID = identify_species_specific_clades(tree_top, numt, taxa_fate, clannID);  /* Call recursive function to travel down the tree looking for species-specific clades */
-    	fprintf(tempoutfile, "\nTree # %d [ %s ]\n\t", j, tree_names[j]);
-    	/* Print out the list of deleted and pruned taxa from the taxa_fate array */	
-    	for(k=1; k<=numt; k++)
-    		{
-    		report=FALSE;
-    		/* find out if there are any taxa in clann k for reporting */
-    		for(l=0; l<numt; l++)
-    			{	
-    			if(abs(taxa_fate[l]) == k)
-    				{
-    				report=TRUE;
-    				l=numt;
-    				} 
-    			}
-    		if(report == TRUE)
-    			{	
-    			for(l=0; l<numt; l++)
-    				{	
-    				if(taxa_fate[l] == k*-1)
-    					fprintf(tempoutfile, "Removed:%s\t", taxa_fate_names[l]);
-    				}
-    			for(l=0; l<numt; l++)
-    				{	
-    				if(taxa_fate[l] == k)
-    					fprintf(tempoutfile, "KEPT:%s\n\t", taxa_fate_names[l]);
-    				}
-    			}
-    		}
-
-    	free(taxa_fate);
-	    for(k=0; k<numt; k++) free(taxa_fate_names[k]);
-	    free(taxa_fate_names);
-
-        shrink_tree(tree_top);    /* Shrink the pruned tree by switching off any internal nodes that are not needed */
-        pruned_tree[0] = '\0'; /* initialise the string */
-        if(print_pruned_tree(tree_top, 0, pruned_tree, TRUE, j) >1)
-            {
-            tmp[0] = '\0';
-            strcpy(tmp, "(");
-            strcat(tmp, pruned_tree);
-            strcat(tmp, ")");
-            strcpy(pruned_tree, tmp);
-            }
-        strcat(pruned_tree, ";");
-
-        num_nodes=0;
-        for(i=0; i<strlen(pruned_tree); i++)
-        	{if(pruned_tree[i] == ',') num_nodes++;	}
-    	if(num_nodes > 2) /* if the remaining tree has more then 3 taxa */
-    		{    
-	        if(strcmp(tree_names[j], "") != 0)
-	        	fprintf(pm_outfile, "%s[%s]\n", pruned_tree, tree_names[j]);
-	        else
-	        	fprintf(pm_outfile, "%s[%d]\n", pruned_tree, j);
-	        trees_included++;
-        	}
-        else
-        	{	
-        	trees_excluded++;
-        	}
-        }
-    
-    printf2("\nPruning finished. %d pruned trees with 4 or more taxa written to the file \"%s\"\n", trees_included, filename2);
-   printf2("Information on pruned and retained taxa in each tree written to the file \"%s\"\n",  filename3); 
-    printf2("%d pruned trees with less than 4 taxa were excluded\n",trees_excluded );
-    free(temptree);
-    free(tmp);
-    free(pruned_tree);
-    fclose(pm_outfile);
-    fprintf(tempoutfile, "\n");
-    fclose(tempoutfile);
-    }
-#endif
-
-
-/* identify_species_specific_clades: moved to prune.c */
-#if 0
-int identify_species_specific_clades(struct taxon * position, int numt, int * taxa_fate, int clannID)
-    {
-    float total = 0, keepnew=FALSE;
-    int k=0, count = 0, taxa_count = 0, all_same_taxon = -1, *foundtaxa = NULL, i, *tmp_taxa_fate = NULL;
-    long seqlength = 0;
-    struct taxon * starting = position, *longest=NULL;
-    foundtaxa = malloc(number_of_taxa*sizeof(int));
-
-    /* Define an array to record the species that are pruned (and kept) in this tree */
-    tmp_taxa_fate = malloc(numt*sizeof(int));
-    for(k=0; k<numt; k++) tmp_taxa_fate[k]=0;
-    
-    /* 1) identify if all descendant nodes are from the same species */
-    
-    for(i=0; i<number_of_taxa; i++) foundtaxa[i] = FALSE;  /* array to keep track of taxa to delete */
-    longestseq=NULL;
-    seqlength= list_taxa_in_clade(position, foundtaxa, longest, seqlength);
-    count=0;
-    for(i=0; i<number_of_taxa; i++) {
-        if(foundtaxa[i] == TRUE) count++;  /* count the number of different taxa we found here */
-        }
-
-    if(count > 1)
-        { /* no point going further down this clade if we already know they are all the same species */
-        while(position != NULL)
-            {
-            if(position->daughter != NULL)
-                clannID = identify_species_specific_clades(position->daughter, numt, taxa_fate, clannID); /* if this node has a daughter, then call new instance of the function on the daughter */
-            position = position->next_sibling;
-            }
-        }
-    else /* if this was a species-specific clade, then untag everything, except for the longest */
-        {
-        clannID+=1; /* increment the clann ID */
-        for(k=0; k<numt; k++) tmp_taxa_fate[k]=0;
-        untag_nodes_below(position, tmp_taxa_fate, clannID);
-
-    	/* check through tmp_taxa_fate to see if it overlaps with any clann definitions already in taxa_fate */
-    	/* If there is overlap, it the new clann definition is a superset of the previous definition, then overwrite the previous definition in taxa_fate */
-    	/* Otherwise do nothing */
-    	keepnew=FALSE;
-    	for(k=0; k<numt; k++)
-    		{
-    		if(tmp_taxa_fate[k] != 0 && taxa_fate[k] == 0) keepnew=TRUE;
-    		}
-    	if(keepnew == TRUE)
-    		{
-    		for(k=0; k<numt; k++) 
-    			{
-    			if(tmp_taxa_fate[k] != 0) 
-					{
-					taxa_fate[k] = tmp_taxa_fate[k];
-					}
-    			}
-    		}
-       /* fprintf (tempoutfile, "\n\t"); */
-        }
-
-    /* 2) Identify if all preceeding nodes are from the same species. */
-        position = starting;
-        for(i=0; i<number_of_taxa; i++) foundtaxa[i] = FALSE;  /* array to keep track of taxa to delete */
-        count=0; seqlength = 0;
-        if(position->parent != NULL)
-            {   
-            seqlength = list_taxa_above(position->parent, foundtaxa, longest, seqlength);
-            }
-        for(i=0; i<number_of_taxa; i++) {
-            if(foundtaxa[i] == TRUE) count++;  /* count the number of different taxa we found here */
-            }
-        if(count == 1)
-            {
-            clannID+=1; /* increment the clann ID */
-            for(k=0; k<numt; k++) tmp_taxa_fate[k]=0;
-            untag_nodes_above(position->parent, tmp_taxa_fate, clannID);
-
-	    	/* check through tmp_taxa_fate to see if it overlaps with any clann definitions already in taxa_fate */
-	    	/* If there is overlap, it the new clann definition is a superset of the previous definition, then overwrite the previous definition in taxa_fate */
-	    	/* Otherwise do nothing */
-	    	keepnew=FALSE;
-	    	for(k=0; k<numt; k++)
-	    		{
-	    		if(tmp_taxa_fate[k] != 0 && taxa_fate[k] == 0) keepnew=TRUE;
-	    		}
-	    	if(keepnew == TRUE)
-	    		{
-	    		for(k=0; k<numt; k++) 
-	    			{
-	    			if(tmp_taxa_fate[k] != 0) taxa_fate[k] = tmp_taxa_fate[k];
-	    			}
-	    		}
-
-
-          /*  fprintf (tempoutfile, "\n\t"); */
-            }
-
-    free(foundtaxa);
-    free(tmp_taxa_fate);
-    return(clannID);
-    }
-#endif
-
-/* list_taxa_above: moved to prune.c */
-#if 0
-long list_taxa_above(struct taxon * position, int * foundtaxa, struct taxon * longest, long seqlength) /* this function will check the parts of the tree above this position, it fixes aproblem that the tree rooting may mask monophylys */
-    {
-    long newseqlength=0;
-    struct taxon * origin = position;
-    /* go all the way to the last sibling */
-    while(position->prev_sibling != NULL) position = position->prev_sibling;
-
-    while(position != NULL)
-        {   
-        if(position->daughter != NULL && position != origin)
-            {  /* go down throug this clade */
-            seqlength = list_taxa_in_clade(position->daughter, foundtaxa, longest, seqlength);
-            }
-        if(position->name != -1 && position->tag == TRUE) /* check this node */
-            {   
-            foundtaxa[position->name]=TRUE;
-            if(select_longest==TRUE)
-                {   
-                if((newseqlength = extract_length(position->fullname)) > seqlength) /* if this taxa has a longer length than the previously found longest */
-                    {
-                    seqlength = newseqlength;
-                    longestseq = position;
-                    }
-                }
-            else
-                {   
-                seqlength = newseqlength;
-                longestseq = position;
-                }
-             }
-        if(position->prev_sibling == NULL && position->parent != NULL)
-            {   
-            seqlength = list_taxa_above(position->parent, foundtaxa, longest, seqlength);
-            }
-        position = position->next_sibling;
-        }
-
-    return(seqlength);
-    }
-#endif
-
-/* list_taxa_in_clade: moved to prune.c */
-#if 0
-long list_taxa_in_clade(struct taxon * position, int * foundtaxa, struct taxon * longest, long seqlength) /* descend through the tree finding what taxa are there (and putting result into an array) and also identifying the longest sequence (the first number in the <<full>> name of the sequence, after the first "." and before the first "|") */
-    {
-    long newseqlength=0;
-    
-    while(position != NULL)
-        {
-        if(position->daughter != NULL)
-            {
-            seqlength = list_taxa_in_clade(position->daughter, foundtaxa, longest, seqlength);
-            }
-        else
-            {
-            if(position->tag == TRUE)
-                {   
-                foundtaxa[position->name]=TRUE;
-                 if(select_longest==TRUE)
-                    {   
-                    if((newseqlength = extract_length(position->fullname)) > seqlength) /* if this taxa has a longer length than the previously found longest */
-                        {
-                        seqlength = newseqlength;
-                        longestseq = position;
-                        }
-                    }
-                else
-                    {   
-                    seqlength = newseqlength;
-                    longestseq = position;
-                    }
-                }               
-            }
-        position = position->next_sibling;
-        }
-    return(seqlength);
-    } 
-#endif
-
-
-
-/* extract_length: moved to prune.c */
-#if 0
-long extract_length(char * fullname)
-    {
-    /* this function assumes that the length of the sequence is embedded in the full name of the taxa in the form "SPECIESNAME.SEQLEN|BLAHBLAHBLAH"
-        the seperators can be a "." or a "|"
-    */
-
-    long seqlength = 0;
-    char name[100000];
-    char *eptr;
-
-    name[0] = '\0';
-    strcpy(name, fullname);
-
-    const char s[3] = ".|";
-    char *token;
-
-    token=strtok(name, s); /* get first token (in this case the species name) */
-    token = strtok(NULL, s); /* Get second token ( inthi case the squence length) */
-
-    seqlength = strtol(token, &eptr, 10); /* extract string version of number as long int */
-
-    return(seqlength);
-    }
-#endif
-
-
-/* untag_nodes_below: moved to prune.c */
-#if 0
-void untag_nodes_below(struct  taxon * position, int * taxa_fate, int clannID)
-    {
-    
-    while(position != NULL)
-        {
-        if(position != longestseq) 
-        	{
-        		position->tag = FALSE;
-        	if(position->daughter == NULL) 
-        		{	
-        		taxa_fate[position->tag2] = clannID*-1; /* to indicate its removal, assign tag2 to the negative of the clannID we are on */
-        		/*fprintf(tempoutfile, "Removed:%s\t", position->fullname); */
-        		}
-        	}
-        else
-        	{
-        	if(position->daughter == NULL) 
-        		{	
-        		taxa_fate[position->tag2] = clannID; /* to indicate that we are keeping this taxon, assign it to the positive of the clannID we are on */
-        		/*fprintf(tempoutfile, "KEPT:%s\t", position->fullname); */
-        		}
-        	}
-        if(position->daughter != NULL) untag_nodes_below(position->daughter, taxa_fate, clannID);
-        position = position->next_sibling;
-        }
-    
-    }
-#endif
-    
-/* untag_nodes_above: moved to prune.c */
-#if 0
-void untag_nodes_above(struct  taxon * position, int * taxa_fate, int clannID)
-    {
-    struct taxon * origin = position;
-    while(position->prev_sibling != NULL) position = position->prev_sibling;
-
-    while(position != NULL)
-        {
-        if(position != longestseq) 
-        	{
-        	position->tag = FALSE;
-        	if(position->daughter == NULL) 
-        		{
-        		taxa_fate[position->tag2] = clannID*-1; /* to indicate its removal, assign tag2 to the negative of the clannID we are on */
-        		/*fprintf(tempoutfile, "Removed:%s\t", position->fullname); */
-        		}
-        	}
-        else
-        	{	
-        	if(position->daughter == NULL) 
-        		{	
-        		taxa_fate[position->tag2] = clannID; /* to indicate that we are keeping this taxon, assign it to the positive of the clannID we are on */
-        		/*fprintf(tempoutfile, "KEPT:%s\t", position->fullname); */
-        		}
-        	}
-        if(position->daughter != NULL && position != origin) untag_nodes_below(position->daughter, taxa_fate, clannID);
-        if(position->parent != NULL) untag_nodes_above(position->parent, taxa_fate, clannID);
-        position = position->next_sibling;
-        }
-    
-    }
-#endif
 
 
 void tips(int num)
@@ -22390,103 +10706,7 @@ void tips(int num)
 
 
 /* This function controls the redirection of output from CLann to a log file (off by default), allow the use of the overwritten "printf" function (below) */
-/* do_log: moved to main.c */
-#if 0
-void do_log(void)
-	{
-	int error = FALSE, newlogfile=FALSE, start=FALSE, stop=FALSE, i=0;
-	
-
-    for(i=0; i<num_commands; i++)
-        {
-
-        if(strcmp(parsed_command[i], "file") == 0)
-             {
-             newlogfile=TRUE;
-             if(logfile!= NULL)
-		     	{
-		     	printf2("closing log file %s \n", logfile_name);
-		     	fclose(logfile);
-		     	}
-		     
-	     	strcpy(logfile_name,parsed_command[i+1]);
-	     	
-	     	if((logfile = fopen(logfile_name, "w")) == NULL)
-				{
-				printf2("Error opening log file named %s\n", logfile_name);
-				error = TRUE;
-				}
-			else
-				printf2("opening log file %s \n", logfile_name);
-		     
-         	 }
-        }
-    for(i=0; i<num_commands; i++)
-        {
-        if(strcmp(parsed_command[i], "status") == 0)
-        	{	
-	        if(strcmp(parsed_command[i+1], "on") == 0)
-		        {
-		        if(print_log == FALSE)
-		        	{	
-			        if(logfile == NULL)
-			        	{
-			        	printf2("opening logfile %s\n", logfile_name);	
-			        	if((logfile = fopen(logfile_name, "w")) == NULL)
-			        		printf2("Error opening log file named %s\n", logfile_name);
-			        	}
-			        printf2("starting logging to logfile %s\n", logfile_name );
-			        print_log = TRUE;
-			        start=TRUE;
-			    	}
-			    else
-			    	{
-			    	printf2("Already logging output, no changes have been made\n");
-			    	}
-			    }
-			else
-				{
-			    if(strcmp(parsed_command[i+1], "off") == 0)
-			        {
-			        if(print_log == TRUE)
-			        	{	
-			        	printf2("stopping logging to file %s\n", logfile_name);
-			        	print_log = FALSE;
-			        	stop=TRUE;
-			        	}
-			        else
-			        	{	
-			        	printf2("Cannot stop logging as there is no logging currently happenning\n");
-			        	}
-			        }
-			    else
-			    	{
-			    	printf2("Error: \"%s\" is not a valid modifer for option \"status\", please choose \"on\" or \"off\"", parsed_command[i+1]);
-			    	}	
-			    }
-		    }
-
-	    }
-	if(newlogfile==FALSE && start==FALSE && stop == FALSE)
-		{
-		printf2("\nLog file status not changed (");
-		if(logfile!= NULL) 
-			{
-			printf2("log file \"%s\" is open ", logfile_name);
-			if(print_log == TRUE)
-				printf2("and logging is currently on)\n");
-			else
-				printf2("and logging is currently off)\n");
-
-			}
-		else printf2("log file not open)\n");
-		}	
-
-
-	}
-#endif
 
 
 
 /* printf2: moved to utils.c */
-

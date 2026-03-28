@@ -71,7 +71,8 @@ extern char   delimiter_char;
 extern char   logfile_name[10000];
 extern char   system_call[100000];
 extern int    trees_in_memory, *sourcetreetag, remainingtrees, GC;
-extern int    user_break, delimiter, print_log, num_gene_nodes, testarraypos;
+extern volatile int user_break;
+extern int    delimiter, print_log, num_gene_nodes, testarraypos;
 extern int    malloc_check, count_now, another_check;
 extern unsigned int thread_seed;
 extern uint64_t *taxon_hash_vals;
@@ -84,6 +85,14 @@ extern float   last_status_score;
 extern float   par_progress_best, par_last_print_score;
 extern time_t  par_search_start;
 extern int     skip_streak, hs_maxskips;
+extern int     hs_strategy;
+extern int     hs_progress_interval;
+extern time_t  par_last_progress_time;
+extern float   hs_droprep;
+extern int     rep_abandon;
+extern int     hs_par_rep;
+extern int     hs_thread_report_interval;
+extern time_t  thread_report_last;
 
 /* -----------------------------------------------------------------------
  * OpenMP threadprivate declarations — repeated per OpenMP §2.15.2 in
@@ -100,7 +109,7 @@ extern int     skip_streak, hs_maxskips;
     thread_seed, \
     visited_set, thread_visited_acc, landscape_map, \
     rep_start_time, hs_do_print, last_status_score, \
-    skip_streak, \
+    skip_streak, rep_abandon, hs_par_rep, thread_report_last, \
     fundamentals, presence_of_taxa, fund_scores, number_of_comparisons \
 )
 #endif
