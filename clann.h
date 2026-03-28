@@ -111,6 +111,7 @@ typedef struct {
 typedef struct {
     uint64_t *hashes;   /* sorted array of canonical bipartition hashes */
     int      *sizes;    /* smaller-side leaf count for each split (for qfit) */
+    float    *supports; /* per-split BS weight in [0,1]; 1.0 when absent */
     int       count;
 } BipartSet;
 

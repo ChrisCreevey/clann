@@ -241,6 +241,7 @@ float *scores_retained_supers = NULL, *partition_number = NULL, num_partitions =
 float *score_of_bootstraps = NULL, *yaptp_results = NULL, largest_length = 0, dup_weight = 1, loss_weight = 1, hgt_weight = 1, BESTSCORE = -1;
 float ml_beta = 1.0f;   /* L.U.st exponential slope parameter (default 1.0) */
 int   ml_scale = 2;     /* ML score scale: 0=paper (raw sum), 1=lust (log10), 2=lnl (default) */
+int   bsweight = 0;     /* use per-split BS support as weights in sfit/qfit (0=off, 1=on) */
 time_t interval1, interval2;
 double sup=1;
 char saved_supertree[TREE_LENGTH],  *test_array, inputfilename[10000], delimiter_char = '.', logfile_name[10000], system_call[100000];
@@ -1061,8 +1062,9 @@ static void boot_free_thread_state(int ntrees, int ntaxa)
         int _fi;
         for(_fi = 0; _fi < ntrees; _fi++)
             {
-            if(fund_bipart_sets[_fi].hashes) free(fund_bipart_sets[_fi].hashes);
-            if(fund_bipart_sets[_fi].sizes)  free(fund_bipart_sets[_fi].sizes);
+            if(fund_bipart_sets[_fi].hashes)   free(fund_bipart_sets[_fi].hashes);
+            if(fund_bipart_sets[_fi].sizes)    free(fund_bipart_sets[_fi].sizes);
+            if(fund_bipart_sets[_fi].supports) free(fund_bipart_sets[_fi].supports);
             }
         free(fund_bipart_sets);
         fund_bipart_sets = NULL;
@@ -2181,6 +2183,8 @@ void usertrees_search(void)
 				if(quartet_normalising == 2) printf2("taxa\n");
 				if(quartet_normalising == 3) printf2("quartets\n");
 				}
+			if(criterion == 2 || criterion == 3)
+				printf2("\tBS split weights (bsweight) = %s\n", bsweight ? "on" : "off");
 			printf2("\tUser defined supertrees from file: %s\n", parsed_command[1]);
 			
 			}
@@ -3399,6 +3403,22 @@ void heuristic_search(int user, int print, int sample, int nreps)
 			else
 				printf2("Error: mlscale must be 'paper', 'lust', or 'lnl'\n");
 			}
+		if(strcmp(parsed_command[i], "bsweight") == 0)
+			{
+			if(criterion == 2 || criterion == 3)
+				{
+				bsweight = atoi(parsed_command[i+1]);
+				if(bsweight < 0 || bsweight > 1)
+					{
+					printf2("Error: bsweight must be 0 or 1\n");
+					bsweight = 0; error = TRUE;
+					}
+				else
+					printf2("Bootstrap split weights: %s\n", bsweight ? "on" : "off");
+				}
+			else
+				printf2("Warning: bsweight only applies to sfit and qfit criteria\n");
+			}
 		if(strcmp(parsed_command[i], "visitedtrees") == 0)
 			{
 			strncpy(g_landscape_file, parsed_command[i+1], sizeof(g_landscape_file) - 1);
@@ -3530,6 +3550,8 @@ void heuristic_search(int user, int print, int sample, int nreps)
                     if(quartet_normalising == 2) printf2("taxa\n");
                     if(quartet_normalising == 3) printf2("quartets\n");
                     }
+                if(criterion == 2 || criterion == 3)
+                    printf2("\tBS split weights (bsweight) = %s\n", bsweight ? "on" : "off");
                 printf2("\tStarting trees = ");
                 if(start == 0)
                     printf2("Top %d random trees chosen from %d random samples\n",nreps, sample);

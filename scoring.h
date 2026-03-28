@@ -29,6 +29,9 @@
 
 /* fund_bipart_sets: defined in treecompare2.c, used by rf scoring */
 extern BipartSet *fund_bipart_sets;
+
+/* bsweight: use per-split bootstrap support as weights in sfit/qfit (0=off, 1=on) */
+extern int bsweight;
 #ifdef _OPENMP
 #pragma omp threadprivate(fund_bipart_sets)
 #endif
