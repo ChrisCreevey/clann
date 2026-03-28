@@ -1334,10 +1334,10 @@ void bootstrap_search(void)
 
 #ifdef _OPENMP
             if(nthreads > 1)
-                printf2("Bootstrap: %d replicates using %d threads", Nreps, nthreads);
+                printf2("Bootstrap: %d replicates using %d threads\n", Nreps, nthreads);
             else
 #endif
-                printf2("Bootstrap progress indicator:");
+                printf2("Bootstrap progress indicator:\n");
 
             /* Shared accumulators — protected by boot_merge critical section */
             {
