@@ -630,12 +630,8 @@ void alltrees_search(int user)
         
         /************ End assign dynamic arrays **************/
     
-        if(criterion == 2 || criterion == 3)
-            {
-            coding(0,0,0);
-            if(criterion == 2) condense_coding();
-            }
-        if(criterion == 6 || criterion == 7) rf_precompute_fund_biparts();
+        if(criterion == 2 || criterion == 3 || criterion == 6 || criterion == 7)
+            rf_precompute_fund_biparts();
 
 
         if(start == 0 && end == 0)
@@ -683,25 +679,17 @@ void alltrees_search(int user)
                 temp_top = NULL;
                 score = compare_trees(FALSE);
                 }
-            if(criterion == 2)  /* if we are using MRC */
-                {
-                unroottree(tree);
-                score = (float)MRC(tree);
-                }
-            if(criterion == 3)  /* if we are using QC */
-                {
-                unroottree(tree);
-                score = (float)quartet_compatibility(tree);
-                }
-            if(criterion == 6 || criterion == 7)  /* RF or ML: build tree_top then score */
+            if(criterion == 2 || criterion == 3 || criterion == 6 || criterion == 7)
                 {
                 if(tree_top != NULL) { dismantle_tree(tree_top); tree_top = NULL; }
                 temp_top = NULL;
                 tree_build(1, tree, tree_top, FALSE, -1, 0);
                 tree_top = temp_top;
                 temp_top = NULL;
-                if(criterion == 6) score = compare_trees_rf(FALSE);
-                else               score = compare_trees_ml(FALSE);
+                if(criterion == 2)      score = compare_trees_sfit(FALSE);
+                else if(criterion == 3) score = compare_trees_qfit(FALSE);
+                else if(criterion == 6) score = compare_trees_rf(FALSE);
+                else                    score = compare_trees_ml(FALSE);
                 }
 
             /* Always populate best_tree with named tree for retained_supers storage.
@@ -709,7 +697,7 @@ void alltrees_search(int user)
                the integer-indexed tree string directly using returntree(). This ensures
                retained_supers[] always holds actual taxon names so that
                'reconstruct speciestree memory' works correctly after alltrees. */
-            if((criterion == 0 || criterion == 6 || criterion == 7) && tree_top != NULL)
+            if((criterion == 0 || criterion == 2 || criterion == 3 || criterion == 6 || criterion == 7) && tree_top != NULL)
                 {
                 strcpy(best_tree, "");
                 print_named_tree(tree_top, best_tree);
@@ -1073,6 +1061,7 @@ static void boot_free_thread_state(int ntrees, int ntaxa)
         int _fi;
         for(_fi = 0; _fi < ntrees; _fi++)
             if(fund_bipart_sets[_fi].hashes) free(fund_bipart_sets[_fi].hashes);
+            if(fund_bipart_sets[_fi].sizes)  free(fund_bipart_sets[_fi].sizes);
         free(fund_bipart_sets);
         fund_bipart_sets = NULL;
         }
@@ -1409,7 +1398,7 @@ void bootstrap_search(void)
                     /* fund_bipart_sets is precomputed from the original trees; after
                      * resampling we must rebuild it so compare_trees_rf/ml score
                      * against the bootstrap replicate, not the original data. */
-                    if(criterion == 6 || criterion == 7) rf_precompute_fund_biparts();
+                    if(criterion == 2 || criterion == 3 || criterion == 6 || criterion == 7) rf_precompute_fund_biparts();
 
                     /* ---- Check all taxa present ---- */
                     allpresent = TRUE;
@@ -2246,11 +2235,8 @@ void usertrees_search(void)
 			scores_retained_supers[i] = -1;
 			}
     
-        if(criterion == 2 || criterion == 3)
-            {
-            coding(0,0,0);
-            if(criterion == 2) condense_coding();
-            }
+        if(criterion == 2 || criterion == 3 || criterion == 6 || criterion == 7)
+            rf_precompute_fund_biparts();
             
         c = getc(userfile);
         while((c == ' ' || c == '\r'  || c == '\n' || c == '[') && !feof(userfile))  /* skip past all the non tree characters */
@@ -2288,25 +2274,11 @@ void usertrees_search(void)
 			tree_top = temp_top;
 			temp_top = NULL;
 			/*check_tree(tree_top); */
-			if(criterion == 0) score = compare_trees(FALSE);
-			if(criterion == 2)  /* calculate the distance using the MRC criterion */
-				{
-				strcpy(temp, "");
-				print_tree(tree_top, temp);
-				strcat(temp, ";");
-				unroottree(temp);
-				score = (float)MRC(temp);
-				}
-			if(criterion == 3)
-				{
-				strcpy(temp, "");
-				print_tree(tree_top, temp);
-				strcat(temp, ";");
-				unroottree(temp);
-				score = (float)quartet_compatibility(temp);
-				}
-			if(criterion == 6) score = compare_trees_rf(FALSE);
-			if(criterion == 7) score = compare_trees_ml(FALSE);
+			if(criterion == 0)      score = compare_trees(FALSE);
+			if(criterion == 2)      score = compare_trees_sfit(FALSE);
+			if(criterion == 3)      score = compare_trees_qfit(FALSE);
+			if(criterion == 6)      score = compare_trees_rf(FALSE);
+			if(criterion == 7)      score = compare_trees_ml(FALSE);
 
 			/* Collect per-gene-tree scores for ML topology tests */
 			if(run_ml_tests && criterion == 7)
@@ -3665,11 +3637,8 @@ void heuristic_search(int user, int print, int sample, int nreps)
             tree[0] = '\0';
 
             
-            if(criterion == 2 || criterion == 3)
-                {
-                coding(0,0,0);   /** if we are using MRC or QC we need to build the source trees matrix first */
-                if(criterion==2) condense_coding();
-                }
+            if(criterion == 2 || criterion == 3 || criterion == 6 || criterion == 7)
+                rf_precompute_fund_biparts();
             
             if(outfile == NULL && print)
                 {
@@ -3788,22 +3757,8 @@ void heuristic_search(int user, int print, int sample, int nreps)
                     strcat(best_tree, ";");
                     /* evaluate the random tree */
                     if(criterion == 0) distance = compare_trees(FALSE);  /* calculate the distance from the super tree to all the fundamental trees */
-                    if(criterion == 2)  /* calculate the distance using the MRC criterion */
-                        {
-						strcpy(temptree, "");
-                        print_tree(tree_top, temptree);
-                        strcat(temptree, ";");
-                        unroottree(temptree);
-                        distance = (float)MRC(temptree);
-                        }
-                    if(criterion == 3)
-                        {
-						strcpy(temptree, "");
-                        print_tree(tree_top, temptree);
-                        strcat(temptree, ";");
-                        unroottree(temptree);
-                        distance = (float)quartet_compatibility(temptree);
-                        }
+                    if(criterion == 2) distance = compare_trees_sfit(FALSE);
+                    if(criterion == 3) distance = compare_trees_qfit(FALSE);
 					if(criterion==5)
 						{
 						strcpy(temptree, "");
@@ -3884,7 +3839,7 @@ void heuristic_search(int user, int print, int sample, int nreps)
                         par_scores[k] = -1;
                         }
 
-                    if(criterion == 6 || criterion == 7) rf_precompute_fund_biparts();
+                    if(criterion == 2 || criterion == 3 || criterion == 6 || criterion == 7) rf_precompute_fund_biparts();
                     par_progress_best    = -1.0f;
                     par_last_print_score = -1.0f;
                     par_last_progress_time = 0;
@@ -3978,7 +3933,7 @@ void heuristic_search(int user, int print, int sample, int nreps)
 #endif
                     {
                     /* ---- Sequential while loop ---- */
-                    if(criterion == 6 || criterion == 7) rf_precompute_fund_biparts();
+                    if(criterion == 2 || criterion == 3 || criterion == 6 || criterion == 7) rf_precompute_fund_biparts();
                     par_progress_best = -1.0f;
                     par_last_progress_time = 0;
                     par_search_start  = time(NULL);
@@ -4093,7 +4048,7 @@ void heuristic_search(int user, int print, int sample, int nreps)
 							par_scores[k] = -1;
 							}
 
-						if(criterion == 6 || criterion == 7) rf_precompute_fund_biparts();
+						if(criterion == 2 || criterion == 3 || criterion == 6 || criterion == 7) rf_precompute_fund_biparts();
 						par_progress_best    = -1.0f;
 						par_last_print_score = -1.0f;
 						par_last_progress_time = 0;
@@ -4200,7 +4155,7 @@ void heuristic_search(int user, int print, int sample, int nreps)
 						ensure_stored_source_trees();
 						char *nj_tree_save = malloc(TREE_LENGTH * sizeof(char));
 						strcpy(nj_tree_save, temptree);
-						if(criterion == 6 || criterion == 7) rf_precompute_fund_biparts();
+						if(criterion == 2 || criterion == 3 || criterion == 6 || criterion == 7) rf_precompute_fund_biparts();
 						par_progress_best = -1.0f;
 						par_last_progress_time = 0;
 						par_search_start  = time(NULL);
@@ -4258,7 +4213,7 @@ void heuristic_search(int user, int print, int sample, int nreps)
 					}
 				else/* if we are to use a tree (or trees) from a file as the starting tree */
 					{
-					if(criterion == 6 || criterion == 7) rf_precompute_fund_biparts();
+					if(criterion == 2 || criterion == 3 || criterion == 6 || criterion == 7) rf_precompute_fund_biparts();
 					c = getc(userfile);
 					while((c == ' ' || c == '\r'  || c == '\n' || c == '[') && !feof(userfile))  /* skip past all the non tree characters */
 						{
@@ -4307,22 +4262,8 @@ void heuristic_search(int user, int print, int sample, int nreps)
 								
 								
 						if(criterion == 0) distance = compare_trees(FALSE);  /* calculate the distance from the super tree to all the fundamental trees */
-						if(criterion == 2)  /* calculate the distance using the MRC criterion */
-							{
-							strcpy(temptree, "");
-							print_tree(tree_top, temptree);
-							strcat(temptree, ";");
-							unroottree(temptree);
-							distance = (float)MRC(temptree);
-							}
-						if(criterion == 3)
-							{
-							strcpy(temptree, "");
-							print_tree(tree_top, temptree);
-							strcat(temptree, ";");
-							unroottree(temptree);
-							distance = (float)quartet_compatibility(temptree);
-							}
+						if(criterion == 2) distance = compare_trees_sfit(FALSE);
+						if(criterion == 3) distance = compare_trees_qfit(FALSE);
 						if(criterion==5)
 							{
 							strcpy(temptree, "");
@@ -4429,7 +4370,7 @@ void heuristic_search(int user, int print, int sample, int nreps)
                  * tree fresh (spr=FALSE) to get the correct score before displaying. */
                 for(i = 0; i < number_retained_supers && scores_retained_supers[i] != -1; i++)
                     {
-                    if(criterion == 0 || criterion == 6 || criterion == 7)
+                    if(criterion == 0 || criterion == 2 || criterion == 3 || criterion == 6 || criterion == 7)
                         {
                         if(tree_top != NULL) { dismantle_tree(tree_top); tree_top = NULL; }
                         temp_top = NULL;
@@ -4437,9 +4378,11 @@ void heuristic_search(int user, int print, int sample, int nreps)
                         tree_top = temp_top;
                         temp_top = NULL;
                         for(k = 0; k < Total_fund_trees; k++) sourcetree_scores[k] = -1;
-                        if(criterion == 0) scores_retained_supers[i] = compare_trees(FALSE);
-                        else if(criterion == 6) scores_retained_supers[i] = compare_trees_rf(FALSE);
-                        else scores_retained_supers[i] = compare_trees_ml(FALSE);
+                        if(criterion == 0)       scores_retained_supers[i] = compare_trees(FALSE);
+                        else if(criterion == 2)  scores_retained_supers[i] = compare_trees_sfit(FALSE);
+                        else if(criterion == 3)  scores_retained_supers[i] = compare_trees_qfit(FALSE);
+                        else if(criterion == 6)  scores_retained_supers[i] = compare_trees_rf(FALSE);
+                        else                     scores_retained_supers[i] = compare_trees_ml(FALSE);
                         }
                     }
 
@@ -5024,20 +4967,8 @@ int swapper(struct taxon * position,struct taxon * prev_pos, int stepstaken, str
                                             
                                             
                                             if(criterion == 0) distance = compare_trees(FALSE);  /* calculate the distance from the super tree to all the fundamental trees */
-                                            if(criterion == 2)  /* calculate the distance using the MRC criterion */
-                                                {
-                                                print_tree(tree_top, temptree);
-                                                strcat(temptree, ";");
-                                                unroottree(temptree);
-                                                distance = (float)MRC(temptree);
-                                                }
-                                            if(criterion == 3)
-                                                {
-                                                print_tree(tree_top, temptree);
-                                                strcat(temptree, ";");
-                                                unroottree(temptree);
-                                                distance = (float)quartet_compatibility(temptree);
-                                                }
+                                            if(criterion == 2) distance = compare_trees_sfit(FALSE);
+                                            if(criterion == 3) distance = compare_trees_qfit(FALSE);
 
 											if(criterion==5)
 												{
@@ -6640,27 +6571,9 @@ static float probe_candidate(const char *candidate_nwk,
 	if(criterion == 0)
 		tmpscore = compare_trees(FALSE);
 	else if(criterion == 2)
-		{
-		temptree = malloc(TREE_LENGTH * sizeof(char));
-		if(temptree)
-			{
-			print_tree(tree_top, temptree); strcat(temptree, ";");
-			while(unroottree(temptree));
-			tmpscore = (float)MRC(temptree);
-			free(temptree);
-			}
-		}
+		tmpscore = compare_trees_sfit(FALSE);
 	else if(criterion == 3)
-		{
-		temptree = malloc(TREE_LENGTH * sizeof(char));
-		if(temptree)
-			{
-			print_tree(tree_top, temptree); strcat(temptree, ";");
-			while(unroottree(temptree));
-			tmpscore = (float)quartet_compatibility(temptree);
-			free(temptree);
-			}
-		}
+		tmpscore = compare_trees_qfit(FALSE);
 	else if(criterion == 5)
 		{
 		temptree = malloc(TREE_LENGTH * sizeof(char));
@@ -6749,19 +6662,9 @@ static int evaluate_candidate(const char *candidate_nwk,
 	if(criterion == 0)
 		tmpscore = compare_trees(FALSE);
 	else if(criterion == 2)
-		{
-		print_tree(tree_top, temptree);
-		strcat(temptree, ";");
-		while(unroottree(temptree));
-		tmpscore = (float)MRC(temptree);
-		}
+		tmpscore = compare_trees_sfit(TRUE);
 	else if(criterion == 3)
-		{
-		print_tree(tree_top, temptree);
-		strcat(temptree, ";");
-		while(unroottree(temptree));
-		tmpscore = (float)quartet_compatibility(temptree);
-		}
+		tmpscore = compare_trees_qfit(TRUE);
 	else if(criterion == 5)
 		{
 		print_tree(tree_top, temptree);
@@ -7977,22 +7880,8 @@ int regraft(struct taxon * position, struct taxon * newbie, struct taxon * last,
                                     strcat(best_tree, ";");
                                     while(unroottree(best_tree));  /* ensure unrooted even if graft was at root */
                                     if(criterion == 0) tmpscore = compare_trees(TRUE);  /* calculate the distance from the super tree to all the fundamental trees */
-                                    if(criterion == 2)  /* calculate the distance using the MRC criterion */
-                                        {
-										strcpy(temptree, "");
-                                        print_tree(tree_top, temptree);
-                                        strcat(temptree, ";");
-                                        while(unroottree(temptree));
-                                        tmpscore = (float)MRC(temptree);
-                                        }
-                                    if(criterion == 3)
-                                        {
-										strcpy(temptree, "");
-                                        print_tree(tree_top, temptree);
-                                        strcat(temptree, ";");
-                                        while(unroottree(temptree));
-                                        tmpscore = (float)quartet_compatibility(temptree);
-                                        }
+                                    if(criterion == 2) tmpscore = compare_trees_sfit(TRUE);
+                                    if(criterion == 3) tmpscore = compare_trees_qfit(TRUE);
 														
 									if(criterion==5)
 										{
@@ -8607,11 +8496,8 @@ void generatetrees(void)
 		if(!error)
 			{
 		
-			if(criterion == 2 || criterion == 3)
-				{
-				coding(0,0,0);   /** if we are using MRC or QC we need to build the source trees matrix first */
-				if(criterion==2) condense_coding();
-				}
+			if(criterion == 2 || criterion == 3 || criterion == 6 || criterion == 7)
+				rf_precompute_fund_biparts();
 				
 			interval1 = time(NULL);
 			printf2("\nProgress Indicator:\n");
@@ -8661,22 +8547,8 @@ void generatetrees(void)
 			/**** evaluate its fit to the source trees in memory *****/
 					temptree[0] = '\0';
 					if(criterion == 0) results[i] = compare_trees(FALSE);  /* calculate the distance from the super tree to all the fundamental trees */
-					if(criterion == 2)  /* calculate the distance using the MRC criterion */
-						{
-						strcpy(temptree, "");
-						print_tree(tree_top, temptree);
-						strcat(temptree, ";");
-						unroottree(temptree);
-						results[i] = (float)MRC(temptree);
-						}
-					if(criterion == 3)
-						{
-						strcpy(temptree, "");
-						print_tree(tree_top, temptree);
-						strcat(temptree, ";");
-						unroottree(temptree);
-						results[i] = (float)quartet_compatibility(temptree);
-						}
+					if(criterion == 2) results[i] = compare_trees_sfit(FALSE);
+					if(criterion == 3) results[i] = compare_trees_qfit(FALSE);
 					/* Display results */
 					if(print_all_scores) fprintf(allscores, "%f\n", results[i]);
 					GC++;

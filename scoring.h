@@ -49,6 +49,8 @@ float compare_trees(int spr);
 void  rf_precompute_fund_biparts(void);
 float compare_trees_rf(int spr);
 float compare_trees_ml(int spr);
+float compare_trees_sfit(int spr);
+float compare_trees_qfit(int spr);
 float MRC(char *supertree);
 float quartet_compatibility(char *supertree);
 

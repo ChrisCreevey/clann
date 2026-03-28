@@ -78,6 +78,96 @@ static int bipart_intersection_count(const uint64_t *a, int na,
     return shared;
     }
 
+/* collect_biparts_newick_sz: like collect_biparts_newick but also fills
+ * sizes_out[k] = min(|A_k|, |B_k|) (smaller-side leaf count) for each
+ * non-trivial bipartition k.  ntaxa is the total leaf count in this tree.
+ * out[] and sizes_out[] are co-sorted by hash on return. */
+static int collect_biparts_newick_sz(const char *nwk, uint64_t total_hash,
+                                     int ntaxa, uint64_t *out, int *sizes_out)
+    {
+    uint64_t hash_stack[2 * NAME_LENGTH + 4];
+    int      cnt_stack [2 * NAME_LENGTH + 4];
+    int depth = 0, cnt = 0, i = 0;
+    hash_stack[0] = 0;
+    cnt_stack[0]  = 0;
+    while(nwk[i] && nwk[i] != ';')
+        {
+        if(nwk[i] == '(')
+            { hash_stack[++depth] = 0; cnt_stack[depth] = 0; i++; }
+        else if(nwk[i] == ')')
+            {
+            uint64_t child_h = hash_stack[depth--];
+            int      child_c = cnt_stack[depth + 1];
+            uint64_t comp    = total_hash ^ child_h;
+            uint64_t bh      = (child_h < comp) ? child_h : comp;
+            if(bh != 0)
+                {
+                int other_c    = ntaxa - child_c;
+                out[cnt]       = bh;
+                sizes_out[cnt] = (child_c < other_c) ? child_c : other_c;
+                cnt++;
+                }
+            hash_stack[depth] ^= child_h;
+            cnt_stack[depth]  += child_c;
+            i++;
+            }
+        else if(nwk[i] == ',')
+            { i++; }
+        else if(nwk[i] == ':')
+            { while(nwk[i] && nwk[i] != ',' && nwk[i] != ')' && nwk[i] != ';') i++; }
+        else
+            {
+            char num[64]; int j = 0;
+            while(nwk[i] && nwk[i] != '(' && nwk[i] != ')' && nwk[i] != ',' && nwk[i] != ':')
+                num[j++] = nwk[i++];
+            num[j] = '\0';
+            int tidx = atoi(num);
+            if(tidx >= 0 && tidx < number_of_taxa)
+                { hash_stack[depth] ^= taxon_hash_vals[tidx]; cnt_stack[depth]++; }
+            }
+        }
+    /* Co-sort (out, sizes_out) by hash — insertion sort, n ≤ number_of_taxa */
+    for(i = 1; i < cnt; i++)
+        {
+        uint64_t kh = out[i]; int ks = sizes_out[i]; int j = i - 1;
+        while(j >= 0 && out[j] > kh)
+            { out[j+1] = out[j]; sizes_out[j+1] = sizes_out[j]; j--; }
+        out[j+1] = kh; sizes_out[j+1] = ks;
+        }
+    return cnt;
+    }
+
+/* quartet_intersect_score: merge-walk over sorted supertree hashes (a) and
+ * sorted source-tree hashes (b, with parallel sizes sb).
+ * Returns the sum of C(s,2)*C(n-s,2) over shared splits (= agreeing quartets).
+ * Sets *q_total_out to the same sum over all source-tree splits. */
+static int64_t quartet_intersect_score(const uint64_t *a, int na,
+                                        const uint64_t *b, const int *sb, int nb,
+                                        int ntaxa_i, int64_t *q_total_out)
+    {
+    int64_t q_agree = 0, q_total = 0;
+    int i, j;
+    for(j = 0; j < nb; j++)
+        {
+        int64_t s = sb[j], n = ntaxa_i;
+        q_total += s*(s-1)/2 * (n-s)*(n-s-1)/2;
+        }
+    i = 0; j = 0;
+    while(i < na && j < nb)
+        {
+        if(a[i] == b[j])
+            {
+            int64_t s = sb[j], n = ntaxa_i;
+            q_agree += s*(s-1)/2 * (n-s)*(n-s-1)/2;
+            i++; j++;
+            }
+        else if(a[i] < b[j]) i++;
+        else                  j++;
+        }
+    *q_total_out = q_total;
+    return q_agree;
+    }
+
 void cal_fund_scores(int printfundscores)
     {
     int i =0, j=0, k=0;
@@ -654,23 +744,31 @@ void rf_precompute_fund_biparts(void)
     int i, j;
     if(fund_bipart_sets != NULL)
         {
-        for(i = 0; i < Total_fund_trees; i++) free(fund_bipart_sets[i].hashes);
+        for(i = 0; i < Total_fund_trees; i++)
+            {
+            free(fund_bipart_sets[i].hashes);
+            free(fund_bipart_sets[i].sizes);
+            }
         free(fund_bipart_sets);
         }
     fund_bipart_sets = malloc(Total_fund_trees * sizeof(BipartSet));
     for(i = 0; i < Total_fund_trees; i++)
         {
         fund_bipart_sets[i].hashes = malloc(number_of_taxa * sizeof(uint64_t));
+        fund_bipart_sets[i].sizes  = malloc(number_of_taxa * sizeof(int));
         fund_bipart_sets[i].count  = 0;
         if(!sourcetreetag[i]) continue;
+        int ntaxa_i = 0;
         uint64_t total_hash = 0;
         for(j = 0; j < number_of_taxa; j++)
-            if(presence_of_taxa[i][j]) total_hash ^= taxon_hash_vals[j];
+            if(presence_of_taxa[i][j]) { ntaxa_i++; total_hash ^= taxon_hash_vals[j]; }
         char *tmp = malloc(strlen(fundamentals[i]) + 10);
         strcpy(tmp, fundamentals[i]);
         unroottree(tmp);
         fund_bipart_sets[i].count =
-            collect_biparts_newick(tmp, total_hash, fund_bipart_sets[i].hashes);
+            collect_biparts_newick_sz(tmp, total_hash, ntaxa_i,
+                                      fund_bipart_sets[i].hashes,
+                                      fund_bipart_sets[i].sizes);
         free(tmp);
         }
     }
@@ -815,6 +913,172 @@ float compare_trees_ml(int spr)
             float ml_score = (float)(ml_beta * d * (ml_scale == 1 ? LOG10E : 1.0f)) * tree_weights[i];
             sourcetree_scores[i] = ml_score;
             total += ml_score;
+            }
+        else
+            {
+            total += sourcetree_scores[i];
+            }
+        }
+
+    free(super_bp);
+    free(tmp);
+    free(pruned_nwk);
+    return total;
+    }
+
+/* -----------------------------------------------------------------------
+ * compare_trees_sfit: splits-fit criterion.
+ *   loss_i = (gene_cnt_i - shared_i) / gene_cnt_i
+ * Fraction of source-tree splits absent from the pruned supertree.
+ * Returns weighted sum of per-source-tree loss values (0 = perfect fit).
+ * Requires rf_precompute_fund_biparts() to have been called.
+ * ----------------------------------------------------------------------- */
+float compare_trees_sfit(int spr)
+    {
+    int i, j;
+    float total = 0.0f;
+    char *pruned_nwk    = malloc(TREE_LENGTH * sizeof(char));
+    if(!pruned_nwk) memory_error(86);
+    char *tmp           = malloc(TREE_LENGTH * sizeof(char));
+    if(!tmp) { free(pruned_nwk); memory_error(87); }
+    uint64_t *super_bp  = malloc(number_of_taxa * sizeof(uint64_t));
+    if(!super_bp) { free(pruned_nwk); free(tmp); memory_error(88); }
+
+    for(i = 0; i < Total_fund_trees; i++)
+        {
+#ifdef _OPENMP
+        #pragma omp flush(user_break)
+#endif
+        if(user_break) break;
+        if(!sourcetreetag[i]) continue;
+
+        int found = FALSE, here1 = TRUE, here2 = TRUE;
+        if(sourcetree_scores[i] != -1 && spr)
+            {
+            for(j = 0; j < number_of_taxa; j++)
+                {
+                if(presence_of_taxa[i][j] > 0 && presenceof_SPRtaxa[j] == TRUE)  here1 = FALSE;
+                if(presence_of_taxa[i][j] > 0 && presenceof_SPRtaxa[j] == FALSE) here2 = FALSE;
+                }
+            if(here1 || here2) found = TRUE;
+            }
+
+        if(!found || !spr)
+            {
+            int ntaxa_i = 0;
+            uint64_t total_hash = 0;
+            for(j = 0; j < number_of_taxa; j++)
+                if(presence_of_taxa[i][j]) { ntaxa_i++; total_hash ^= taxon_hash_vals[j]; }
+            if(ntaxa_i < 4) { sourcetree_scores[i] = 0.0f; continue; }
+
+            prune_tree(tree_top, i);
+            shrink_tree(tree_top);
+
+            pruned_nwk[0] = '\0';
+            if(print_pruned_tree(tree_top, 0, pruned_nwk, FALSE, 0) > 1)
+                {
+                tmp[0] = '\0';
+                strcpy(tmp, "("); strcat(tmp, pruned_nwk); strcat(tmp, ")");
+                strcpy(pruned_nwk, tmp);
+                }
+            strcat(pruned_nwk, ";");
+
+            while(unroottree(pruned_nwk));
+            int super_cnt = collect_biparts_newick(pruned_nwk, total_hash, super_bp);
+            reset_tree(tree_top);
+
+            int gene_cnt = fund_bipart_sets[i].count;
+            int shared   = bipart_intersection_count(super_bp, super_cnt,
+                                                     fund_bipart_sets[i].hashes, gene_cnt);
+            float loss = (gene_cnt > 0) ? (float)(gene_cnt - shared) / (float)gene_cnt : 0.0f;
+            loss *= tree_weights[i];
+            sourcetree_scores[i] = loss;
+            total += loss;
+            }
+        else
+            {
+            total += sourcetree_scores[i];
+            }
+        }
+
+    free(super_bp);
+    free(tmp);
+    free(pruned_nwk);
+    return total;
+    }
+
+/* -----------------------------------------------------------------------
+ * compare_trees_qfit: quartet-fit criterion.
+ *   Q_agree_i = Σ_{shared splits e} C(s_e,2)*C(n_i-s_e,2)
+ *   Q_total_i = Σ_{all source splits e} C(s_e,2)*C(n_i-s_e,2)
+ *   loss_i    = 1 - Q_agree_i / Q_total_i
+ * Returns weighted sum of per-source-tree loss values (0 = all quartets agree).
+ * Requires rf_precompute_fund_biparts() to have been called (needs sizes).
+ * ----------------------------------------------------------------------- */
+float compare_trees_qfit(int spr)
+    {
+    int i, j;
+    float total = 0.0f;
+    char *pruned_nwk    = malloc(TREE_LENGTH * sizeof(char));
+    if(!pruned_nwk) memory_error(89);
+    char *tmp           = malloc(TREE_LENGTH * sizeof(char));
+    if(!tmp) { free(pruned_nwk); memory_error(90); }
+    uint64_t *super_bp  = malloc(number_of_taxa * sizeof(uint64_t));
+    if(!super_bp) { free(pruned_nwk); free(tmp); memory_error(91); }
+
+    for(i = 0; i < Total_fund_trees; i++)
+        {
+#ifdef _OPENMP
+        #pragma omp flush(user_break)
+#endif
+        if(user_break) break;
+        if(!sourcetreetag[i]) continue;
+
+        int found = FALSE, here1 = TRUE, here2 = TRUE;
+        if(sourcetree_scores[i] != -1 && spr)
+            {
+            for(j = 0; j < number_of_taxa; j++)
+                {
+                if(presence_of_taxa[i][j] > 0 && presenceof_SPRtaxa[j] == TRUE)  here1 = FALSE;
+                if(presence_of_taxa[i][j] > 0 && presenceof_SPRtaxa[j] == FALSE) here2 = FALSE;
+                }
+            if(here1 || here2) found = TRUE;
+            }
+
+        if(!found || !spr)
+            {
+            int ntaxa_i = 0;
+            uint64_t total_hash = 0;
+            for(j = 0; j < number_of_taxa; j++)
+                if(presence_of_taxa[i][j]) { ntaxa_i++; total_hash ^= taxon_hash_vals[j]; }
+            if(ntaxa_i < 4) { sourcetree_scores[i] = 0.0f; continue; }
+
+            prune_tree(tree_top, i);
+            shrink_tree(tree_top);
+
+            pruned_nwk[0] = '\0';
+            if(print_pruned_tree(tree_top, 0, pruned_nwk, FALSE, 0) > 1)
+                {
+                tmp[0] = '\0';
+                strcpy(tmp, "("); strcat(tmp, pruned_nwk); strcat(tmp, ")");
+                strcpy(pruned_nwk, tmp);
+                }
+            strcat(pruned_nwk, ";");
+
+            while(unroottree(pruned_nwk));
+            int super_cnt = collect_biparts_newick(pruned_nwk, total_hash, super_bp);
+            reset_tree(tree_top);
+
+            int gene_cnt = fund_bipart_sets[i].count;
+            int64_t q_total;
+            int64_t q_agree = quartet_intersect_score(super_bp, super_cnt,
+                                                       fund_bipart_sets[i].hashes,
+                                                       fund_bipart_sets[i].sizes,
+                                                       gene_cnt, ntaxa_i, &q_total);
+            float loss = (q_total > 0) ? (float)(q_total - q_agree) / (float)q_total : 0.0f;
+            loss *= tree_weights[i];
+            sourcetree_scores[i] = loss;
+            total += loss;
             }
         else
             {
