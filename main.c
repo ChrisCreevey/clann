@@ -1214,6 +1214,13 @@ void print_commands(int num)
 		printf2("\n\t  (prune monophyletic same-species clades from multicopy trees at load time;");
 		printf2("\n\t   trees that become single-copy after pruning join the supertree pool;");
 		printf2("\n\t   original unpruned trees are preserved for 'reconstruct')");
+		printf2("\n\tautoweight\tclan\t\t\t\t*off");
+		printf2("\n\t  (assign per-tree weights based on compatibility with user-defined clans;");
+		printf2("\n\t   requires clanfile=<file>; weights = fraction of testable clans compatible,");
+		printf2("\n\t   normalised to mean=1.0; use with criterion=ml and mlscores)");
+		printf2("\n\tclanfile\t<filename>\t\t\t*none");
+		printf2("\n\t  (clan file: one clan per line, taxon names separated by spaces or commas,");
+		printf2("\n\t   lines beginning with '#' are comments)");
         }
     if(num == 2)
         {
@@ -1292,7 +1299,8 @@ void print_commands(int num)
             if(method == 2) printf2("spr"); 
             if(method == 3) printf2("tbr");
             printf2("\n\tnsteps\t\t<integer number>\t\t%d", number_of_steps);
-			printf2("\n\tstart\t\tnj | random | <filename>\tnj");
+			printf2("\n\tstart\t\tnj | random | memory | <filename>\tnj");
+			printf2("\n\t  memory  = use best tree currently in memory as starting point");
 
 			printf2("\n\tmaxswaps\t<integer number>\t\t*1,000,000\n\tsavetrees\t<filename>\t\t\tHeuristic_result.txt");
 #ifdef _OPENMP
@@ -1352,7 +1360,12 @@ void print_commands(int num)
 			printf2("\n\tmlscale\t\tpaper | lust | lnl\t\t%s", ml_scale==1?"lust":ml_scale==2?"lnl":"paper");
 			printf2("\n\t  paper = Steel & Rodrigo (2008) formula: minimise beta*RF directly");
 			printf2("\n\t  lust  = L.U.st (Akanni et al. 2014) log10 scaling (beta*d*log10(e))");
-			printf2("\n\t  lnl   = report as lnL = -beta*RF  [default; matches ML tool conventions]\n");
+			printf2("\n\t  lnl   = report as lnL = -beta*RF  [default; matches ML tool conventions]");
+			printf2("\n\tmlalpha\t\t<float >= 0>\t\t\t%.4f  [experimental]", ml_alpha);
+			printf2("\n\t  0     = Steel & Rodrigo (2008) raw RF (default)");
+			printf2("\n\t  1     = divide RF by source-tree split count (full normalisation)");
+			printf2("\n\t  >1    = actively down-weight large trees beyond normalisation\n");
+			printf2("\n\t  Use 'mlscores alpha=auto' to estimate optimal alpha from data\n");
 			}
         }
     if(num == 5)
@@ -1392,6 +1405,7 @@ void print_commands(int num)
 				{
 				printf2("\n\tmlbeta\t\t<float > 0>\t\t\t%.4f", ml_beta);
 				printf2("\n\tmlscale\t\tpaper | lust | lnl\t\t%s", ml_scale==1?"lust":ml_scale==2?"lnl":"paper");
+				printf2("\n\tmlalpha\t\t<float >= 0>\t\t\t%.4f  [experimental]", ml_alpha);
 				}
 #ifdef _OPENMP
 			if(criterion == 0 || criterion == 2 || criterion == 3)
@@ -1468,6 +1482,7 @@ void print_commands(int num)
         printf2("\n\tcriterion\tdfit | sfit | qfit | mrp | avcon | rf | ml\t");
         printf2("\n\tmlbeta\t\t<float > 0>\t\t\t\t%.4f", ml_beta);
         printf2("\n\tmlscale\t\tpaper | lust | lnl\t\t\t%s", ml_scale == 1 ? "lust (Akanni et al. 2014)" : ml_scale == 2 ? "lnl" : "Steel & Rodrigo 2008");
+        printf2("\n\tmlalpha\t\t<float >= 0>\t\t\t\t%.4f  [experimental]", ml_alpha);
         if(criterion == 0) printf2("dfit");
         if(criterion == 1) printf2("mrp");
         if(criterion == 2) printf2("sfit");
@@ -1647,21 +1662,33 @@ void print_commands(int num)
         }
 	 if(num == 31)
 		{
-		printf2("\nmlscores\t[outfile=<file>] [scan=<n>] [scanmin=<f>] [scanmax=<f>]\n\n");
+		printf2("\nmlscores\t[outfile=<file>] [scan=<n>] [scanmin=<f>] [scanmax=<f>]\n");
+		printf2("\t\t[alpha=auto] [ascan=<n>] [alphamax=<f>]\n\n");
 		printf2("  Estimates the Steel & Rodrigo (2008) ML beta parameter for the current\n");
 		printf2("  supertree by closed-form MLE: beta = W / WD, where W is the sum of\n");
-		printf2("  source-tree weights and WD is the weighted sum of RF distances.\n");
+		printf2("  source-tree weights and WD is the weighted sum of (scaled) RF distances.\n");
 		printf2("  Updates ml_beta so subsequent hs/boot runs use the estimated value.\n\n");
-		printf2("\tOptions\t\tSettings\t\t\tCurrent\n");
+		printf2("  alpha=auto [experimental]: jointly estimates the tree-size scaling\n");
+		printf2("  exponent alpha via 1-D grid search. Model:\n");
+		printf2("  log L = W*log(beta) - alpha*sum(log k_i) - beta*sum(w_i*d_i/k_i^alpha)\n");
+		printf2("  alpha=0: Steel 2008 (default); alpha=1: normalised by split count;\n");
+		printf2("  alpha>1: down-weights large trees. Updates ml_alpha after estimation.\n\n");
+		printf2("\tOptions\t\t\tSettings\t\t\tCurrent\n");
         printf2("\t===========================================================\n");
-		printf2("\n\toutfile\t\t<filename>\t\t\t*none\n");
-		printf2("\t\t\tWrite beta log-likelihood profile\n");
-		printf2("\tscan\t\t<integer>\t\t\t*100\n");
-		printf2("\t\t\tNumber of points in profile\n");
-		printf2("\tscanmin\t\t<float>\t\t\t\t*beta/100\n");
-		printf2("\t\t\tLower bound of beta scan\n");
-		printf2("\tscanmax\t\t<float>\t\t\t\t*beta*10\n");
-		printf2("\t\t\tUpper bound of beta scan\n");
+		printf2("\n\toutfile\t\t\t<filename>\t\t\t*none\n");
+		printf2("\t\t\t\tWrite beta (and alpha) log-likelihood profile\n");
+		printf2("\tscan\t\t\t<integer>\t\t\t*100\n");
+		printf2("\t\t\t\tNumber of points in beta profile\n");
+		printf2("\tscanmin\t\t\t<float>\t\t\t\t*beta/100\n");
+		printf2("\t\t\t\tLower bound of beta scan\n");
+		printf2("\tscanmax\t\t\t<float>\t\t\t\t*beta*10\n");
+		printf2("\t\t\t\tUpper bound of beta scan\n");
+		printf2("\talpha\t\t\tauto\t\t\t\t*off\n");
+		printf2("\t\t\t\tEstimate optimal alpha from data\n");
+		printf2("\tascan\t\t\t<integer>\t\t\t*50\n");
+		printf2("\t\t\t\tNumber of points in alpha grid\n");
+		printf2("\talphamax\t\t<float>\t\t\t\t*3.0\n");
+		printf2("\t\t\t\tUpper bound of alpha grid\n");
 		}
 
 	 if(num == 30)
@@ -1913,12 +1940,234 @@ static void autoprunemono_apply(void)
 		}
 	}
 
+/* -----------------------------------------------------------------------
+ * is_monophyletic_subtree: recursive helper.
+ * Returns number of marked leaves in the subtree rooted at pos.
+ * Sets *mono=FALSE if the marked leaves are not monophyletic.
+ * total_marked: total number of marked leaves in the whole tree.
+ * ----------------------------------------------------------------------- */
+static int is_monophyletic_subtree(struct taxon *pos, const int *marked,
+                                   int total_marked, int *mono)
+    {
+    if(pos == NULL) return 0;
+    if(pos->daughter == NULL)   /* leaf */
+        return (marked[pos->name] ? 1 : 0);
+
+    int count = 0;
+    struct taxon *child = pos->daughter;
+    while(child != NULL)
+        {
+        count += is_monophyletic_subtree(child, marked, total_marked, mono);
+        child = child->next_sibling;
+        }
+    /* If this subtree contains some but not all marked leaves, not monophyletic */
+    if(count > 0 && count < total_marked) *mono = FALSE;
+    return count;
+    }
+
+/* Returns TRUE if the taxa marked in marked[] form a monophyletic group
+ * in the tree rooted at root.  total_taxa = number_of_taxa. */
+static int is_monophyletic(struct taxon *root, const int *marked, int total_taxa)
+    {
+    (void)total_taxa;
+    /* count total marked */
+    int total_marked = 0, t;
+    for(t = 0; t < total_taxa; t++) if(marked[t]) total_marked++;
+    if(total_marked < 2) return TRUE;
+    int mono = TRUE;
+    is_monophyletic_subtree(root, marked, total_marked, &mono);
+    return mono;
+    }
+
+/* -----------------------------------------------------------------------
+ * compute_autoweights_clan: assign per-tree weights based on compatibility
+ * with a set of user-defined clans (irrefutable monophyletic groups).
+ *
+ * For each source tree i, w_i = (number of clans compatible with T_i) /
+ * (number of clans testable in T_i), where a clan C is testable in T_i if
+ * at least 2 members of C are present.  Trees with no testable clans receive
+ * weight 1.0.  Weights are normalised so the mean across tagged trees is 1.0.
+ *
+ * Clan file format: one clan per line, taxon names separated by whitespace
+ * or commas.  Lines beginning with '#' are comments.  Taxon names must match
+ * those in the source trees (after any delimiter processing).
+ * ----------------------------------------------------------------------- */
+static void compute_autoweights_clan(const char *clanfile)
+    {
+    int i, j, c, t;
+    FILE *fp = fopen(clanfile, "r");
+    if(!fp)
+        { printf2("autoweight=clan: cannot open clan file '%s'\n", clanfile); return; }
+
+    /* ---- read clans from file ---- */
+    int    max_clans = 256, nclans = 0;
+    int  **clan_ids   = malloc(max_clans * sizeof(int *));
+    int   *clan_sizes = malloc(max_clans * sizeof(int));
+    if(!clan_ids || !clan_sizes)
+        { printf2("autoweight=clan: out of memory\n"); fclose(fp); return; }
+
+    char line[100000];
+    while(fgets(line, sizeof(line), fp))
+        {
+        /* strip newline and skip comments / blank lines */
+        int len = (int)strlen(line);
+        while(len > 0 && (line[len-1] == '\n' || line[len-1] == '\r')) line[--len] = '\0';
+        if(line[0] == '#' || len == 0) continue;
+
+        /* tokenise on whitespace and commas */
+        int  clan_buf[10000], clan_n = 0;
+        char *tok = strtok(line, " \t,");
+        while(tok != NULL)
+            {
+            /* look up taxon name in taxa_names[] */
+            int found = -1;
+            for(t = 0; t < number_of_taxa; t++)
+                if(taxa_names[t] != NULL && strcmp(taxa_names[t], tok) == 0)
+                    { found = t; break; }
+            if(found >= 0 && clan_n < 10000)
+                clan_buf[clan_n++] = found;
+            tok = strtok(NULL, " \t,");
+            }
+
+        if(clan_n < 2) continue;  /* need at least 2 members to be testable */
+
+        if(nclans >= max_clans)
+            {
+            max_clans *= 2;
+            clan_ids   = realloc(clan_ids,   max_clans * sizeof(int *));
+            clan_sizes = realloc(clan_sizes, max_clans * sizeof(int));
+            if(!clan_ids || !clan_sizes)
+                { printf2("autoweight=clan: out of memory\n"); fclose(fp); return; }
+            }
+        clan_ids[nclans]   = malloc(clan_n * sizeof(int));
+        if(!clan_ids[nclans]) { printf2("autoweight=clan: out of memory\n"); fclose(fp); return; }
+        for(t = 0; t < clan_n; t++) clan_ids[nclans][t] = clan_buf[t];
+        clan_sizes[nclans] = clan_n;
+        nclans++;
+        }
+    fclose(fp);
+
+    if(nclans == 0)
+        { printf2("autoweight=clan: no valid clans found in '%s'\n", clanfile); goto cleanup; }
+
+    printf2("  Clan file: %s  (%d clans loaded)\n", clanfile, nclans);
+
+    /* ---- score each source tree ---- */
+    /* For each tree i and clan c:
+     *   testable if >= 2 clan members present in T_i
+     *   compatible if all clan members present in T_i form a clade —
+     *   i.e. none of the non-clan taxa present in T_i appear *between*
+     *   clan members.  We test this via presence_of_taxa: a clan is
+     *   incompatible if any taxon NOT in the clan is present in T_i and
+     *   the clan members do not form a contiguous subtree.
+     *
+     *   Simple testable compatibility check using only presence_of_taxa:
+     *   build the tree in memory and check actual monophyly.
+     */
+    char *temptree = malloc(TREE_LENGTH * sizeof(char));
+    if(!temptree) { printf2("autoweight=clan: out of memory\n"); goto cleanup; }
+
+    /* Save current tree_top */
+    struct taxon *saved_top = tree_top;
+    tree_top = NULL;
+
+    double weight_sum = 0.0;
+    int    n_tagged   = 0;
+
+    for(i = 0; i < Total_fund_trees; i++)
+        {
+        if(!sourcetreetag[i]) { continue; }
+
+        /* Build source tree into tree_top */
+        temptree[0] = '\0';
+        strcpy(temptree, fundamentals[i]);
+        returntree_fullnames(temptree, i);
+        basic_tree_build(1, temptree, tree_top, TRUE);
+        tree_top = temp_top;
+        temp_top = NULL;
+        reset_tree(tree_top);
+
+        int compatible = 0, testable = 0;
+        for(c = 0; c < nclans; c++)
+            {
+            /* count clan members present in this tree */
+            int n_present = 0;
+            for(j = 0; j < clan_sizes[c]; j++)
+                if(presence_of_taxa[i][clan_ids[c][j]] > 0) n_present++;
+            if(n_present < 2) continue;  /* not testable */
+            testable++;
+
+            /* count non-clan taxa present */
+            int n_other = 0;
+            for(t = 0; t < number_of_taxa; t++)
+                {
+                if(presence_of_taxa[i][t] == 0) continue;
+                int in_clan = FALSE;
+                for(j = 0; j < clan_sizes[c]; j++)
+                    if(clan_ids[c][j] == t) { in_clan = TRUE; break; }
+                if(!in_clan) n_other++;
+                }
+
+            /* if no other taxa, clan is trivially compatible */
+            if(n_other == 0) { compatible++; continue; }
+
+            /* mark clan members and check monophyly */
+            int *clan_mark = calloc(number_of_taxa, sizeof(int));
+            if(!clan_mark) continue;
+            for(j = 0; j < clan_sizes[c]; j++)
+                clan_mark[clan_ids[c][j]] = 1;
+
+            int mono = is_monophyletic(tree_top, clan_mark, number_of_taxa);
+            if(mono) compatible++;
+
+            free(clan_mark);
+            }
+
+        if(tree_top != NULL) { dismantle_tree(tree_top); tree_top = NULL; }
+
+        double w = (testable > 0) ? (double)compatible / (double)testable : 1.0;
+        tree_weights[i] = (float)w;
+        weight_sum += w;
+        n_tagged++;
+        }
+
+    free(temptree);
+    tree_top = saved_top;
+
+    /* normalise so mean weight = 1.0 */
+    if(n_tagged > 0 && weight_sum > 0.0)
+        {
+        double scale = (double)n_tagged / weight_sum;
+        for(i = 0; i < Total_fund_trees; i++)
+            if(sourcetreetag[i]) tree_weights[i] = (float)(tree_weights[i] * scale);
+        }
+
+    printf2("  Clan weights assigned to %d trees (normalised to mean=1.0)\n", n_tagged);
+    /* print summary */
+    {
+    float wmin = 1e30f, wmax = -1e30f;
+    for(i = 0; i < Total_fund_trees; i++)
+        if(sourcetreetag[i])
+            { if(tree_weights[i] < wmin) wmin = tree_weights[i];
+              if(tree_weights[i] > wmax) wmax = tree_weights[i]; }
+    printf2("  Weight range: %.4f – %.4f\n", wmin, wmax);
+    }
+
+cleanup:
+    for(c = 0; c < nclans; c++) free(clan_ids[c]);
+    free(clan_ids);
+    free(clan_sizes);
+    }
+
 void execute_command(char *commandline, int do_all)
     {
     int i = 0, j=0, k=0, printfundscores = FALSE, error = FALSE, do_autoprunemono = FALSE;
+    int do_clan_weights = FALSE;
     char c = '\0', temp[NAME_LENGTH], filename[10000], *newbietree, string_num[1000];
+    char clanfile_name[10000];
     int newbietree_alloc = 0;  /* tracks allocated size of newbietree for overflow detection */
 	float num = 0;
+    clanfile_name[0] = '\0';
 
     for(i=0; i<num_commands; i++)
         {
@@ -1982,6 +2231,18 @@ void execute_command(char *commandline, int do_all)
                 printf2("Error: value '%s' not valid for autoprunemono (use yes or no)\n", parsed_command[i+1]);
                 error = TRUE;
                 }
+            }
+        if(strcmp(parsed_command[i], "autoweight") == 0)
+            {
+            if(strcmp(parsed_command[i+1], "clan") == 0)
+                do_clan_weights = TRUE;
+            else
+                printf2("Warning: autoweight value '%s' not recognised (use 'clan')\n", parsed_command[i+1]);
+            }
+        if(strcmp(parsed_command[i], "clanfile") == 0)
+            {
+            strncpy(clanfile_name, parsed_command[i+1], 9999);
+            clanfile_name[9999] = '\0';
             }
         }
 
@@ -2396,7 +2657,16 @@ void execute_command(char *commandline, int do_all)
 			autoprunemono_active = 1;
 			autoprunemono_apply();
 			}
-		
+
+        /* Apply clan-based autoweights if requested */
+        if(do_clan_weights && Total_fund_trees > 0)
+            {
+            if(clanfile_name[0] == '\0')
+                printf2("autoweight=clan: please specify clanfile=<filename>\n");
+            else
+                compute_autoweights_clan(clanfile_name);
+            }
+
 		free(newbietree);
 
         }
@@ -2795,6 +3065,14 @@ void set_parameters(void)
                 { ml_scale = 0; printf2("ML scale set to paper\n"); }
             else
                 printf2("Error: mlscale must be 'paper', 'lust', or 'lnl'\n");
+            }
+        if(strcmp(parsed_command[i], "mlalpha") == 0)
+            {
+            double a = atof(parsed_command[i+1]);
+            if(a < 0.0)
+                printf2("Error: mlalpha must be >= 0 (0=Steel 2008, 1=normalised, >1=downweight large trees)\n");
+            else
+                { ml_alpha = a; printf2("[Experimental] ml_alpha set to %.4f\n", ml_alpha); }
             }
         }
 

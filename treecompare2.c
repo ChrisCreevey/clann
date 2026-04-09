@@ -242,6 +242,7 @@ float *scores_retained_supers = NULL, *partition_number = NULL, num_partitions =
 float *score_of_bootstraps = NULL, *yaptp_results = NULL, largest_length = 0, dup_weight = 1, loss_weight = 1, hgt_weight = 1, BESTSCORE = -1;
 float ml_beta = 1.0f;   /* L.U.st exponential slope parameter (default 1.0) */
 int   ml_scale = 2;     /* ML score scale: 0=paper (raw sum), 1=lust (log10), 2=lnl (default) */
+double ml_alpha = 0.0;  /* [experimental] tree-size scaling exponent: 0=Steel 2008, 1=normalised, >1=downweight large trees */
 int   bsweight = 0;     /* use per-split BS support as weights in sfit/qfit (0=off, 1=on) */
 time_t interval1, interval2;
 double sup=1;
@@ -1109,10 +1110,12 @@ static void boot_free_thread_state(int ntrees, int ntaxa)
  * ----------------------------------------------------------------------- */
 void mlscores(void)
     {
-    int i;
+    int i, k;
     char outfile_name[10000];
-    int  scan = 100, user_set_scanmin = FALSE, user_set_scanmax = FALSE;
-    float scanmin = 0.0f, scanmax = 0.0f;
+    int    scan = 100, user_set_scanmin = FALSE, user_set_scanmax = FALSE;
+    int    do_alpha = FALSE, ascan = 50;
+    double alpha_max = 3.0;
+    float  scanmin = 0.0f, scanmax = 0.0f;
     outfile_name[0] = '\0';
 
     for(i = 1; i < num_commands; i++)
@@ -1125,6 +1128,12 @@ void mlscores(void)
             { scanmin = (float)atof(parsed_command[i+1]); user_set_scanmin = TRUE; i++; }
         else if(strcmp(parsed_command[i], "scanmax") == 0 && i + 1 < num_commands)
             { scanmax = (float)atof(parsed_command[i+1]); user_set_scanmax = TRUE; i++; }
+        else if(strcmp(parsed_command[i], "alpha") == 0 && i + 1 < num_commands)
+            { if(strcmp(parsed_command[i+1], "auto") == 0) do_alpha = TRUE; i++; }
+        else if(strcmp(parsed_command[i], "ascan") == 0 && i + 1 < num_commands)
+            { ascan = atoi(parsed_command[i+1]); i++; }
+        else if(strcmp(parsed_command[i], "alphamax") == 0 && i + 1 < num_commands)
+            { alpha_max = atof(parsed_command[i+1]); i++; }
         }
 
     if(criterion != 7)
@@ -1136,10 +1145,22 @@ void mlscores(void)
 
     if(fund_bipart_sets == NULL) rf_precompute_fund_biparts();
 
-    float *dists = malloc(Total_fund_trees * sizeof(float));
-    if(!dists) { printf2("mlscores: out of memory\n"); return; }
+    /* Compute raw (unscaled) RF distances once; reused for both beta and alpha estimation */
+    float *dists_raw = malloc(Total_fund_trees * sizeof(float));
+    if(!dists_raw) { printf2("mlscores: out of memory\n"); return; }
+    compute_raw_rf_dists(dists_raw);
 
-    compute_raw_rf_dists(dists);
+    /* Apply current global ml_alpha scaling for the standard beta MLE */
+    float *dists = malloc(Total_fund_trees * sizeof(float));
+    if(!dists) { free(dists_raw); printf2("mlscores: out of memory\n"); return; }
+    for(i = 0; i < Total_fund_trees; i++)
+        {
+        if(!sourcetreetag[i]) { dists[i] = 0.0f; continue; }
+        int ki = fund_bipart_sets[i].count;
+        dists[i] = (ml_alpha != 0.0 && ki > 0)
+                   ? (float)(dists_raw[i] / pow((double)ki, ml_alpha))
+                   : dists_raw[i];
+        }
 
     double W = 0.0, WD = 0.0;
     for(i = 0; i < Total_fund_trees; i++)
@@ -1153,19 +1174,31 @@ void mlscores(void)
 
     if(WD <= 0.0)
         {
+        free(dists_raw);
         printf2("  mlscores: all source trees have zero RF distance to supertree; beta is undefined\n");
         return;
         }
 
     double beta_hat = W / WD;
-    double logL_hat = W * log(beta_hat) - beta_hat * WD;
+    /* Full joint lnL = W*log(beta) - beta*WD - alpha*P
+     * where P = sum_i log(k_i) for active trees with k_i > 0.
+     * When alpha=0, penalty=0 and this reduces to Steel & Rodrigo (2008). */
+    double lnl_penalty = 0.0;
+    if(ml_alpha != 0.0 && fund_bipart_sets != NULL)
+        for(i = 0; i < Total_fund_trees; i++)
+            if(sourcetreetag[i] && fund_bipart_sets[i].count > 0)
+                lnl_penalty += log((double)fund_bipart_sets[i].count);
+    double logL_hat = W * log(beta_hat) - beta_hat * WD - ml_alpha * lnl_penalty;
     ml_beta = (float)beta_hat;
 
     printf2("  Source trees     : %d   Weighted RF sum : %.4f\n", Total_fund_trees, (float)WD);
+    if(ml_alpha != 0.0)
+        printf2("  ml_alpha (active): %.4f  (RF distances scaled by k_i^%.4f)\n", ml_alpha, ml_alpha);
     printf2("  Optimal beta MLE : %.6f\n", (float)beta_hat);
     printf2("  Log-likelihood   : %.4f\n", (float)logL_hat);
     printf2("  ml_beta updated to %.6f (used for all subsequent hs/boot runs)\n", ml_beta);
 
+    /* --- Beta profile outfile ------------------------------------------- */
     if(outfile_name[0] != '\0')
         {
         if(!user_set_scanmin) scanmin = (float)(beta_hat / 100.0);
@@ -1181,7 +1214,12 @@ void mlscores(void)
             {
             fprintf(fp, "# mlscores beta profile log-likelihood\n");
             fprintf(fp, "# Source trees: %d   Weighted RF sum: %.6f\n", Total_fund_trees, WD);
+            if(ml_alpha != 0.0)
+                fprintf(fp, "# ml_alpha: %.6f (RF distances scaled by k_i^alpha)\n", ml_alpha);
             fprintf(fp, "# Optimal beta (MLE): %.6f   Log-likelihood: %.6f\n", beta_hat, logL_hat);
+            if(ml_alpha != 0.0)
+                fprintf(fp, "# alpha penalty (alpha*sum_log_k): %.6f  (constant offset included in logL)\n",
+                        ml_alpha * lnl_penalty);
             fprintf(fp, "# beta\tlogL\n");
             double log_min = log((double)scanmin);
             double log_max = log((double)scanmax);
@@ -1189,13 +1227,112 @@ void mlscores(void)
             for(i = 0; i < scan; i++)
                 {
                 double beta_k = exp(log_min + i * step);
-                double logL_k = W * log(beta_k) - beta_k * WD;
+                double logL_k = W * log(beta_k) - beta_k * WD - ml_alpha * lnl_penalty;
                 fprintf(fp, "%.6f\t%.6f\n", beta_k, logL_k);
                 }
             fclose(fp);
-            printf2("  Profile written to: %s\n", outfile_name);
+            printf2("  Beta profile written to: %s\n", outfile_name);
             }
         }
+
+    /* --- Alpha grid search -----------------------------------------------
+     * Model: P(d_i|S,beta,alpha) = (beta/k_i^alpha) * exp(-(beta/k_i^alpha)*d_i)
+     * log L(beta,alpha) = n*log(beta) - alpha*penalty - beta*WD(alpha)
+     * penalty = sum_i log(k_i)   [from normalisation constant of each exponential]
+     * Profiling beta: beta_hat(alpha) = W / WD(alpha)
+     * log L(alpha)   = W*log(W/WD(alpha)) - W - alpha*penalty
+     * The penalty term prevents alpha running to infinity.
+     * --------------------------------------------------------------------- */
+    if(do_alpha)
+        {
+        if(ascan < 2) ascan = 2;
+        if(alpha_max <= 0.0) alpha_max = 3.0;
+
+        /* Penalty: sum of log(k_i) over tagged trees with splits */
+        double penalty = 0.0;
+        for(i = 0; i < Total_fund_trees; i++)
+            if(sourcetreetag[i] && fund_bipart_sets[i].count > 0)
+                penalty += log((double)fund_bipart_sets[i].count);
+
+        double best_logL_a  = -1e300;
+        double best_alpha   = 0.0;
+        double best_beta_a  = beta_hat;
+
+        /* Store grid for output */
+        double *g_alpha = malloc(ascan * sizeof(double));
+        double *g_beta  = malloc(ascan * sizeof(double));
+        double *g_logL  = malloc(ascan * sizeof(double));
+        int     g_n     = 0;
+
+        if(!g_alpha || !g_beta || !g_logL)
+            { printf2("mlscores alpha: out of memory\n"); }
+        else
+            {
+            for(k = 0; k < ascan; k++)
+                {
+                double alpha_k = (double)k * alpha_max / (ascan - 1);
+                double WD_k = 0.0;
+                for(i = 0; i < Total_fund_trees; i++)
+                    {
+                    if(!sourcetreetag[i]) continue;
+                    int ki = fund_bipart_sets[i].count;
+                    double d_k = (alpha_k != 0.0 && ki > 0)
+                                 ? dists_raw[i] / pow((double)ki, alpha_k)
+                                 : dists_raw[i];
+                    WD_k += (double)tree_weights[i] * d_k;
+                    }
+                if(WD_k <= 0.0) continue;
+                double beta_k = W / WD_k;
+                double logL_k = W * log(beta_k) - beta_k * WD_k - alpha_k * penalty;
+                g_alpha[g_n] = alpha_k;
+                g_beta[g_n]  = beta_k;
+                g_logL[g_n]  = logL_k;
+                g_n++;
+                if(logL_k > best_logL_a)
+                    { best_logL_a = logL_k; best_alpha = alpha_k; best_beta_a = beta_k; }
+                }
+
+            ml_alpha = best_alpha;
+            ml_beta  = (float)best_beta_a;
+
+            printf2("\n  --- Tree-size scaling exponent (alpha) estimation ---\n");
+            printf2("  Penalty term (sum log k_i) : %.4f\n", penalty);
+            printf2("  Alpha grid  : 0 to %.2f  (%d points)\n", alpha_max, ascan);
+            printf2("  Optimal alpha (MLE) : %.4f\n", best_alpha);
+            printf2("  Optimal beta  (MLE) : %.6f\n", best_beta_a);
+            printf2("  Joint log-likelihood: %.4f\n", best_logL_a);
+            printf2("  ml_alpha updated to %.4f\n", ml_alpha);
+            printf2("  ml_beta  updated to %.6f\n", ml_beta);
+
+            /* Append alpha profile to outfile if requested */
+            if(outfile_name[0] != '\0' && g_n > 0)
+                {
+                FILE *fp2 = fopen(outfile_name, "a");
+                if(!fp2)
+                    { printf2("mlscores: cannot reopen '%s' for alpha append\n", outfile_name); }
+                else
+                    {
+                    fprintf(fp2, "\n# --- alpha profile ---\n");
+                    fprintf(fp2, "# Model: log L(alpha) = W*log(W/WD(alpha)) - W - alpha*penalty\n");
+                    fprintf(fp2, "# Penalty (sum log k_i): %.6f\n", penalty);
+                    fprintf(fp2, "# Optimal alpha (MLE): %.6f\n", best_alpha);
+                    fprintf(fp2, "# Optimal beta  (MLE): %.6f\n", best_beta_a);
+                    fprintf(fp2, "# Joint log-likelihood: %.6f\n", best_logL_a);
+                    fprintf(fp2, "# alpha\tbeta\tlogL\n");
+                    for(k = 0; k < g_n; k++)
+                        fprintf(fp2, "%.6f\t%.6f\t%.6f\n", g_alpha[k], g_beta[k], g_logL[k]);
+                    fclose(fp2);
+                    printf2("  Alpha profile appended to: %s\n", outfile_name);
+                    }
+                }
+            }
+
+        free(g_alpha);
+        free(g_beta);
+        free(g_logL);
+        }
+
+    free(dists_raw);
     }
 
 void bootstrap_search(void)
@@ -1951,7 +2088,7 @@ static void run_usertrees_ml_tests(
     float best_score_ml = all_total_scores[best_idx];
 
     printf2("\nML topology tests  (T1 = tree %d,  lnL = %.4f,  beta = %.2f)\n",
-            best_idx+1, -(double)best_score_ml, ml_beta);
+            best_idx+1, ml_display_score(best_score_ml), ml_beta);
     printf2("=============================================================================\n");
     printf2("  %-8s  %-10s  %-12s  %-14s  %-12s\n",
             "Tree", "lnL", "WinSites p", "KH z / p", "SH p");
@@ -2513,7 +2650,7 @@ void usertrees_search(void)
 						}
 					}
 				
-				if(outfile != NULL) fprintf(outfile, "%s\t[%f]\n", retained_supers[i], scores_retained_supers[i] );
+				if(outfile != NULL) fprintf(outfile, "%s\t[%f]\n", retained_supers[i], ml_display_score(scores_retained_supers[i]) );
 				tree_coordinates(retained_supers[i], FALSE, TRUE, FALSE, -1);
 				printf2("\nSupertree %d of %d %s = %f\n", i+1, j, ml_score_label(), ml_display_score(scores_retained_supers[i]) );
 				i++;
@@ -2744,12 +2881,53 @@ static void hs_free_thread_state(void)
 
 
 /* --- ML display helpers --------------------------------------------------
- * ml_display_score: for lnl scale, negate the internal minimisation score
- *   to give the conventional lnL (negative = better, as in IQ-TREE/RAxML).
- * ml_score_label:   returns the column header "lnL" or "score".
+ * ml_display_score: convert internal minimisation score to the true joint MLE lnL.
+ *
+ *   Internal score s = ml_beta * WD(alpha)  (positive, minimised during search).
+ *
+ *   The true joint MLE lnL for any topology is obtained by profiling out beta:
+ *
+ *     beta_hat = W / WD(alpha)  =>  lnL = W*log(beta_hat) - W - alpha*P
+ *
+ *   Since s = ml_beta * WD, we have WD = s / ml_beta, and therefore
+ *     beta_hat = W * ml_beta / s
+ *
+ *   So:  lnL = W * log(W * ml_beta / s) - W - alpha * P
+ *
+ *   This is identical to what mlscores reports for any given topology, making
+ *   values directly comparable across hs runs and mlscores calls regardless of
+ *   what the fixed ml_beta happens to be.  The search objective is unaffected
+ *   because minimising s is monotonically equivalent to maximising this lnL.
+ *
+ *   When alpha=0 and ml_beta=beta_hat, this reduces to Steel & Rodrigo (2008).
+ *   For paper/lust scales the score is returned as-is (no transformation).
+ *
+ * ml_score_label:  returns column header "lnL" or "score".
  */
 static float ml_display_score(float s)
-    { return (criterion == 7 && ml_scale == 2) ? -s : s; }
+    {
+    if(!(criterion == 7 && ml_scale == 2)) return s;
+    /* W = sum of active tree weights */
+    double W = 0.0;
+    int _i;
+    for(_i = 0; _i < Total_fund_trees; _i++)
+        if(sourcetreetag[_i]) W += (double)tree_weights[_i];
+    /* alpha penalty: P = sum_i log(k_i) for active trees with k_i > 0 */
+    double penalty = 0.0;
+    if(ml_alpha != 0.0 && fund_bipart_sets != NULL)
+        for(_i = 0; _i < Total_fund_trees; _i++)
+            if(sourcetreetag[_i] && fund_bipart_sets[_i].count > 0)
+                penalty += log((double)fund_bipart_sets[_i].count);
+    /* True MLE lnL: W*log(W*ml_beta/s) - W - alpha*P
+     * Guard against s<=0 (degenerate: all source trees perfectly agree). */
+    double lnL;
+    double sd = (double)s;
+    if(W > 0.0 && ml_beta > 0.0 && sd > 0.0)
+        lnL = W * log(W * (double)ml_beta / sd) - W - ml_alpha * penalty;
+    else
+        lnL = -sd - ml_alpha * penalty;   /* fallback for s==0 edge case */
+    return (float)lnL;
+    }
 
 static const char *ml_score_label(void)
     { return (criterion == 7 && ml_scale == 2) ? "lnL" : "score"; }
@@ -3073,6 +3251,7 @@ void heuristic_search(int user, int print, int sample, int nreps)
     int i=0, j=0, k=0, l=0, swaps = 0, keep = 0, nbest = 0, start = 2, error = FALSE, numswaps = 1000000, different=TRUE, do_histogram = FALSE, here = FALSE, **taxa_comp = NULL, bins = 20, found = FALSE, missing_method = 1, random_num, numspectries = 2, numgenetries = 2, nthreads = 1;
     hs_maxskips_is_auto = 1;   /* reset: auto-scale N² unless user sets maxskips= this call */
     char *tree = NULL, c = '\0', *best_tree = NULL, *temptree = NULL, **starths = NULL, userfilename[10000], useroutfile[10000], histogramfile_name[10000];
+    char *memory_start_tree = NULL;  /* saved copy of retained_supers[0] for start=memory (captured at parse time, before the retained_supers reset) */
     FILE *userfile = NULL, *outfile = NULL, *paupfile = NULL, *histogram_file = NULL;
     float distance=0, number=0, *startscores = NULL, used_weights = 0;
     int *saved_tags = NULL;  /* for single-copy auto-filter */
@@ -3373,22 +3552,39 @@ void heuristic_search(int user, int print, int sample, int nreps)
 						error = TRUE;
 						}
 					}
+				else if(strcmp(parsed_command[i+1], "memory") == 0)
+					{
+					if(trees_in_memory > 0 && retained_supers[0][0] != '\0')
+						{
+						start = 3;
+						/* Capture NOW — retained_supers[0] is cleared before the search loop */
+						memory_start_tree = malloc(TREE_LENGTH * sizeof(char));
+						if(!memory_start_tree) memory_error(75);
+						strcpy(memory_start_tree, retained_supers[0]);
+						printf2("Starting tree: best tree currently in memory\n");
+						}
+					else
+						{
+						printf2("Warning: no tree currently in memory — falling back to NJ starting tree\n");
+						start = 2;
+						}
+					}
 				else
 					{
 					start = 1;
 					if((userfile = fopen(parsed_command[i+1], "r")) == NULL)
 						{
-						
+
 						printf2("Error opening file named %s\n", parsed_command[i+1]);
 						error = TRUE;
-						
+
 						}
 					else
 						{
 						printf2("opened user file %s\n", parsed_command[i+1]);
 						strcpy(userfilename, parsed_command[i+1]);
 						}
-					} 
+					}
 				}
 			}
 		if(criterion==5)
@@ -3492,7 +3688,7 @@ void heuristic_search(int user, int print, int sample, int nreps)
 			if(strcmp(parsed_command[i+1], "lnl") == 0 || strcmp(parsed_command[i+1], "lnL") == 0)
 				{
 				ml_scale = 2;
-				printf2("ML scoring: lnL display (reported as lnL = -beta*d)\n");
+				printf2("ML scoring: lnL display (reported as true Steel lnL = W*log(beta) - beta*WD)\n");
 				}
 			else if(strcmp(parsed_command[i+1], "lust") == 0 || strcmp(parsed_command[i+1], "LUSt") == 0)
 				{
@@ -3506,6 +3702,17 @@ void heuristic_search(int user, int print, int sample, int nreps)
 				}
 			else
 				printf2("Error: mlscale must be 'paper', 'lust', or 'lnl'\n");
+			}
+		if(strcmp(parsed_command[i], "mlalpha") == 0)
+			{
+			double a = atof(parsed_command[i+1]);
+			if(a < 0.0)
+				printf2("Error: mlalpha must be >= 0 (0=Steel 2008, 1=normalised, >1=downweight large trees)\n");
+			else
+				{
+				ml_alpha = a;
+				printf2("[Experimental] ml_alpha set to %.4f (tree-size scaling exponent)\n", ml_alpha);
+				}
 			}
 		if(strcmp(parsed_command[i], "bsweight") == 0)
 			{
@@ -3596,8 +3803,9 @@ void heuristic_search(int user, int print, int sample, int nreps)
                     printf2("Robinson-Foulds distance (RF)\n");
                     break;
                 case 7:
-                    printf2("Maximum likelihood supertree (beta=%.2f, scale=%s)\n",
-                            ml_beta, ml_scale == 1 ? "lust (Akanni et al. 2014)" : ml_scale == 2 ? "lnl" : "Steel & Rodrigo 2008");
+                    printf2("Maximum likelihood supertree (beta=%.4f, alpha=%.4f, scale=%s)\n",
+                            ml_beta, ml_alpha,
+                            ml_scale == 1 ? "lust (Akanni et al. 2014)" : ml_scale == 2 ? "lnl" : "Steel & Rodrigo 2008");
                     break;
                 default:
                     printf2("Maximum quartet fit (QFIT)\n");
@@ -3667,6 +3875,8 @@ void heuristic_search(int user, int print, int sample, int nreps)
 					if(missing_method == 1) printf2(" 4 point condition distances\n");
 					if(missing_method == 0) printf2(" ultrametric distances\n");
 					}
+				if(start == 3)
+					printf2("Best tree currently in memory (start=memory)\n");
 				if(user) printf2("\tOutput file = %s\n", useroutfile);
                 }
             }
@@ -4351,6 +4561,206 @@ void heuristic_search(int user, int print, int sample, int nreps)
 						}
 						}
 					}
+				else if(start == 3)  /* use best tree currently in memory as starting point */
+					{
+					if(criterion == 2 || criterion == 3 || criterion == 6 || criterion == 7) rf_precompute_fund_biparts();
+					if(signal(SIGINT, controlc2) == SIG_ERR)
+						printf2("An error occurred while setting a signal handler\n");
+					for(i = 0; i < Total_fund_trees; i++) sourcetree_scores[i] = -1;
+					if(print) printf2("\nHeuristic search progress indicator:\n");
+					/* Pre-compute nreps starting trees in numbered format (mirrors NJ start path).
+					 * Rep 0    = memory tree converted to numbered format (exact in-memory topology).
+					 * Reps 1+  = same base tree with 10-30 random string_SPR moves applied, giving
+					 *             independent starting points around the known-best neighbourhood.
+					 * returntree() is called inside the parallel/sequential loops (as for start=nj)
+					 * to convert numbered trees to named format immediately before do_search(). */
+					{
+					char **start_trees   = malloc(nreps * sizeof(char *));
+					char *mem_numbered   = malloc(TREE_LENGTH * sizeof(char));
+
+					/* Convert named memory tree → numbered Newick once.
+					 * Use memory_start_tree (saved at parse time) — retained_supers[0]
+					 * has been cleared by the reset loop before we reach this point. */
+					if(tree_top != NULL) { dismantle_tree(tree_top); tree_top = NULL; }
+					temp_top = NULL;
+					tree_build(1, memory_start_tree, tree_top, TRUE, -1, 0);
+					tree_top = temp_top;
+					temp_top = NULL;
+					number_tree(tree_top, 0);
+					strcpy(mem_numbered, "");
+					print_tree(tree_top, mem_numbered);
+					strcat(mem_numbered, ";");
+
+					for(k = 0; k < nreps; k++)
+						{
+						start_trees[k] = malloc(TREE_LENGTH * sizeof(char));
+						strcpy(start_trees[k], mem_numbered);
+						if(k > 0)
+							{
+							/* Perturb with 10-30 random SPR moves for diversity */
+							random_num = 10 + (int)fmod(rand(), 21);
+							for(j = 0; j < random_num; j++)
+								string_SPR(start_trees[k]);
+							}
+						}
+					free(mem_numbered);
+
+#ifdef _OPENMP
+					if(nthreads > 1)
+						{
+						/* ---- Parallel start==3 nreps loop (mirrors start==2 parallel path) ---- */
+						int    prl_i;
+						char **par_retained = NULL;
+						float *par_scores   = NULL;
+						int    par_n        = 10;
+						float  par_best     = -1;
+						int    par_NUMSWAPS = 0;
+						VisitedSet *par_visited_set = vs_create(1024);
+
+						par_retained = malloc(par_n * sizeof(char *));
+						par_scores   = malloc(par_n * sizeof(float));
+						for(k = 0; k < par_n; k++)
+							{
+							par_retained[k] = malloc(TREE_LENGTH * sizeof(char));
+							par_retained[k][0] = '\0';
+							par_scores[k] = -1;
+							}
+
+						par_progress_best    = -1.0f;
+						par_last_print_score = -1.0f;
+						par_last_progress_time = 0;
+						par_search_start     = time(NULL);
+						g_hs_fundamentals_snap = fundamentals;
+						g_hs_presence_snap     = presence_of_taxa;
+						g_hs_fund_scores_snap  = fund_scores;
+						g_hs_num_comp_snap     = number_of_comparisons;
+						g_hs_fund_bipart_snap  = fund_bipart_sets;
+						#pragma omp parallel num_threads(nthreads) default(shared) \
+						        private(prl_i)
+							{
+							char *thr_tree = malloc(TREE_LENGTH * sizeof(char));
+							int  thr_swaps = 0;
+
+							hs_alloc_thread_state();
+
+							#pragma omp for schedule(dynamic, 1)
+							for(prl_i = 0; prl_i < nreps; prl_i++)
+								{
+								if(user_break) continue;
+								hs_par_rep = prl_i + 1;
+								strcpy(thr_tree, start_trees[prl_i]);
+								returntree(thr_tree);
+								thr_swaps += do_search(thr_tree, TRUE, FALSE, numswaps, outfile, numspectries, numgenetries);
+
+								#pragma omp critical (par_progress_print)
+									{
+									int new_best = 0;
+									if(sprscore >= 0.0f && (par_progress_best < 0.0f || sprscore < par_progress_best))
+										{ par_progress_best = sprscore; new_best = 1; }
+									double hs_el = difftime(time(NULL), par_search_start);
+									int    hs_em = (int)(hs_el / 60), hs_es = (int)hs_el % 60;
+									const char *stop_reason;
+									if(user_break)                                           stop_reason = "interrupted";
+									else if(rep_abandon)                                     stop_reason = "suboptimal";
+									else if(hs_maxskips > 0 && skip_streak >= hs_maxskips)  stop_reason = "maxskips";
+									else if(tried_regrafts >= numswaps)                      stop_reason = "maxswaps";
+									else                                                     stop_reason = "converged";
+									if(hsprint)
+										{
+										if(sprscore >= 0.0f)
+											printf2("  [%2d:%02d]  rep %d/%d  %s= %s%.6f  (%d spr/tbr + %d nni swaps, %s)\n",
+												hs_em, hs_es, prl_i+1, nreps,
+												ml_score_label(), new_best ? "* " : "  ",
+												ml_display_score(sprscore),
+												tried_regrafts, nni_swaps, stop_reason);
+										else
+											printf2("  [%2d:%02d]  rep %d/%d  (no new topologies)  (%d spr/tbr + %d nni swaps, %s)\n",
+												hs_em, hs_es, prl_i+1, nreps,
+												tried_regrafts, nni_swaps, stop_reason);
+										fflush(stdout);
+										}
+									}
+								}
+
+							#pragma omp critical (hs_merge)
+								{
+								hs_merge_results(&par_retained, &par_scores, &par_n, &par_best, &par_NUMSWAPS, par_visited_set);
+								swaps += thr_swaps;
+								}
+
+							hs_free_thread_state();
+							free(thr_tree);
+							}
+						/* ---- end parallel region ---- */
+
+						for(k = 0; k < number_retained_supers; k++)
+							{ if(retained_supers[k]) free(retained_supers[k]); }
+						free(retained_supers);
+						free(scores_retained_supers);
+						retained_supers        = par_retained;
+						scores_retained_supers = par_scores;
+						number_retained_supers = par_n;
+						BESTSCORE              = par_best;
+						NUMSWAPS               = par_NUMSWAPS;
+						swaps = (int)par_visited_set->count + (par_visited_set->zero_present ? 1 : 0);
+						vs_free(par_visited_set);
+
+						if(user_break && print)
+							printf2("All threads stopped — writing best tree to output file.\n");
+
+						/* Re-allocate super_scores for post-loop use (freed by hs_free_thread_state). */
+						super_scores = malloc(number_of_taxa * sizeof(int *));
+						for(k = 0; k < number_of_taxa; k++)
+							super_scores[k] = malloc(number_of_taxa * sizeof(int));
+						}
+					else
+#endif
+						{
+						/* ---- Sequential nreps loop ---- */
+						par_progress_best = -1.0f;
+						par_last_progress_time = 0;
+						par_search_start  = time(NULL);
+						for(i = 0; i < nreps && !user_break; i++)
+							{
+							strcpy(tree, start_trees[i]);
+							returntree(tree);
+							swaps += do_search(tree, TRUE, print, numswaps, outfile, numspectries, numgenetries);
+							{
+							int new_best = 0;
+							if(sprscore >= 0.0f && (par_progress_best < 0.0f || sprscore < par_progress_best))
+								{ par_progress_best = sprscore; new_best = 1; }
+							double hs_el = difftime(time(NULL), par_search_start);
+							int    hs_em = (int)(hs_el / 60), hs_es = (int)hs_el % 60;
+							const char *stop_reason;
+							if(user_break)                                           stop_reason = "interrupted";
+							else if(rep_abandon)                                     stop_reason = "suboptimal";
+							else if(hs_maxskips > 0 && skip_streak >= hs_maxskips)  stop_reason = "maxskips";
+							else if(tried_regrafts >= numswaps)                      stop_reason = "maxswaps";
+							else                                                     stop_reason = "converged";
+							if(hsprint)
+								{
+								if(sprscore >= 0.0f)
+									printf2("  [%2d:%02d]  rep %d/%d  %s= %s%.6f  (%d spr/tbr + %d nni swaps, %s)\n",
+										hs_em, hs_es, i+1, nreps,
+										ml_score_label(), new_best ? "* " : "  ",
+										ml_display_score(sprscore),
+										tried_regrafts, nni_swaps, stop_reason);
+								else
+									printf2("  [%2d:%02d]  rep %d/%d  (no new topologies)  (%d spr/tbr + %d nni swaps, %s)\n",
+										hs_em, hs_es, i+1, nreps,
+										tried_regrafts, nni_swaps, stop_reason);
+								fflush(stdout);
+								}
+							}
+							}
+						}
+
+					for(k = 0; k < nreps; k++) free(start_trees[k]);
+					free(start_trees);
+					free(memory_start_tree);
+					memory_start_tree = NULL;
+					}
+					}
 				else/* if we are to use a tree (or trees) from a file as the starting tree */
 					{
 					if(criterion == 2 || criterion == 3 || criterion == 6 || criterion == 7) rf_precompute_fund_biparts();
@@ -4585,7 +4995,7 @@ void heuristic_search(int user, int print, int sample, int nreps)
 					
                     while(scores_retained_supers[i] != -1)
                         {
-                        if(outfile != NULL) fprintf(outfile, "%s\t[%f]\n", retained_supers[i], scores_retained_supers[i] );
+                        if(outfile != NULL) fprintf(outfile, "%s\t[%f]\n", retained_supers[i], ml_display_score(scores_retained_supers[i]) );
                         tree_coordinates(retained_supers[i], FALSE, TRUE, FALSE, -1);
                         printf2("\nSupertree %d of %d %s = %f\n", i+1, j, ml_score_label(), ml_display_score(scores_retained_supers[i]) );
 						
@@ -6851,10 +7261,11 @@ static int evaluate_candidate(const char *candidate_nwk,
 	else if(criterion == 7)
 		tmpscore = compare_trees_ml(TRUE);
 
-	/* Landscape recording */
+	/* Landscape recording — store display-scale score (lnL for ML, raw for others)
+	 * so the TSV column is on the same scale as all other reported values. */
 	if(g_landscape_file[0])
 		lm_record(landscape_map ? landscape_map : g_landscape_map,
-		          topo_h, tmpscore, best_tree);
+		          topo_h, ml_display_score(tmpscore), best_tree);
 
 	/* --- Bookkeeping --- */
 	/* Always initialise sprscore at the start of a new rep */
@@ -8073,7 +8484,7 @@ int regraft(struct taxon * position, struct taxon * newbie, struct taxon * last,
                                     /* Record this topology in the landscape map (first visit: store score+newick) */
                                     if(g_landscape_file[0])
                                         lm_record(landscape_map ? landscape_map : g_landscape_map,
-                                                  topo_h, tmpscore, best_tree);
+                                                  topo_h, ml_display_score(tmpscore), best_tree);
 
                                     /*printf("scores_retained_supers[0] = %f\n", scores_retained_supers[0]); */
                                     if(scores_retained_supers[0] == -1 || sprscore == -1)  /* Then this is the first tree to be checked */

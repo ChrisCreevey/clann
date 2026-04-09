@@ -62,6 +62,7 @@ extern float *score_of_bootstraps, *yaptp_results;
 extern float  largest_length, dup_weight, loss_weight, hgt_weight, BESTSCORE;
 extern float  ml_beta;
 extern int    ml_scale;
+extern double ml_alpha;  /* [experimental] tree-size scaling exponent: 0=Steel 2008, 1=normalised, >1=downweight large trees */
 extern time_t interval1, interval2;
 extern double sup;
 extern char   saved_supertree[TREE_LENGTH];

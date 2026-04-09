@@ -1032,6 +1032,9 @@ float compare_trees_ml(int spr)
                                                      fund_bipart_sets[i].hashes, gene_cnt);
             /* Raw RF distance — no normalisation */
             float d = (float)(super_cnt + gene_cnt - 2 * shared);
+            /* [experimental] tree-size scaling: divide by k_i^alpha (alpha=0: Steel 2008, alpha=1: normalised) */
+            if(ml_alpha != 0.0 && gene_cnt > 0)
+                d /= (float)pow((double)gene_cnt, ml_alpha);
             /* Negated log-likelihood: -ln L = beta * d  (Steel & Rodrigo 2008 formula).
              * mlscale=lust multiplies by log10(e) to match Akanni et al. 2014 (L.U.st). */
             float ml_score = (float)(ml_beta * d * (ml_scale == 1 ? LOG10E : 1.0f)) * tree_weights[i];
