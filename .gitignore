@@ -84,6 +84,7 @@ all_raxml_bestTrees.txt
 prune_test.txt
 prune_test.txt_info.txt
 prune_test.txt_info.txt.zip
+html/*
 
 # -----------------------------------------------------------------------------
 # Examples output (generated files inside examples/, not source inputs)

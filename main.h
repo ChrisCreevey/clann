@@ -30,6 +30,7 @@
  * ----------------------------------------------------------------------- */
 void  heuristic_search(int user, int print, int sample, int nreps);
 void  bootstrap_search(void);
+void  mlscores(void);
 void  alltrees_search(int user);
 void  usertrees_search(void);
 void  yaptp_search(void);

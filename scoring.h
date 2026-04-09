@@ -56,5 +56,6 @@ float compare_trees_sfit(int spr);
 float compare_trees_qfit(int spr);
 float MRC(char *supertree);
 float quartet_compatibility(char *supertree);
+void  compute_raw_rf_dists(float *dists_out);
 
 #endif /* CLANN_SCORING_H */

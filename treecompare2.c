@@ -85,6 +85,7 @@ int find_taxa(struct taxon * position, char *query);
 int number_tree(struct taxon * position, int num);
 void dismantle_tree(struct taxon * position);
 void bootstrap_search(void);
+void mlscores(void);
 void memory_error(int error_num);
 void print_named_tree(struct taxon * position, char *tree);
 void print_fullnamed_tree(struct taxon * position, char *tree, int fundtreenum);
@@ -1093,6 +1094,109 @@ static void boot_free_thread_state(int ntrees, int ntaxa)
     }
 #endif /* _OPENMP */
 
+
+/* -----------------------------------------------------------------------
+ * mlscores: estimate the Steel (2008) ML beta parameter for the current
+ * supertree and source trees using the closed-form MLE beta = W / WD,
+ * where W = sum of tree weights and WD = weighted sum of RF distances.
+ * Updates ml_beta so subsequent hs/boot runs use the estimated value.
+ *
+ * Options:
+ *   outfile=<file>   write beta log-likelihood profile (log-uniform scan)
+ *   scan=<n>         number of points in profile (default 100)
+ *   scanmin=<f>      lower bound of beta scan (default beta/100)
+ *   scanmax=<f>      upper bound of beta scan (default beta*10)
+ * ----------------------------------------------------------------------- */
+void mlscores(void)
+    {
+    int i;
+    char outfile_name[10000];
+    int  scan = 100, user_set_scanmin = FALSE, user_set_scanmax = FALSE;
+    float scanmin = 0.0f, scanmax = 0.0f;
+    outfile_name[0] = '\0';
+
+    for(i = 1; i < num_commands; i++)
+        {
+        if(strcmp(parsed_command[i], "outfile") == 0 && i + 1 < num_commands)
+            { strncpy(outfile_name, parsed_command[i+1], 9999); outfile_name[9999] = '\0'; i++; }
+        else if(strcmp(parsed_command[i], "scan") == 0 && i + 1 < num_commands)
+            { scan = atoi(parsed_command[i+1]); i++; }
+        else if(strcmp(parsed_command[i], "scanmin") == 0 && i + 1 < num_commands)
+            { scanmin = (float)atof(parsed_command[i+1]); user_set_scanmin = TRUE; i++; }
+        else if(strcmp(parsed_command[i], "scanmax") == 0 && i + 1 < num_commands)
+            { scanmax = (float)atof(parsed_command[i+1]); user_set_scanmax = TRUE; i++; }
+        }
+
+    if(criterion != 7)
+        { printf2("  mlscores: criterion must be set to ml (use 'set criterion ml')\n"); return; }
+    if(number_of_taxa == 0 || Total_fund_trees == 0)
+        { printf2("Error: You need to load source trees before using this command\n"); return; }
+    if(tree_top == NULL)
+        { printf2("  mlscores: no supertree in memory (run hs or nj first)\n"); return; }
+
+    if(fund_bipart_sets == NULL) rf_precompute_fund_biparts();
+
+    float *dists = malloc(Total_fund_trees * sizeof(float));
+    if(!dists) { printf2("mlscores: out of memory\n"); return; }
+
+    compute_raw_rf_dists(dists);
+
+    double W = 0.0, WD = 0.0;
+    for(i = 0; i < Total_fund_trees; i++)
+        {
+        if(!sourcetreetag[i]) continue;
+        double w = (double)tree_weights[i];
+        W  += w;
+        WD += w * (double)dists[i];
+        }
+    free(dists);
+
+    if(WD <= 0.0)
+        {
+        printf2("  mlscores: all source trees have zero RF distance to supertree; beta is undefined\n");
+        return;
+        }
+
+    double beta_hat = W / WD;
+    double logL_hat = W * log(beta_hat) - beta_hat * WD;
+    ml_beta = (float)beta_hat;
+
+    printf2("  Source trees     : %d   Weighted RF sum : %.4f\n", Total_fund_trees, (float)WD);
+    printf2("  Optimal beta MLE : %.6f\n", (float)beta_hat);
+    printf2("  Log-likelihood   : %.4f\n", (float)logL_hat);
+    printf2("  ml_beta updated to %.6f (used for all subsequent hs/boot runs)\n", ml_beta);
+
+    if(outfile_name[0] != '\0')
+        {
+        if(!user_set_scanmin) scanmin = (float)(beta_hat / 100.0);
+        if(!user_set_scanmax) scanmax = (float)(beta_hat * 10.0);
+        if(scanmin <= 0.0f) scanmin = 1e-6f;
+        if(scanmax <= scanmin) scanmax = scanmin * 1000.0f;
+        if(scan < 2) scan = 2;
+
+        FILE *fp = fopen(outfile_name, "w");
+        if(!fp)
+            { printf2("mlscores: cannot open '%s' for writing\n", outfile_name); }
+        else
+            {
+            fprintf(fp, "# mlscores beta profile log-likelihood\n");
+            fprintf(fp, "# Source trees: %d   Weighted RF sum: %.6f\n", Total_fund_trees, WD);
+            fprintf(fp, "# Optimal beta (MLE): %.6f   Log-likelihood: %.6f\n", beta_hat, logL_hat);
+            fprintf(fp, "# beta\tlogL\n");
+            double log_min = log((double)scanmin);
+            double log_max = log((double)scanmax);
+            double step    = (log_max - log_min) / (scan - 1);
+            for(i = 0; i < scan; i++)
+                {
+                double beta_k = exp(log_min + i * step);
+                double logL_k = W * log(beta_k) - beta_k * WD;
+                fprintf(fp, "%.6f\t%.6f\n", beta_k, logL_k);
+                }
+            fclose(fp);
+            printf2("  Profile written to: %s\n", outfile_name);
+            }
+        }
+    }
 
 void bootstrap_search(void)
     {

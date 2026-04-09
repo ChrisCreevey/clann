@@ -949,10 +949,20 @@ int main(int argc, char *argv[])
 		                                                                                                                            		}
 		                                                                                                                        		}
 		                                                                                                                        	else
+	                                                                                                                        	    {
+	                                                                                                                        	    if(strcmp(parsed_command[0], "mlscores") == 0)
+	                                                                                                                        	        {
+	                                                                                                                        	        if(num_commands == 2 && parsed_command[1][0] == '?')
+	                                                                                                                        	            print_commands(31);
+	                                                                                                                        	        else
+	                                                                                                                        	            mlscores();
+	                                                                                                                        	        }
+	                                                                                                                        	    else
 	                                                                                                                        			printf2("Error: command not known.\n\tType help at the prompt to get a list of available commands.\n");
+	                                                                                                                        	    }
 	                                                                                                                        		}
 	                                                                                                                        	}
-	                                                                                                                        }  
+	                                                                                                                        }
                                                                                                                         }
 																													}
 																												}
@@ -1635,6 +1645,25 @@ void print_commands(int num)
         else printf2("off");
         printf2("\n\tfile\t\t<output file name>\t\t%s", logfile_name);
         }
+	 if(num == 31)
+		{
+		printf2("\nmlscores\t[outfile=<file>] [scan=<n>] [scanmin=<f>] [scanmax=<f>]\n\n");
+		printf2("  Estimates the Steel & Rodrigo (2008) ML beta parameter for the current\n");
+		printf2("  supertree by closed-form MLE: beta = W / WD, where W is the sum of\n");
+		printf2("  source-tree weights and WD is the weighted sum of RF distances.\n");
+		printf2("  Updates ml_beta so subsequent hs/boot runs use the estimated value.\n\n");
+		printf2("\tOptions\t\tSettings\t\t\tCurrent\n");
+        printf2("\t===========================================================\n");
+		printf2("\n\toutfile\t\t<filename>\t\t\t*none\n");
+		printf2("\t\t\tWrite beta log-likelihood profile\n");
+		printf2("\tscan\t\t<integer>\t\t\t*100\n");
+		printf2("\t\t\tNumber of points in profile\n");
+		printf2("\tscanmin\t\t<float>\t\t\t\t*beta/100\n");
+		printf2("\t\t\tLower bound of beta scan\n");
+		printf2("\tscanmax\t\t<float>\t\t\t\t*beta*10\n");
+		printf2("\t\t\tUpper bound of beta scan\n");
+		}
+
 	 if(num == 30)
 		{
 		printf2("\nsavetrees\trange | size | namecontains | containstaxa | score \n\n");
@@ -2661,6 +2690,7 @@ void set_parameters(void)
             if(strcmp(parsed_command[i+1], "mrp") == 0 || strcmp(parsed_command[i+1], "MRP") == 0)
                 {
                 if(criterion != 1) printf2("Scoring criterion set to matrix representation using parsimony (MRP)\n");
+                else printf2("Scoring criterion is already set to MRP\n");
                 criterion = 1;
                 }
             else
@@ -2668,6 +2698,7 @@ void set_parameters(void)
                 if(strcmp(parsed_command[i+1], "dfit") == 0 || strcmp(parsed_command[i+1], "DFIT") == 0)
                     {
                     if(criterion != 0) printf2("Scoring criterion set to best distance fit (DFIT)\n");
+                    else printf2("Scoring criterion is already set to DFIT\n");
                     criterion = 0;
                     }
                 else
@@ -2675,6 +2706,7 @@ void set_parameters(void)
                     if(strcmp(parsed_command[i+1], "sfit") == 0 || strcmp(parsed_command[i+1], "SFIT") == 0)
                         {
                         if(criterion != 2) printf2("Scoring criterion set to maximum split fit (SFIT)\n");
+                        else printf2("Scoring criterion is already set to SFIT\n");
                         criterion = 2;
                         }
                     else
@@ -2682,6 +2714,7 @@ void set_parameters(void)
                         if(strcmp(parsed_command[i+1], "qfit") == 0 || strcmp(parsed_command[i+1], "QFIT") == 0)
                             {
                             if(criterion != 3) printf2("Scoring criterion set to maximum quartet fit (QFIT)\n");
+                            else printf2("Scoring criterion is already set to QFIT\n");
                             criterion = 3;
                             }
                         else
@@ -2689,6 +2722,7 @@ void set_parameters(void)
                             if(strcmp(parsed_command[i+1], "avcon") == 0 || strcmp(parsed_command[i+1], "AVCON") == 0)
                                 {
 								if(criterion != 4) printf2("Scoring criterion set to average consensus (AVCON)\n");
+								else printf2("Scoring criterion is already set to AVCON\n");
 								criterion = 4;
                                 }
                             else
@@ -2696,17 +2730,20 @@ void set_parameters(void)
 								if(strcmp(parsed_command[i+1], "recon") == 0 || strcmp(parsed_command[i+1], "RECON") == 0)
 									{
 									if(criterion != 5) printf2("Scoring criterion set to duplication and loss reconstruction (RECON)\n");
+									else printf2("Scoring criterion is already set to RECON\n");
 									criterion = 5;
 									}
 								else if(strcmp(parsed_command[i+1], "rf") == 0 || strcmp(parsed_command[i+1], "RF") == 0)
 									{
 									if(criterion != 6) printf2("Scoring criterion set to Robinson-Foulds distance (RF)\n");
+									else printf2("Scoring criterion is already set to RF\n");
 									criterion = 6;
 									}
 								else if(strcmp(parsed_command[i+1], "ml") == 0 || strcmp(parsed_command[i+1], "ML") == 0
 									     || strcmp(parsed_command[i+1], "lust") == 0)
 									{
 									if(criterion != 7) printf2("Scoring criterion set to ML supertree likelihood (Steel & Rodrigo 2008)\n");
+									else printf2("Scoring criterion is already set to ML\n");
 									criterion = 7;
 									}
 								else

@@ -843,6 +843,60 @@ void rf_precompute_fund_biparts(void)
         }
     }
 
+/* -----------------------------------------------------------------------
+ * compute_raw_rf_dists: raw (unnormalized, unweighted) RF distance from
+ * tree_top to each source tree, stored in dists_out[i].
+ * Requires rf_precompute_fund_biparts() to have been called.
+ * dists_out must be allocated by caller (Total_fund_trees floats).
+ * ----------------------------------------------------------------------- */
+void compute_raw_rf_dists(float *dists_out)
+    {
+    int i, j;
+    char *pruned_nwk = malloc(TREE_LENGTH * sizeof(char));
+    if(!pruned_nwk) memory_error(90);
+    char *tmp        = malloc(TREE_LENGTH * sizeof(char));
+    if(!tmp) { free(pruned_nwk); memory_error(91); }
+    uint64_t *super_bp = malloc(number_of_taxa * sizeof(uint64_t));
+    if(!super_bp) { free(pruned_nwk); free(tmp); memory_error(92); }
+
+    for(i = 0; i < Total_fund_trees; i++)
+        {
+        dists_out[i] = 0.0f;
+        if(!sourcetreetag[i]) continue;
+
+        int ntaxa_i = 0;
+        uint64_t total_hash = 0;
+        for(j = 0; j < number_of_taxa; j++)
+            if(presence_of_taxa[i][j]) { ntaxa_i++; total_hash ^= taxon_hash_vals[j]; }
+        if(ntaxa_i < 4) continue;
+
+        prune_tree(tree_top, i);
+        shrink_tree(tree_top);
+
+        pruned_nwk[0] = '\0';
+        if(print_pruned_tree(tree_top, 0, pruned_nwk, FALSE, 0) > 1)
+            {
+            tmp[0] = '\0';
+            strcpy(tmp, "("); strcat(tmp, pruned_nwk); strcat(tmp, ")");
+            strcpy(pruned_nwk, tmp);
+            }
+        strcat(pruned_nwk, ";");
+
+        while(unroottree(pruned_nwk));
+        int super_cnt = collect_biparts_newick(pruned_nwk, total_hash, super_bp);
+        reset_tree(tree_top);
+
+        int gene_cnt = fund_bipart_sets[i].count;
+        int shared   = bipart_intersection_count(super_bp, super_cnt,
+                                                 fund_bipart_sets[i].hashes, gene_cnt);
+        dists_out[i] = (float)(super_cnt + gene_cnt - 2 * shared);
+        }
+
+    free(super_bp);
+    free(tmp);
+    free(pruned_nwk);
+    }
+
 float compare_trees_rf(int spr)
     {
     int i, j;
