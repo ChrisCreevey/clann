@@ -358,9 +358,11 @@ hs [options]
 |--------|--------|---------|-------------|
 | `mlbeta` | `<float > 0>` | 1.0 | Slope parameter β for the exponential likelihood model P(G_i\|T) ∝ e^(−β·d_i). Larger values make the likelihood sharper and penalise RF distance more strongly. Can also be set via `set mlbeta=<value>`. |
 | `mlscale` | `paper`, `lust`, `lnl` | `lnl` | Scoring convention. `lnl` reports lnL = −β·Σd_i (negative, standard ML convention). `paper` reports the Steel & Rodrigo (2008) positive score directly. `lust` uses Akanni *et al.* (2014) log₁₀ scaling. See `set mlscale` for details. |
-| `mlalpha` | `<float ≥ 0>` | `0.0` | **[Experimental]** Tree-size scaling exponent α. Each source tree's RF distance is divided by k_i^α before scoring, where k_i is the number of internal splits in that tree. α = 0 recovers the original Steel & Rodrigo (2008) model; α = 1 fully normalises by split count; α > 1 actively down-weights large trees beyond normalisation. Can be estimated from data using `mlscores alpha=auto`. See note below. |
+| `mleta` | `<float ≥ 0>` | `0.0` | **[Experimental]** Tree-size scaling exponent η. Each source tree's RF distance is divided by k_i^η before scoring, where k_i is the number of internal splits in that tree. η = 0 recovers the original Steel & Rodrigo (2008) model; η = 1 fully normalises by split count; η > 1 actively down-weights large trees beyond normalisation. Can be estimated from data using `mlscores eta=auto`. See note below. |
 
-> **mlalpha — experimental tree-size scaling exponent.** The Steel model implicitly treats each split disagreement as an independent event with equal cost, meaning source trees with more splits contribute proportionally more to WD and therefore dominate β̂ and the search objective. The `mlalpha` parameter addresses this by scaling each tree's RF distance by k_i^α before scoring, derived from the probability model P(d_i | S, β, α) = (β/k_i^α) · exp(−(β/k_i^α) · d_i). This gives log L(β, α) = n·log(β) − α·Σ log(k_i) − β·Σ w_i·d_i/k_i^α. The term −α·Σ log(k_i) is a natural penalty from the model's normalisation constant that prevents α from growing without bound, unlike ad hoc weighting schemes. α = 0 is the original Steel (2008) model; α = 1 gives equal per-tree contribution regardless of size; α > 1 actively down-weights large trees (appropriate if large trees are less reliable due to ILS or estimation error). The optimal α can be estimated jointly with β using `mlscores alpha=auto`, which performs a 1-D grid search since β profiles analytically at each fixed α. If the optimal supertree topology changes substantially between α = 0 and the estimated α*, tree-size heterogeneity is a confounding factor in your dataset.
+> **mleta — experimental tree-size scaling exponent.** The Steel model implicitly treats each split disagreement as an independent event with equal cost, meaning source trees with more splits contribute proportionally more to WD and therefore dominate β̂ and the search objective. The `mleta` parameter addresses this by scaling each tree's RF distance by k_i^η before scoring, derived from the probability model P(d_i | S, β, η) = (β/k_i^η) · exp(−(β/k_i^η) · d_i). This gives log L(β, η) = n·log(β) − η·Σ log(k_i) − β·Σ w_i·d_i/k_i^η. The term −η·Σ log(k_i) is a natural penalty from the model's normalisation constant that prevents η from growing without bound, unlike ad hoc weighting schemes. η = 0 is the original Steel (2008) model; η = 1 gives equal per-tree contribution regardless of size; η > 1 actively down-weights large trees (appropriate if large trees are less reliable due to ILS or estimation error). The optimal η can be estimated jointly with β using `mlscores eta=auto`, which performs a 1-D grid search since β profiles analytically at each fixed η. If the optimal supertree topology changes substantially between η = 0 and the estimated η*, tree-size heterogeneity is a confounding factor in your dataset.
+>
+> **Note on naming:** Clann's η is a *tree-size scaling exponent* and should not be confused with the normalising constant α used in Steel & Rodrigo (2008) or the L.U.St paper (Akanni *et al.* 2014). Those papers use α to denote the partition function Z_T — a completely different quantity. Clann uses η to avoid this naming clash.
 
 #### Options for recon criterion (criterion 5) only
 
@@ -505,6 +507,7 @@ usertrees <filename> [options]
 | `tests` | `yes`, `no` | `no` | Run ML topology tests after scoring. Only valid with `criterion=ml`. |
 | `nboot` | `<integer>` | `1000` | Bootstrap replicates for the SH test. |
 | `testsfile` | `<filename>` | `mltest_results.txt` | File for per-gene-tree δ breakdown table. |
+| `normcorrect` | *(flag)* | off | Apply the Bryant & Steel (2008) normalising constant correction to all reported lnL values. Only active with `criterion=ml` and `mlscale=lnl`. See below. |
 
 **Weight options** are criterion-dependent (same as `hs`).
 
@@ -548,11 +551,48 @@ A tab-separated table with full per-gene-tree details is written to `testsfile`.
 - Kishino, H. & Hasegawa, M. (1989) *Evaluation of the maximum likelihood estimate of the evolutionary tree topologies from DNA sequence data.* J. Mol. Evol. 29:170–179.
 - Shimodaira, H. & Hasegawa, M. (1999) *Multiple comparisons of log-likelihoods with applications to phylogenetic inference.* Mol. Biol. Evol. 16:1114–1116.
 
+#### Normalising constant correction (`normcorrect`)
+
+The Steel & Rodrigo (2008) model requires a normalising constant Z_T so that probabilities sum to 1 over all possible source trees:
+
+    Z_T = Σ_{T'} exp(−β · d(T', T|X_i))
+
+The original Steel & Rodrigo (2008) paper omitted this constant when deriving the ML condition (noted by Bryant & Steel 2008), arguing it was approximately equal across candidate supertrees. Bryant & Steel (2008) showed that Z_T does vary with tree shape — specifically with the number of *cherries* (pairs of adjacent leaves) in T|X_i — and derived an efficient O(n⁵) algorithm to compute it exactly.
+
+The corrected per-source-tree lnL contribution is:
+
+    lnL_i = w_i · [log(β) + log(w_i) − β · d_i − log(Z_{T|X_i})]
+
+Without `normcorrect`, `log(Z_{T|X_i})` is always zero (ignored). With `normcorrect`, Clann subtracts this term using a truncated large-β expansion:
+
+    log Z_T ≈ log(1 + b₂ε + b₄(c_T)ε²)
+
+where ε = e^{−2β}, b₂ = 2(n−3) is the number of trees at RF distance 2 (same for all binary trees), and b₄(c_T) = 4·C(n−3,2) + 6·(n−6+c_T) depends on the cherry count c_T of T|X_i. This approximation is accurate for β > ~1.5.
+
+**When does it matter?** Bryant & Steel (2008) showed that ignoring Z_T changes the *ranking* of candidate supertrees only when |log Z_{T1} − log Z_{T2}| ≥ 2β. The topology-dependent part of log Z is driven entirely by the cherry count and enters only at second order (ε²), so:
+
+| Dataset | Effect on rankings | Effect on absolute lnL |
+|---|---|---|
+| Source trees n ≤ 20, any β | Negligible | Minor |
+| Source trees n = 33, β ≈ 1.9 | Negligible (Δ ≈ 0.05 ≪ 2β = 3.8) | ~0.83 nats per tree |
+| Source trees n ≥ 50, β ≈ 1.5 | Potentially significant | Large |
+
+The correction is most valuable when comparing absolute lnL values between datasets or between different methods. It does **not** affect KH/SH test statistics (differences in lnL cancel the topology-independent part of log Z), but makes the absolute lnL more interpretable and model-correct.
+
+```
+usertrees candidates.ph normcorrect
+usertrees candidates.ph tests=yes normcorrect
+```
+
+**Reference:**
+- Bryant, D. & Steel, M. (2008) *Computing the distribution of a tree metric.* arXiv:0810.0868.
+
 **Examples:**
 ```
 usertrees mytopology.ph
 usertrees candidates.ph outfile=scores.txt printsourcescores=yes
 usertrees candidates.ph tests=yes nboot=1000
+usertrees candidates.ph tests=yes normcorrect          # correct absolute lnL
 ```
 
 ---
