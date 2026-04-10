@@ -1214,10 +1214,13 @@ void print_commands(int num)
 		printf2("\n\t  (prune monophyletic same-species clades from multicopy trees at load time;");
 		printf2("\n\t   trees that become single-copy after pruning join the supertree pool;");
 		printf2("\n\t   original unpruned trees are preserved for 'reconstruct')");
-		printf2("\n\tautoweight\tclan\t\t\t\t*off");
-		printf2("\n\t  (assign per-tree weights based on compatibility with user-defined clans;");
-		printf2("\n\t   requires clanfile=<file>; weights = fraction of testable clans compatible,");
-		printf2("\n\t   normalised to mean=1.0; use with criterion=ml and mlscores)");
+		printf2("\n\tautoweight\tclan | splitviol\t\t*off");
+		printf2("\n\t  clan:      weights = compatible_clans / testable_clans  (per-clan metric)");
+		printf2("\n\t  splitviol: weights = 1 - violated_splits / total_splits  (per-split metric)");
+		printf2("\n\t  Both modes report split score range alongside weights.");
+		printf2("\n\t  A split is 'violated' only when non-clan taxa appear on both sides");
+		printf2("\n\t  (internal clan splits are not counted as violations).");
+		printf2("\n\t  Requires clanfile=<file>.");
 		printf2("\n\tclanfile\t<filename>\t\t\t*none");
 		printf2("\n\t  (clan file: one clan per line, taxon names separated by spaces or commas,");
 		printf2("\n\t   lines beginning with '#' are comments)");
@@ -1663,7 +1666,7 @@ void print_commands(int num)
 	 if(num == 31)
 		{
 		printf2("\nmlscores\t[outfile=<file>] [scan=<n>] [scanmin=<f>] [scanmax=<f>]\n");
-		printf2("\t\t[alpha=auto] [ascan=<n>] [alphamax=<f>]\n\n");
+		printf2("\t\t[alpha=auto] [ascan=<n>] [alphamax=<f>] [fixbeta]\n\n");
 		printf2("  Estimates the Steel & Rodrigo (2008) ML beta parameter for the current\n");
 		printf2("  supertree by closed-form MLE: beta = W / WD, where W is the sum of\n");
 		printf2("  source-tree weights and WD is the weighted sum of (scaled) RF distances.\n");
@@ -1689,6 +1692,9 @@ void print_commands(int num)
 		printf2("\t\t\t\tNumber of points in alpha grid\n");
 		printf2("\talphamax\t\t<float>\t\t\t\t*3.0\n");
 		printf2("\t\t\t\tUpper bound of alpha grid\n");
+		printf2("\tfixbeta\t\t\t(no value)\t\t\t*off\n");
+		printf2("\t\t\t\tHold beta fixed at current ml_beta; do not recompute.\n");
+		printf2("\t\t\t\tWith alpha=auto: grid-search alpha with beta fixed.\n");
 		}
 
 	 if(num == 30)
@@ -1980,6 +1986,90 @@ static int is_monophyletic(struct taxon *root, const int *marked, int total_taxa
     }
 
 /* -----------------------------------------------------------------------
+ * count_clan_and_total_in_subtree: recursive helper used by
+ * count_violated_splits.  Returns the number of clan members in the
+ * subtree rooted at pos, and stores the total leaf count (all taxa,
+ * clan or not) in *total_out.
+ * ----------------------------------------------------------------------- */
+static int count_clan_and_total_in_subtree(struct taxon *pos,
+                                            const int *clan_ids, int clan_size,
+                                            int *total_out)
+    {
+    if(pos == NULL) { *total_out = 0; return 0; }
+    if(pos->daughter == NULL)   /* leaf */
+        {
+        *total_out = 1;
+        int j;
+        for(j = 0; j < clan_size; j++)
+            if(clan_ids[j] == pos->name) return 1;
+        return 0;
+        }
+    int clan_cnt = 0, tot = 0;
+    struct taxon *ch = pos->daughter;
+    while(ch != NULL)
+        {
+        int sub_tot = 0;
+        clan_cnt += count_clan_and_total_in_subtree(ch, clan_ids, clan_size, &sub_tot);
+        tot += sub_tot;
+        ch = ch->next_sibling;
+        }
+    *total_out = tot;
+    return clan_cnt;
+    }
+
+/* -----------------------------------------------------------------------
+ * count_violated_splits: recursively count internal nodes (splits) in the
+ * tree rooted at pos and determine how many are violated by at least one
+ * clan.
+ *
+ * A split {L | R} violates clan C only when non-clan taxa appear on BOTH
+ * sides alongside clan members — i.e. the split genuinely crosses the clan
+ * boundary in both directions.  Internal splits within a monophyletic clan
+ * (where one side consists entirely of clan members) are NOT counted as
+ * violations.
+ *
+ * Formal condition: split {L|R} violates clan C iff all four hold:
+ *   clan_in  >= 1  (clan member(s) in subtree L)
+ *   clan_out >= 1  (clan member(s) in R)
+ *   non_clan_in  >= 1  (non-clan taxon in L)
+ *   non_clan_out >= 1  (non-clan taxon in R)
+ *
+ * n_present[c] = number of clan c members present in this source tree.
+ * n_taxa_tree  = total taxa present in this source tree.
+ * violated and total are incremented in-place.
+ * ----------------------------------------------------------------------- */
+static void count_violated_splits(struct taxon *pos,
+                                   int **clan_ids, int *clan_sizes,
+                                   int *n_present, int nclans,
+                                   int n_taxa_tree,
+                                   int *violated, int *total)
+    {
+    if(pos == NULL || pos->daughter == NULL) return;  /* skip leaves */
+    (*total)++;
+    int c, is_viol = 0;
+    for(c = 0; c < nclans && !is_viol; c++)
+        {
+        if(n_present[c] < 2) continue;
+        int total_in = 0;
+        int clan_in  = count_clan_and_total_in_subtree(pos, clan_ids[c],
+                                                        clan_sizes[c], &total_in);
+        int clan_out     = n_present[c] - clan_in;
+        int non_clan_in  = total_in - clan_in;
+        int non_clan_out = (n_taxa_tree - total_in) - clan_out;
+        if(clan_in >= 1 && clan_out >= 1 && non_clan_in >= 1 && non_clan_out >= 1)
+            is_viol = 1;
+        }
+    if(is_viol) (*violated)++;
+    struct taxon *ch = pos->daughter;
+    while(ch != NULL)
+        {
+        count_violated_splits(ch, clan_ids, clan_sizes, n_present, nclans,
+                               n_taxa_tree, violated, total);
+        ch = ch->next_sibling;
+        }
+    }
+
+/* -----------------------------------------------------------------------
  * compute_autoweights_clan: assign per-tree weights based on compatibility
  * with a set of user-defined clans (irrefutable monophyletic groups).
  *
@@ -1992,7 +2082,11 @@ static int is_monophyletic(struct taxon *root, const int *marked, int total_taxa
  * or commas.  Lines beginning with '#' are comments.  Taxon names must match
  * those in the source trees (after any delimiter processing).
  * ----------------------------------------------------------------------- */
-static void compute_autoweights_clan(const char *clanfile)
+/* mode 0 = clan-compatibility weight (compatible/testable clans)
+ * mode 1 = split-violation weight (1 - violated_splits/total_splits)
+ * Both modes always compute and report the split-violation metric; the
+ * chosen mode determines which value is stored in tree_weights[]. */
+static void compute_autoweights_clan(const char *clanfile, int mode)
     {
     int i, j, c, t;
     FILE *fp = fopen(clanfile, "r");
@@ -2074,6 +2168,15 @@ static void compute_autoweights_clan(const char *clanfile)
     double weight_sum = 0.0;
     int    n_tagged   = 0;
 
+    /* per-tree split scores for summary (allocated once, reused) */
+    double *split_scores = malloc(Total_fund_trees * sizeof(double));
+    if(!split_scores) { printf2("autoweight=clan: out of memory\n"); free(temptree); tree_top = saved_top; goto cleanup; }
+    for(i = 0; i < Total_fund_trees; i++) split_scores[i] = 1.0;
+
+    /* pre-compute n_present[c] for all clans per tree (reused array) */
+    int *np = malloc(nclans * sizeof(int));
+    if(!np) { printf2("autoweight=clan: out of memory\n"); free(split_scores); free(temptree); tree_top = saved_top; goto cleanup; }
+
     for(i = 0; i < Total_fund_trees; i++)
         {
         if(!sourcetreetag[i]) { continue; }
@@ -2087,14 +2190,18 @@ static void compute_autoweights_clan(const char *clanfile)
         temp_top = NULL;
         reset_tree(tree_top);
 
+        /* pre-compute clan member counts for this tree */
+        for(c = 0; c < nclans; c++)
+            {
+            np[c] = 0;
+            for(j = 0; j < clan_sizes[c]; j++)
+                if(presence_of_taxa[i][clan_ids[c][j]] > 0) np[c]++;
+            }
+
         int compatible = 0, testable = 0;
         for(c = 0; c < nclans; c++)
             {
-            /* count clan members present in this tree */
-            int n_present = 0;
-            for(j = 0; j < clan_sizes[c]; j++)
-                if(presence_of_taxa[i][clan_ids[c][j]] > 0) n_present++;
-            if(n_present < 2) continue;  /* not testable */
+            if(np[c] < 2) continue;  /* not testable */
             testable++;
 
             /* count non-clan taxa present */
@@ -2123,35 +2230,51 @@ static void compute_autoweights_clan(const char *clanfile)
             free(clan_mark);
             }
 
+        /* compute split-violation metric for this tree */
+        int n_taxa_tree = 0;
+        for(t = 0; t < number_of_taxa; t++)
+            if(presence_of_taxa[i][t] > 0) n_taxa_tree++;
+        int vsplit = 0, tsplit = 0;
+        count_violated_splits(tree_top, clan_ids, clan_sizes, np, nclans,
+                               n_taxa_tree, &vsplit, &tsplit);
+        split_scores[i] = (tsplit > 0) ? 1.0 - (double)vsplit / (double)tsplit : 1.0;
+
         if(tree_top != NULL) { dismantle_tree(tree_top); tree_top = NULL; }
 
-        double w = (testable > 0) ? (double)compatible / (double)testable : 1.0;
-        tree_weights[i] = (float)w;
-        weight_sum += w;
+        double clan_w  = (testable > 0) ? (double)compatible / (double)testable : 1.0;
+        double split_w = split_scores[i];
+        tree_weights[i] = (float)(mode == 1 ? split_w : clan_w);
+        weight_sum += tree_weights[i];
         n_tagged++;
         }
 
+    free(np);
     free(temptree);
     tree_top = saved_top;
 
-    /* normalise so mean weight = 1.0 */
-    if(n_tagged > 0 && weight_sum > 0.0)
-        {
-        double scale = (double)n_tagged / weight_sum;
-        for(i = 0; i < Total_fund_trees; i++)
-            if(sourcetreetag[i]) tree_weights[i] = (float)(tree_weights[i] * scale);
-        }
+    if(mode == 1)
+        printf2("  Split-violation weights assigned to %d trees (range 0–1: fraction of splits not violated by any clan)\n", n_tagged);
+    else
+        printf2("  Clan weights assigned to %d trees (range 0–1: fraction of clans supported)\n", n_tagged);
 
-    printf2("  Clan weights assigned to %d trees (normalised to mean=1.0)\n", n_tagged);
-    /* print summary */
+    /* print weight range and split score range */
     {
     float wmin = 1e30f, wmax = -1e30f;
+    double smin = 1e30, smax = -1e30;
     for(i = 0; i < Total_fund_trees; i++)
         if(sourcetreetag[i])
-            { if(tree_weights[i] < wmin) wmin = tree_weights[i];
-              if(tree_weights[i] > wmax) wmax = tree_weights[i]; }
+            {
+            if(tree_weights[i] < wmin) wmin = tree_weights[i];
+            if(tree_weights[i] > wmax) wmax = tree_weights[i];
+            if(split_scores[i] < smin) smin = split_scores[i];
+            if(split_scores[i] > smax) smax = split_scores[i];
+            }
     printf2("  Weight range: %.4f – %.4f\n", wmin, wmax);
+    if(mode == 0)
+        printf2("  Split score range: %.4f – %.4f  (fraction of splits not violated by any clan)\n", (float)smin, (float)smax);
     }
+
+    free(split_scores);
 
 cleanup:
     for(c = 0; c < nclans; c++) free(clan_ids[c]);
@@ -2162,7 +2285,7 @@ cleanup:
 void execute_command(char *commandline, int do_all)
     {
     int i = 0, j=0, k=0, printfundscores = FALSE, error = FALSE, do_autoprunemono = FALSE;
-    int do_clan_weights = FALSE;
+    int do_clan_weights = 0;  /* 0=off, 1=clan-compatibility, 2=split-violation */
     char c = '\0', temp[NAME_LENGTH], filename[10000], *newbietree, string_num[1000];
     char clanfile_name[10000];
     int newbietree_alloc = 0;  /* tracks allocated size of newbietree for overflow detection */
@@ -2235,9 +2358,11 @@ void execute_command(char *commandline, int do_all)
         if(strcmp(parsed_command[i], "autoweight") == 0)
             {
             if(strcmp(parsed_command[i+1], "clan") == 0)
-                do_clan_weights = TRUE;
+                do_clan_weights = 1;
+            else if(strcmp(parsed_command[i+1], "splitviol") == 0)
+                do_clan_weights = 2;
             else
-                printf2("Warning: autoweight value '%s' not recognised (use 'clan')\n", parsed_command[i+1]);
+                printf2("Warning: autoweight value '%s' not recognised (use 'clan' or 'splitviol')\n", parsed_command[i+1]);
             }
         if(strcmp(parsed_command[i], "clanfile") == 0)
             {
@@ -2659,12 +2784,12 @@ void execute_command(char *commandline, int do_all)
 			}
 
         /* Apply clan-based autoweights if requested */
-        if(do_clan_weights && Total_fund_trees > 0)
+        if(do_clan_weights > 0 && Total_fund_trees > 0)
             {
             if(clanfile_name[0] == '\0')
-                printf2("autoweight=clan: please specify clanfile=<filename>\n");
+                printf2("autoweight=clan/splitviol: please specify clanfile=<filename>\n");
             else
-                compute_autoweights_clan(clanfile_name);
+                compute_autoweights_clan(clanfile_name, do_clan_weights - 1);
             }
 
 		free(newbietree);

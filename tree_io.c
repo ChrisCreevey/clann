@@ -1203,14 +1203,11 @@ void showtrees(int savet)
 			            }
 			        strcat(temptree, ";");
 
+			        fprintf(showfile, "%s[%f]", temptree, tree_weights[j]);
 			        if(strcmp(tree_names[j], "") != 0)
-			        	fprintf(showfile, "%s[%s", temptree, tree_names[j]);
+			        	fprintf(showfile, "[%s]\n", tree_names[j]);
 			        else
-			        	fprintf(showfile, "%s[%d", temptree, j);
-			        if(trees_in_memory > 0)
-						fprintf(showfile, " %f]\n", sourcetree_scores[j]);
-					else
-						fprintf(showfile, "]\n");
+			        	fprintf(showfile, "[%d]\n", j+1);
 					}
 				if(display)
 					{

@@ -1113,7 +1113,7 @@ void mlscores(void)
     int i, k;
     char outfile_name[10000];
     int    scan = 100, user_set_scanmin = FALSE, user_set_scanmax = FALSE;
-    int    do_alpha = FALSE, ascan = 50;
+    int    do_alpha = FALSE, ascan = 50, fix_beta = FALSE;
     double alpha_max = 3.0;
     float  scanmin = 0.0f, scanmax = 0.0f;
     outfile_name[0] = '\0';
@@ -1134,6 +1134,8 @@ void mlscores(void)
             { ascan = atoi(parsed_command[i+1]); i++; }
         else if(strcmp(parsed_command[i], "alphamax") == 0 && i + 1 < num_commands)
             { alpha_max = atof(parsed_command[i+1]); i++; }
+        else if(strcmp(parsed_command[i], "fixbeta") == 0)
+            { fix_beta = TRUE; }
         }
 
     if(criterion != 7)
@@ -1179,7 +1181,7 @@ void mlscores(void)
         return;
         }
 
-    double beta_hat = W / WD;
+    double beta_hat = fix_beta ? (double)ml_beta : W / WD;
     /* Full joint lnL = W*log(beta) - beta*WD - alpha*P
      * where P = sum_i log(k_i) for active trees with k_i > 0.
      * When alpha=0, penalty=0 and this reduces to Steel & Rodrigo (2008). */
@@ -1189,14 +1191,23 @@ void mlscores(void)
             if(sourcetreetag[i] && fund_bipart_sets[i].count > 0)
                 lnl_penalty += log((double)fund_bipart_sets[i].count);
     double logL_hat = W * log(beta_hat) - beta_hat * WD - ml_alpha * lnl_penalty;
-    ml_beta = (float)beta_hat;
+    if(!fix_beta) ml_beta = (float)beta_hat;
 
     printf2("  Source trees     : %d   Weighted RF sum : %.4f\n", Total_fund_trees, (float)WD);
     if(ml_alpha != 0.0)
         printf2("  ml_alpha (active): %.4f  (RF distances scaled by k_i^%.4f)\n", ml_alpha, ml_alpha);
-    printf2("  Optimal beta MLE : %.6f\n", (float)beta_hat);
-    printf2("  Log-likelihood   : %.4f\n", (float)logL_hat);
-    printf2("  ml_beta updated to %.6f (used for all subsequent hs/boot runs)\n", ml_beta);
+    if(fix_beta)
+        {
+        printf2("  Beta (fixed)     : %.6f\n", beta_hat);
+        printf2("  Log-likelihood   : %.4f\n", (float)logL_hat);
+        printf2("  ml_beta unchanged (fixbeta active)\n");
+        }
+    else
+        {
+        printf2("  Optimal beta MLE : %.6f\n", (float)beta_hat);
+        printf2("  Log-likelihood   : %.4f\n", (float)logL_hat);
+        printf2("  ml_beta updated to %.6f (used for all subsequent hs/boot runs)\n", ml_beta);
+        }
 
     /* --- Beta profile outfile ------------------------------------------- */
     if(outfile_name[0] != '\0')
@@ -1256,7 +1267,7 @@ void mlscores(void)
 
         double best_logL_a  = -1e300;
         double best_alpha   = 0.0;
-        double best_beta_a  = beta_hat;
+        double best_beta_a  = beta_hat;  /* stays fixed throughout if fix_beta */
 
         /* Store grid for output */
         double *g_alpha = malloc(ascan * sizeof(double));
@@ -1282,7 +1293,7 @@ void mlscores(void)
                     WD_k += (double)tree_weights[i] * d_k;
                     }
                 if(WD_k <= 0.0) continue;
-                double beta_k = W / WD_k;
+                double beta_k = fix_beta ? beta_hat : W / WD_k;
                 double logL_k = W * log(beta_k) - beta_k * WD_k - alpha_k * penalty;
                 g_alpha[g_n] = alpha_k;
                 g_beta[g_n]  = beta_k;
@@ -1293,16 +1304,22 @@ void mlscores(void)
                 }
 
             ml_alpha = best_alpha;
-            ml_beta  = (float)best_beta_a;
+            if(!fix_beta) ml_beta = (float)best_beta_a;
 
             printf2("\n  --- Tree-size scaling exponent (alpha) estimation ---\n");
             printf2("  Penalty term (sum log k_i) : %.4f\n", penalty);
             printf2("  Alpha grid  : 0 to %.2f  (%d points)\n", alpha_max, ascan);
-            printf2("  Optimal alpha (MLE) : %.4f\n", best_alpha);
-            printf2("  Optimal beta  (MLE) : %.6f\n", best_beta_a);
-            printf2("  Joint log-likelihood: %.4f\n", best_logL_a);
+            printf2("  Optimal alpha : %.4f\n", best_alpha);
+            if(fix_beta)
+                printf2("  Beta (fixed)  : %.6f\n", best_beta_a);
+            else
+                printf2("  Optimal beta  : %.6f\n", best_beta_a);
+            printf2("  Log-likelihood: %.4f\n", best_logL_a);
             printf2("  ml_alpha updated to %.4f\n", ml_alpha);
-            printf2("  ml_beta  updated to %.6f\n", ml_beta);
+            if(fix_beta)
+                printf2("  ml_beta unchanged (fixbeta active)\n");
+            else
+                printf2("  ml_beta  updated to %.6f\n", ml_beta);
 
             /* Append alpha profile to outfile if requested */
             if(outfile_name[0] != '\0' && g_n > 0)
