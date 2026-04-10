@@ -1285,6 +1285,11 @@ void print_commands(int num)
 		printf2("\n\tnthreads\t<integer>\t\t\t*%-3d (parallel SH bootstrap; default=all CPUs)", omp_get_num_procs());
 #endif
 		printf2("\n\ttestsfile\t<filename>\t\t\t*mltest_results.txt");
+		printf2("\n\tnormcorrect\t(flag)\t\t\t\t*off");
+		printf2("\n\t  Apply Bryant & Steel (2008) normalising constant correction to lnL.");
+		printf2("\n\t  Subtracts log(Z_{T|X_i}) per source tree, where Z_T = sum_m b_m(T)*e^{-beta*m}.");
+		printf2("\n\t  Uses truncated large-beta expansion (b_0+b_2+b_4 terms); accurate for beta>~1.5.");
+		printf2("\n\t  Improves absolute lnL accuracy; minor effect on tree rankings (see Bryant & Steel 2008).");
 		}
 	printf2("\n");
         }

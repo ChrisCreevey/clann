@@ -244,6 +244,8 @@ float *score_of_bootstraps = NULL, *yaptp_results = NULL, largest_length = 0, du
 float ml_beta = 1.0f;   /* L.U.st exponential slope parameter (default 1.0) */
 int   ml_scale = 2;     /* ML score scale: 0=paper (raw sum), 1=lust (log10), 2=lnl (default) */
 double ml_eta = 0.0;    /* [experimental] tree-size scaling exponent: 0=Steel 2008, 1=normalised, >1=downweight large trees */
+double *ml_norm_logZ  = NULL;  /* log Z_{T_i|X_i} per source tree; populated by compare_trees_ml when ml_do_normcorr=1 */
+int     ml_do_normcorr = 0;    /* 0=off, 1=apply Bryant & Steel (2008) normalising constant correction in usertrees */
 int   bsweight = 0;     /* use per-split BS support as weights in sfit/qfit (0=off, 1=on) */
 time_t interval1, interval2;
 double sup=1;
@@ -2290,6 +2292,7 @@ void usertrees_search(void)
     {
     FILE *userfile = NULL, *outfile = NULL, *sourcescoresfile = NULL;
     int keep = 0, nbest = 0, error = FALSE, i=0, tree_number = 0, j=0, k=0, prev = 0, print_source_scores = FALSE;
+    int    do_normcorr_local = FALSE;   /* set by normcorrect option; enables Bryant & Steel Z_T correction */
     /* ML topology test state */
     int    run_ml_tests = FALSE, nboot_tests = 1000;
     float  alpha_tests  = 0.05f;
@@ -2398,6 +2401,8 @@ void usertrees_search(void)
                 if(strcmp(parsed_command[i+1], "yes") == 0)
                     run_ml_tests = TRUE;
                 }
+            if(strcmp(parsed_command[i], "normcorrect") == 0)
+                do_normcorr_local = TRUE;
             if(strcmp(parsed_command[i], "nboot") == 0)
                 nboot_tests = atoi(parsed_command[i+1]);
             if(strcmp(parsed_command[i], "testsfile") == 0)
@@ -2561,7 +2566,15 @@ void usertrees_search(void)
     
         if(criterion == 2 || criterion == 3 || criterion == 6 || criterion == 7)
             rf_precompute_fund_biparts();
-            
+
+        /* Enable Bryant & Steel normalising constant correction if requested */
+        if(do_normcorr_local && criterion == 7 && ml_scale == 2)
+            {
+            ml_norm_logZ = calloc(Total_fund_trees, sizeof(double));
+            if(ml_norm_logZ) { ml_do_normcorr = 1; printf2("  Normalising constant correction: enabled (Bryant & Steel 2008, large-beta approx)\n"); }
+            else printf2("  Warning: normcorrect allocation failed; correction disabled\n");
+            }
+
         c = getc(userfile);
         while((c == ' ' || c == '\r'  || c == '\n' || c == '[') && !feof(userfile))  /* skip past all the non tree characters */
             {
@@ -2754,6 +2767,9 @@ void usertrees_search(void)
 			}
 	if(sourcescoresfile != NULL) fclose(sourcescoresfile);
 	free(best_tree);
+    /* Clean up normalising constant correction state */
+    ml_do_normcorr = 0;
+    if(ml_norm_logZ) { free(ml_norm_logZ); ml_norm_logZ = NULL; }
     }
 
 
@@ -2990,6 +3006,11 @@ static float ml_display_score(float s)
         lnL = W * log((double)ml_beta) + w_entropy - sd - ml_eta * penalty;
     else
         lnL = w_entropy - sd - ml_eta * penalty;   /* fallback */
+    /* Bryant & Steel (2008) normalising constant correction: subtract sum(w_i * log Z_i) */
+    if(ml_do_normcorr && ml_norm_logZ != NULL)
+        for(_i = 0; _i < Total_fund_trees; _i++)
+            if(sourcetreetag[_i] && tree_weights[_i] > 0.0f)
+                lnL -= (double)tree_weights[_i] * ml_norm_logZ[_i];
     return (float)lnL;
     }
 
@@ -3021,6 +3042,9 @@ static float ml_display_source_score(float raw_score, int tree_idx)
        && fund_bipart_sets[tree_idx].count > 0)
         lnL_k -= ml_eta * w_k * log((double)fund_bipart_sets[tree_idx].count);
     lnL_k -= (double)raw_score;
+    /* Bryant & Steel (2008) normalising constant correction for this source tree */
+    if(ml_do_normcorr && ml_norm_logZ != NULL && tree_idx >= 0 && tree_idx < Total_fund_trees)
+        lnL_k -= w_k * ml_norm_logZ[tree_idx];
     return (float)lnL_k;
     }
 

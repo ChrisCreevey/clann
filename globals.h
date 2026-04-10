@@ -63,6 +63,8 @@ extern float  largest_length, dup_weight, loss_weight, hgt_weight, BESTSCORE;
 extern float  ml_beta;
 extern int    ml_scale;
 extern double ml_eta;    /* [experimental] tree-size scaling exponent: 0=Steel 2008, 1=normalised, >1=downweight large trees */
+extern double *ml_norm_logZ;  /* log Z_{T_i|X_i} per source tree for current candidate; set by usertrees normcorrect */
+extern int    ml_do_normcorr; /* 0=off, 1=compute and apply Bryant & Steel normconst correction */
 extern time_t interval1, interval2;
 extern double sup;
 extern char   saved_supertree[TREE_LENGTH];

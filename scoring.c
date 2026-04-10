@@ -82,6 +82,71 @@ static int bipart_intersection_count(const uint64_t *a, int na,
     return shared;
     }
 
+/* count_cherries_newick: count internal nodes in pruned_nwk whose subtree
+ * contains exactly 2 taxa.  Each such node is the shared ancestor of a cherry
+ * pair (a split with one 2-taxon side) in the unrooted tree.
+ * Uses the same Newick-parsing idiom as collect_biparts_newick. */
+static int count_cherries_newick(const char *nwk)
+    {
+    int cnt_stack[2 * NAME_LENGTH + 4];
+    int depth = 0, cherries = 0, i = 0;
+    cnt_stack[0] = 0;
+    while(nwk[i] && nwk[i] != ';')
+        {
+        if(nwk[i] == '(')
+            { cnt_stack[++depth] = 0; i++; }
+        else if(nwk[i] == ')')
+            {
+            int child_c = cnt_stack[depth--];
+            if(child_c == 2) cherries++;
+            cnt_stack[depth] += child_c;
+            i++;
+            /* skip optional internal node label */
+            while(nwk[i] && nwk[i] != '(' && nwk[i] != ')' &&
+                  nwk[i] != ',' && nwk[i] != ':' && nwk[i] != ';') i++;
+            }
+        else if(nwk[i] == ',')
+            { i++; }
+        else if(nwk[i] == ':')
+            { while(nwk[i] && nwk[i] != ',' && nwk[i] != ')' && nwk[i] != ';') i++; }
+        else
+            {  /* taxon index at leaf — skip token, count one leaf */
+            while(nwk[i] && nwk[i] != '(' && nwk[i] != ')' &&
+                  nwk[i] != ',' && nwk[i] != ':') i++;
+            cnt_stack[depth]++;
+            }
+        }
+    return cherries;
+    }
+
+/* log_normconst_approx: approximate log(Z_T) for the Bryant & Steel (2008)
+ * normalising constant using the truncated large-beta expansion:
+ *
+ *   Z_T = sum_m b_m(T) * e^{-beta*m}
+ *       ≈ 1  +  b_2 * eps  +  b_4(c_T) * eps^2
+ *
+ * where
+ *   eps   = e^{-2*beta}
+ *   b_2   = 2*(n-3)                            [same for all binary n-leaf trees]
+ *   b_4   = 4*C(n-3,2) + 6*(n-6+c_T)          [depends on cherry count c_T]
+ *   c_T   = number of cherry pairs in T|X_i
+ *
+ * Accuracy: good for beta > ~1.5 (eps < 0.05).  Returns 0 for n < 4.
+ *
+ * Reference: Bryant & Steel (2008), arXiv:0810.0868, Section 3.
+ * b_2 from their §3.2; b_4 from their Theorem 2.26 / equation after b_4(T). */
+static double log_normconst_approx(int n, int cherries, double beta)
+    {
+    if(n < 4) return 0.0;
+    double eps  = exp(-2.0 * beta);
+    double eps2 = eps * eps;
+    double b2   = 2.0 * (n - 3);
+    double b4   = 4.0 * (n - 3) * (n - 4) * 0.5 + 6.0 * (n - 6 + cherries);
+    double Z    = 1.0 + b2 * eps + b4 * eps2;
+    if(Z < 1.0) Z = 1.0;   /* safety: b_4 can be slightly negative for n=4,5 */
+    return log(Z);
+    }
+
 /* collect_biparts_newick_sz: like collect_biparts_newick but also fills
  * sizes_out[k] = min(|A_k|, |B_k|) (smaller-side leaf count) for each
  * non-trivial bipartition k.  ntaxa is the total leaf count in this tree.
@@ -1025,6 +1090,15 @@ float compare_trees_ml(int spr)
 
             while(unroottree(pruned_nwk));  /* remove bifurcating root from SPR-at-root grafts */
             int super_cnt = collect_biparts_newick(pruned_nwk, total_hash, super_bp);
+
+            /* Bryant & Steel (2008) normalising constant correction (usertrees normcorrect).
+             * Computed here while pruned_nwk is still valid for T|X_i. */
+            if(ml_do_normcorr && ml_norm_logZ != NULL)
+                {
+                int nc = count_cherries_newick(pruned_nwk);
+                ml_norm_logZ[i] = log_normconst_approx(ntaxa_i, nc, (double)ml_beta);
+                }
+
             reset_tree(tree_top);
 
             int gene_cnt = fund_bipart_sets[i].count;
