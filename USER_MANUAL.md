@@ -30,8 +30,10 @@ See COPYING.txt for full licence terms.
    - [reconstruct](#reconstruct)
    - [savetrees](#savetrees)
    - [showtrees](#showtrees)
-   - [deletetrees](#deletetrees)
+   - [excludetrees](#excludetrees)
+   - [includetrees](#includetrees)
    - [deletetaxa](#deletetaxa)
+   - [restoretaxa](#restoretaxa)
    - [randomisetrees](#randomisetrees)
    - [rfdists](#rfdists)
    - [generatetrees](#generatetrees)
@@ -706,26 +708,54 @@ showtrees namecontains=RAxML savetrees=yes filename=raxml_trees.txt
 
 ---
 
-### deletetrees
+### excludetrees
 
-Permanently remove source trees from memory based on filter criteria. This operation cannot be undone within a session.
+Flag source trees so they are excluded from all subsequent analyses (`hs`, `boot`, `nj`, `rfdists`, etc.). The trees remain in memory and can be restored with `includetrees`. Both `excludetrees` and `includetrees` accept the same filter criteria.
 
 ```
-deletetrees [filter options]
+excludetrees [filter options]
 ```
 
 | Option | Values | Description |
 |--------|--------|-------------|
-| `singlecopy` | (flag, no value) | Delete all single-copy trees. |
-| `multicopy` | (flag, no value) | Delete all multicopy trees. |
-
-Filter options are the same as `savetrees` (`range`, `size`, `namecontains`, `containstaxa`, `score`).
+| `singlecopy` | (flag, no value) | Exclude all single-copy trees. |
+| `multicopy` | (flag, no value) | Exclude all multicopy trees. |
+| `range` | `<start> <end>` | Exclude trees in the given index range (1-based). |
+| `size` | `equalto \| lessthan \| greaterthan <n>` | Exclude trees by taxon count. |
+| `namecontains` | `<string>` | Exclude trees whose name contains the given string. |
+| `containstaxa` | `<taxon>` | Exclude trees containing the specified taxon. |
+| `score` | `<min> <max>` | Exclude trees whose score falls in the given range. |
 
 **Examples:**
 ```
-deletetrees range=1-10
-deletetrees size=lessthan 5
-deletetrees multicopy
+excludetrees range 1 10
+excludetrees size lessthan 5
+excludetrees multicopy
+```
+
+---
+
+### includetrees
+
+Restore previously excluded source trees so they are included in subsequent analyses. Accepts the same filter criteria as `excludetrees`; with no options, restores all excluded trees.
+
+```
+includetrees [filter options]
+```
+
+| Option | Values | Description |
+|--------|--------|-------------|
+| `range` | `<start> <end>` | Restore trees in the given index range (1-based). |
+| `size` | `equalto \| lessthan \| greaterthan <n>` | Restore trees by taxon count. |
+| `namecontains` | `<string>` | Restore trees whose name contains the given string. |
+| `containstaxa` | `<taxon>` | Restore trees containing the specified taxon. |
+| `score` | `<min> <max>` | Restore trees whose score falls in the given range. |
+
+**Examples:**
+```
+includetrees
+includetrees range 1 10
+includetrees namecontains RAxML
 ```
 
 ---
@@ -733,6 +763,8 @@ deletetrees multicopy
 ### deletetaxa
 
 Remove specified taxa from all source trees in memory, pruning branches while preserving the remaining topology and branch lengths. Trees that fall below the minimum taxon count after pruning are removed entirely.
+
+A full snapshot of the original trees is saved automatically before the operation. Use `restoretaxa` immediately afterwards to undo it. Only one snapshot is held at a time — a second `deletetaxa` overwrites the previous snapshot.
 
 ```
 deletetaxa <taxon1> [<taxon2> ...] [options]
@@ -746,6 +778,25 @@ deletetaxa <taxon1> [<taxon2> ...] [options]
 ```
 deletetaxa Human
 deletetaxa Human Mouse mintaxa=5
+```
+
+---
+
+### restoretaxa
+
+Restore the full set of source trees that existed before the most recent `deletetaxa` operation. The snapshot includes all trees, their names, and their weights. Calling `restoretaxa` clears the snapshot — a subsequent `restoretaxa` without a preceding `deletetaxa` will report an error.
+
+```
+restoretaxa
+```
+
+No options.
+
+**Example:**
+```
+deletetaxa Outgroup
+hs
+restoretaxa
 ```
 
 ---

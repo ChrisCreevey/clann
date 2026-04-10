@@ -117,7 +117,11 @@ void     showtrees(int savet);
 void     exclude(int do_all);
 void     include(int do_all);
 void     exclude_taxa(int do_all);
+void     restoretaxa(int do_all);
 void     returntree(char *temptree);
 void     returntree_fullnames(char *temptree, int treenum);
+
+/* restoretaxa availability flag (set by exclude_taxa, cleared by restoretaxa) */
+extern int restoretaxa_available;
 
 #endif /* CLANN_TREE_IO_H */

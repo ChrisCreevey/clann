@@ -615,15 +615,23 @@ void input_file_summary(int do_all)
     {
     int i=0, j=0, k=0, l=0, limit, previous_limit, limit_reached, singlecopy=0;
     float *size_of_trees = NULL;
+    int active_trees = 0;
 
-	size_of_trees = malloc((Total_fund_trees-num_excluded_trees)*sizeof(float));
-	for(i=0; i<Total_fund_trees-num_excluded_trees; i++)
+    /* Count trees currently active (sourcetreetag[i] == TRUE) */
+    for(i=0; i<Total_fund_trees; i++)
+        if(sourcetreetag[i]) active_trees++;
+
+	size_of_trees = malloc(Total_fund_trees*sizeof(float));
+	for(i=0; i<Total_fund_trees; i++)
 		size_of_trees[i] = 0;
 
     sup=1;
     printf2("\n\tSource tree summmary:\n\n");
     printf2("\t----------------------------------------------------\n");
-    printf2("\t\tNumber of input trees: %d\n", Total_fund_trees-num_excluded_trees);
+    printf2("\t\tNumber of input trees: %d", active_trees);
+    if(active_trees < Total_fund_trees)
+        printf2("  (%d excluded)", Total_fund_trees - active_trees);
+    printf2("\n");
     printf2("\t\tNumber of unique taxa: %d\n", number_of_taxa-num_excluded_taxa);
     sup =1;
     for(i=4; i<=number_of_taxa-num_excluded_taxa; i++) sup*=((2*i)-5);
@@ -702,11 +710,12 @@ void input_file_summary(int do_all)
 			}
 		}
 
-	draw_histogram(NULL, (largest_tree-smallest_tree)+1, size_of_trees, Total_fund_trees-num_excluded_trees);
+	draw_histogram(NULL, (largest_tree-smallest_tree)+1, size_of_trees, l);
 
 
 	for(l=0; l<Total_fund_trees; l++)
 		{
+		if(!sourcetreetag[l]) continue;
 		i=0;
 		for(k=0; k<number_of_taxa; k++)
 			{
@@ -717,7 +726,7 @@ void input_file_summary(int do_all)
 		}
 
 	printf2("\tNumber of single copy trees:\t%d\n", singlecopy);
-	printf2("\tnumber of multicopy trees:\t%d\n", Total_fund_trees-singlecopy);
+	printf2("\tnumber of multicopy trees:\t%d\n", active_trees-singlecopy);
 
     printf2("\t----------------------------------------------------\n");
 
@@ -1622,162 +1631,58 @@ void exclude(int do_all)
 				if(temp_incidence[i] == 0) l++;
 				}
 				*/
-			l=1;
-			if(l> 0)
+			counter = 0;
+			for(i=0; i<Total_fund_trees; i++)
 				{
-				/*printf("\nWarning: %d Taxa are no longer represented in the included source trees\nThese taxa are as follows:\n", l);
-				for(i=0; i<number_of_taxa; i++)
+				if(tempsourcetreetag[i]== FALSE && sourcetreetag[i] == TRUE)
 					{
-					if(temp_incidence[i] == 0)
-						printf2("\t%s\n", taxa_names[i]);
+					sourcetreetag[i] = FALSE;
+					counter++;
 					}
-				command = malloc(10000*sizeof(char));
-				printf2("This will permenantly remove these trees from memory\nAre you sure you wish to continue: (yes/no) ");
-				xgets(command);
-				if(strcmp(command, "y") == 0 || strcmp(command, "Y") == 0 || strcmp(command, "yes") == 0 || strcmp(command, "Yes") == 0)
-					{
-				*/	tempfile = fopen("tempclannfile164.chr", "w");
-					tmp[0] = '\0';
-					countedout = 0;
-
-
-					for(j=0; j<Total_fund_trees; j++)
-					        {
-					        if(tempsourcetreetag[j])
-								{
-						        if(tree_top != NULL) dismantle_tree(tree_top);  /* Dismantle any trees already in memory */
-						        tree_top = NULL;
-
-						        temp_top = NULL;
-						        taxaorder=0;
-						        strcpy(temptree, fundamentals[j]);
-								returntree_fullnames(temptree, j);
-			                    basic_tree_build(1, temptree, tree_top, TRUE);
-
-						       /*  tree_build(1, fundamentals[j], tree_top, 0, j, 0); build the tree passed to the function */
-
-						        tree_top = temp_top;
-						        temp_top = NULL;
-						        reset_tree(tree_top);
-
-						        shrink_tree(tree_top);    /* Shrink the pruned tree by switching off any internal nodes that are not needed */
-						        temptree[0] = '\0'; /* initialise the string */
-						        if(print_pruned_tree(tree_top, 0, temptree, TRUE, j) >1)
-						            {
-						            tmp[0] = '\0';
-						            strcpy(tmp, "(");
-						            strcat(tmp, temptree);
-						            strcat(tmp, ")");
-						            strcpy(temptree, tmp);
-						            }
-						        strcat(temptree, ";");
-
-						        if(strcmp(tree_names[j], "") != 0)
-						        	fprintf(tempfile, "%s[%s]\n", temptree, tree_names[j]);
-						        else
-						        	fprintf(tempfile, "%s[%d]\n", temptree, j);
-						        countedout++;
-						        }
-							else
-								{
-								if(sourcetreetag[i]) counter++;
-								}
-							}
-
-		/*			for(i=0; i<Total_fund_trees; i++)
-						{
-						if(tempsourcetreetag[i])
-							{
-							temptree[0] = '\0';
-							strcpy(temptree, fundamentals[i]);
-							returntree(temptree);
-							strcpy(tmp, "");
-							strncpy(tmp, temptree, strlen(temptree)-1);
-							tmp[strlen(temptree)-1] = '\0';
-							strcpy(temptree, tmp);
-							fprintf(tempfile, "%s", temptree);
-							fprintf(tempfile, " [%f]; [ %s]\n", tree_weights[i], tree_names[i]);
-							countedout++;
-							}
-						else
-							{
-							if(sourcetreetag[i]) counter++;
-							}
-						}  */ /* Old printing code, before implementation of delimited names input */
-					fclose(tempfile);
-					for(i=0; i<number_of_taxa; i++)
-						{
-						taxa_incidence[i] = 0;
-						for(j=0; j<number_of_taxa; j++)
-							{
-							Cooccurrance[i][j] = 0;
-							}
-						}
-					execute_command("tempclannfile164.chr", do_all);
-					remove("tempclannfile164.chr");
-				/*	}
-				else
-					{
-					printf2("\nAction aborted\n");
-					error = TRUE;
-					} */
 				}
-			else
+			countedout = 0;
+			for(i=0; i<Total_fund_trees; i++)
 				{
-				counter = 0;
-				for(i=0; i<Total_fund_trees; i++)
-					{
-					if(tempsourcetreetag[i]== FALSE && sourcetreetag[i] == TRUE)
-						{
-						sourcetreetag[i] = FALSE;
-						counter++;
-						}
-					}
-				countedout = 0;
-				for(i=0; i<Total_fund_trees; i++)
-					{
-					if(sourcetreetag[i])
-						countedout++;
-					}
-				/*num_excluded_trees +=counter; */
+				if(sourcetreetag[i])
+					countedout++;
+				}
 
-				for(i=0; i<number_of_taxa; i++)
+			for(i=0; i<number_of_taxa; i++)
+				{
+				taxa_incidence[i] = 0;
+				for(j=0; j<number_of_taxa; j++)
 					{
-					taxa_incidence[i] = 0;
-					for(j=0; j<number_of_taxa; j++)
+					Cooccurrance[i][j] = 0;
+					}
+				for(k=0; k<Total_fund_trees; k++)
+					{
+					if(sourcetreetag[k])
 						{
-						Cooccurrance[i][j] = 0;
+						if(presence_of_taxa[k][i] > 0)
+							taxa_incidence[i]++;
 						}
+					}
+				for(j=0; j<number_of_taxa; j++)
+					{
 					for(k=0; k<Total_fund_trees; k++)
 						{
 						if(sourcetreetag[k])
 							{
 							if(presence_of_taxa[k][i] > 0)
-								taxa_incidence[i]++;
-							}
-						}
-					for(j=0; j<number_of_taxa; j++)
-						{
-						for(k=0; k<Total_fund_trees; k++)
-							{
-							if(sourcetreetag[k])
 								{
-								if(presence_of_taxa[k][i] > 0)
-									{
-									if(presence_of_taxa[k][j] > 0)
-										Cooccurrance[i][j]++;
-									}
+								if(presence_of_taxa[k][j] > 0)
+									Cooccurrance[i][j]++;
 								}
 							}
 						}
 					}
-				input_file_summary(do_all);
 				}
+			input_file_summary(do_all);
 			if(!error)
 				{
-				printf2("\n%d source trees were excluded, %d trees remain in memory\n", counter, countedout );
+				printf2("\n%d source trees excluded, %d trees active, %d trees excluded in total\n",
+					counter, countedout, Total_fund_trees - countedout);
 				}
-			/*} */
 		}
 
 	free(temptree);
@@ -2058,6 +1963,13 @@ void include(int do_all)
 
 	if(!error)
 		{
+		/* No options: restore all excluded trees */
+		if(!mode[0] && !mode[1] && !mode[2] && !mode[3] && !mode[4])
+			{
+			for(i=0; i<Total_fund_trees; i++)
+				tempsourcetreetag[i] = TRUE;
+			}
+
 		if(mode[0])
 			{
 			for(i=start-1; i<end; i++)
@@ -2151,25 +2063,14 @@ void include(int do_all)
 					}
 				}
 			}
-		if(mode[4]) /* Look for trees that meet a particular score */
+		if(mode[4]) /* Look for trees that fall within the specified score range */
 			{
 			for(i=0; i<Total_fund_trees; i++)
 				{
-				if(bestscore != worstscore)
+				if(sourcetree_scores[i] >= bestscore && sourcetree_scores[i] <= worstscore)
 					{
-					if(sourcetree_scores[i] >= bestscore || sourcetree_scores[i] <= worstscore)
-						{
-						tempsourcetreetag[i] = TRUE;
-						countedout++;
-						}
-					}
-				else
-					{
-					if(sourcetree_scores[i] > bestscore-0.000001 && sourcetree_scores[i] < worstscore+0.000001)
-						{
-						tempsourcetreetag[i] = TRUE;
-						countedout++;
-						}
+					tempsourcetreetag[i] = TRUE;
+					countedout++;
 					}
 				}
 			}
@@ -2226,7 +2127,8 @@ void include(int do_all)
 	if(!error)
 		{
 		input_file_summary(do_all);
-		printf2("\n%d source trees were re-included, %d trees remain in memory\n", counter, countedout );
+		printf2("\n%d source trees re-included, %d trees now active, %d trees still excluded\n",
+			counter, countedout, Total_fund_trees - countedout);
 		}
 
 	free(temptree);
@@ -2238,6 +2140,119 @@ void include(int do_all)
 	free(containstaxa);
 	free(tempsourcetreetag);
 	}
+
+/* ---------- restoretaxa state ------------------------------------------ */
+/* Full-name Newick strings saved before a deletetaxa operation.            */
+static char  **pre_dt_trees   = NULL;   /* full-name Newick[i] */
+static char  **pre_dt_names   = NULL;   /* tree_names[i]       */
+static float  *pre_dt_weights = NULL;   /* tree_weights[i]     */
+static int     pre_dt_count   = 0;      /* Total_fund_trees at save time */
+int            restoretaxa_available = 0; /* 1 after a deletetaxa */
+
+static void free_pre_dt(void)
+	{
+	int i;
+	if(pre_dt_trees)
+		{
+		for(i = 0; i < pre_dt_count; i++)
+			if(pre_dt_trees[i]) free(pre_dt_trees[i]);
+		free(pre_dt_trees);
+		pre_dt_trees = NULL;
+		}
+	if(pre_dt_names)
+		{
+		for(i = 0; i < pre_dt_count; i++)
+			if(pre_dt_names[i]) free(pre_dt_names[i]);
+		free(pre_dt_names);
+		pre_dt_names = NULL;
+		}
+	if(pre_dt_weights) { free(pre_dt_weights); pre_dt_weights = NULL; }
+	pre_dt_count = 0;
+	restoretaxa_available = 0;
+	}
+
+/* Save a full-name snapshot of every tree currently in memory (all tags). */
+static int save_pre_dt_snapshot(void)
+	{
+	int i;
+	char *temptree = malloc(TREE_LENGTH * sizeof(char));
+	if(!temptree) return 0;
+
+	free_pre_dt();
+
+	pre_dt_count   = Total_fund_trees;
+	pre_dt_trees   = calloc(pre_dt_count, sizeof(char *));
+	pre_dt_names   = calloc(pre_dt_count, sizeof(char *));
+	pre_dt_weights = malloc(pre_dt_count * sizeof(float));
+
+	if(!pre_dt_trees || !pre_dt_names || !pre_dt_weights)
+		{ free(temptree); free_pre_dt(); return 0; }
+
+	for(i = 0; i < pre_dt_count; i++)
+		{
+		pre_dt_weights[i] = tree_weights[i];
+		pre_dt_names[i]   = strdup(tree_names[i] ? tree_names[i] : "");
+		/* Convert numeric fundamentals[i] back to full taxon names */
+		temptree[0] = '\0';
+		strcpy(temptree, fundamentals[i]);
+		returntree_fullnames(temptree, i);
+		pre_dt_trees[i] = strdup(temptree);
+		if(!pre_dt_names[i] || !pre_dt_trees[i])
+			{ free(temptree); free_pre_dt(); return 0; }
+		}
+	free(temptree);
+	restoretaxa_available = 1;
+	return 1;
+	}
+
+void restoretaxa(int do_all)
+	{
+	int i;
+	char tmpfilename[10000];
+	FILE *tmpfile = NULL;
+
+	if(!restoretaxa_available || pre_dt_count == 0)
+		{
+		printf2("Error: no saved snapshot available — run deletetaxa first\n");
+		return;
+		}
+
+	/* Write snapshot to temp file in the same format as exe input */
+	strcpy(tmpfilename, inputfilename);
+	strcat(tmpfilename, ".restoretaxa.chr");
+	tmpfile = fopen(tmpfilename, "w");
+	if(!tmpfile)
+		{
+		printf2("Error: cannot open temp file for restoretaxa\n");
+		return;
+		}
+
+	/* The Phylip parser expects: <tree_no_semi> [weight] ; [name]
+	 * returntree_fullnames() appends ';', so strip it before writing —
+	 * weight must appear BEFORE ';' to be picked up by the inner read loop. */
+	for(i = 0; i < pre_dt_count; i++)
+		{
+		int _tlen = (int)strlen(pre_dt_trees[i]);
+		if(_tlen > 0 && pre_dt_trees[i][_tlen - 1] == ';')
+			pre_dt_trees[i][_tlen - 1] = '\0';   /* strip trailing ';' */
+
+		if(pre_dt_names[i] && pre_dt_names[i][0] != '\0')
+			fprintf(tmpfile, "%s [%f]; [%s]\n", pre_dt_trees[i], pre_dt_weights[i], pre_dt_names[i]);
+		else
+			fprintf(tmpfile, "%s [%f];\n", pre_dt_trees[i], pre_dt_weights[i]);
+
+		pre_dt_trees[i][_tlen - 1] = ';';   /* restore for safety */
+		}
+	fclose(tmpfile);
+
+	printf2("  Restoring %d original trees...\n", pre_dt_count);
+	free_pre_dt();   /* clear before reload (execute_command reinitialises everything) */
+
+	execute_command(tmpfilename, do_all);
+	strcpy(inputfilename, tmpfilename);  /* keep exe filename consistent */
+	remove(tmpfilename);
+	}
+/* ----------------------------------------------------------------------- */
 
 void exclude_taxa(int do_all)
 	{
@@ -2311,6 +2326,13 @@ void exclude_taxa(int do_all)
 		/*** go through the names given and identify the taxa ***/
 	if(!error)
 		{
+		/* Save a full-name snapshot of all trees before the destructive reload,
+		 * so that restoretaxa can bring everything back. */
+		if(!save_pre_dt_snapshot())
+			printf2("  Warning: could not save pre-deletetaxa snapshot; restoretaxa will not be available\n");
+		else
+			printf2("  Snapshot saved — use restoretaxa to undo this operation.\n");
+
 		strcpy(previnputfilename, inputfilename);
 		strcpy(tmpfilename, inputfilename);
 		strcat(tmpfilename, ".tempclann.chr");

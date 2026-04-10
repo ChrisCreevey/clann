@@ -2141,9 +2141,17 @@ static const char *ml_sig_label(double p, float alpha)
 static void run_usertrees_ml_tests(
         float **all_gene_scores, float *all_total_scores,
         int n_all, int nboot, float alpha, const char *testsfile_name,
-        int nthreads)
+        int nthreads, char **tree_names, int tree_names_alloc)
     {
     int i, b, k;
+    /* Helper: build a display label for tree i (1-based: i+1) */
+    #define TREE_LABEL_BUF_SZ 32
+    char _tlabel[TREE_LABEL_BUF_SZ];
+    #define TREE_LABEL(idx) ( \
+        (tree_names && (idx) < tree_names_alloc && tree_names[(idx)]) \
+            ? (snprintf(_tlabel, TREE_LABEL_BUF_SZ, "%d:%.*s", (idx)+1, 20, tree_names[(idx)]), _tlabel) \
+            : (snprintf(_tlabel, TREE_LABEL_BUF_SZ, "T%d", (idx)+1), _tlabel) \
+        )
 
     /* Find best (minimum score = maximum lnL). */
     int best_idx = 0;
@@ -2151,10 +2159,10 @@ static void run_usertrees_ml_tests(
         if(all_total_scores[i] < all_total_scores[best_idx]) best_idx = i;
     float best_score_ml = all_total_scores[best_idx];
 
-    printf2("\nML topology tests  (T1 = tree %d,  lnL = %.4f,  beta = %.2f)\n",
-            best_idx+1, ml_display_score(best_score_ml), ml_beta);
+    printf2("\nML topology tests  (best = %s,  lnL = %.4f,  beta = %.2f)\n",
+            TREE_LABEL(best_idx), ml_display_score(best_score_ml), ml_beta);
     printf2("=============================================================================\n");
-    printf2("  %-8s  %-10s  %-12s  %-14s  %-12s\n",
+    printf2("  %-9s  %-10s  %-12s  %-14s  %-12s\n",
             "Tree", "lnL", "WinSites p", "KH z / p", "SH p");
     printf2("-----------------------------------------------------------------------------\n");
 
@@ -2162,8 +2170,8 @@ static void run_usertrees_ml_tests(
     if(tfile)
         {
         fprintf(tfile, "# ML supertree topology tests\n");
-        fprintf(tfile, "# Best tree: T%d  lnL=%.6f  beta=%.4f\n",
-                best_idx+1, (double)ml_display_score(best_score_ml), ml_beta);
+        fprintf(tfile, "# Best tree: %s  lnL=%.6f  beta=%.4f\n",
+                TREE_LABEL(best_idx), (double)ml_display_score(best_score_ml), ml_beta);
         fprintf(tfile, "# tree\tdelta_lnL\tn_inform\tn_plus\tn_minus\tWS_p\tKH_z\tKH_p\tSH_p\n");
         }
 
@@ -2189,8 +2197,8 @@ static void run_usertrees_ml_tests(
             }
 
         if(n_inform < 4)
-            printf2("  WARNING: tree %d has only %d informative gene trees — results unreliable\n",
-                    i+1, n_inform);
+            printf2("  WARNING: %s has only %d informative gene trees — results unreliable\n",
+                    TREE_LABEL(i), n_inform);
 
         /* Winning Sites */
         double ws_p = ml_binomial_p2(n_plus, n_minus);
@@ -2254,15 +2262,15 @@ static void run_usertrees_ml_tests(
         double lnL_i     = (double)ml_display_score(all_total_scores[i]);
         double delta_lnL = lnL_i - (double)ml_display_score(all_total_scores[best_idx]);
 
-        printf2("  T%-7d  lnL=%-6.3f  p=%-8.4f  z=%-5.2f p=%-5.3f %-3s  p=%-6.4f %-3s\n",
-                i+1, lnL_i,
+        printf2("  %-9s  lnL=%-6.3f  p=%-8.4f  z=%-5.2f p=%-5.3f %-3s  p=%-6.4f %-3s\n",
+                TREE_LABEL(i), lnL_i,
                 ws_p,
                 kh_z, kh_p, ml_sig_label(kh_p, alpha),
                 sh_p >= 0 ? sh_p : 9.9999, sh_p >= 0 ? ml_sig_label(sh_p, alpha) : "--");
 
         if(tfile)
-            fprintf(tfile, "T%d\t%.6f\t%d\t%d\t%d\t%.6f\t%.4f\t%.6f\t%.6f\n",
-                    i+1, delta_lnL,
+            fprintf(tfile, "%s\t%.6f\t%d\t%d\t%d\t%.6f\t%.4f\t%.6f\t%.6f\n",
+                    TREE_LABEL(i), delta_lnL,
                     n_inform, n_plus, n_minus,
                     ws_p, kh_z, kh_p, sh_p >= 0 ? sh_p : -1.0);
 
@@ -2283,6 +2291,8 @@ static void run_usertrees_ml_tests(
         printf2("  Per-gene-tree details written to: %s\n", testsfile_name);
         fclose(tfile);
         }
+    #undef TREE_LABEL
+    #undef TREE_LABEL_BUF_SZ
     }
 
 /* --- end ML topology test helpers --------------------------------------- */
@@ -2293,6 +2303,10 @@ void usertrees_search(void)
     FILE *userfile = NULL, *outfile = NULL, *sourcescoresfile = NULL;
     int keep = 0, nbest = 0, error = FALSE, i=0, tree_number = 0, j=0, k=0, prev = 0, print_source_scores = FALSE;
     int    do_normcorr_local = FALSE;   /* set by normcorrect option; enables Bryant & Steel Z_T correction */
+    char  **user_tree_names     = NULL;   /* [tree_number]: name from [..] bracket for each input tree */
+    int     user_tree_names_alloc = 0;
+    int    *retained_orig_idx   = NULL;   /* [j]: 0-based input tree index for retained_supers[j] */
+    char    utn_buf[NAME_LENGTH + 2];     /* temp buffer for capturing [name] from input */
     /* ML topology test state */
     int    run_ml_tests = FALSE, nboot_tests = 1000;
     float  alpha_tests  = 0.05f;
@@ -2563,7 +2577,13 @@ void usertrees_search(void)
 			strcpy(retained_supers[i], "");
 			scores_retained_supers[i] = -1;
 			}
-    
+
+		/* Allocate name-tracking arrays */
+		user_tree_names_alloc = 64;
+		user_tree_names = calloc(user_tree_names_alloc, sizeof(char *));
+		retained_orig_idx = malloc(number_retained_supers * sizeof(int));
+		if(retained_orig_idx) { for(i = 0; i < number_retained_supers; i++) retained_orig_idx[i] = -1; }
+
         if(criterion == 2 || criterion == 3 || criterion == 6 || criterion == 7)
             rf_precompute_fund_biparts();
 
@@ -2636,13 +2656,31 @@ void usertrees_search(void)
 			/*printf("%s\t[%f]\n", user_super, score); */
 
 			c = getc(userfile);
+			utn_buf[0] = '\0';
 			while((c == ' ' || c == '\r'  || c == '\n'|| c == '\t' || c == '[') && !feof(userfile))  /* skip past all the non tree characters */
 				{
 				if(c == '[')
 					{
-					while((c = getc(userfile)) != ']' && !feof(userfile));
+					int _ni = 0;
+					while((c = getc(userfile)) != ']' && !feof(userfile))
+						{ if(_ni < NAME_LENGTH) utn_buf[_ni++] = (char)c; }
+					utn_buf[_ni] = '\0';
 					}
 				c = getc(userfile);
+				}
+			/* Store name for this tree (tree_number is the 0-based index, not yet incremented) */
+			if(user_tree_names != NULL)
+				{
+				if(tree_number >= user_tree_names_alloc)
+					{
+					int _na = user_tree_names_alloc * 2;
+					user_tree_names = realloc(user_tree_names, _na * sizeof(char *));
+					if(user_tree_names)
+						{ int _ii; for(_ii = user_tree_names_alloc; _ii < _na; _ii++) user_tree_names[_ii] = NULL; }
+					user_tree_names_alloc = _na;
+					}
+				if(user_tree_names && tree_number < user_tree_names_alloc)
+					user_tree_names[tree_number] = (utn_buf[0] != '\0') ? strdup(utn_buf) : NULL;
 				}
 
 			if(tree_number==0)
@@ -2652,6 +2690,7 @@ void usertrees_search(void)
 				strcpy(retained_supers[0], user_super);
 				scores_retained_supers[0] = score;
 				best_score = score;
+				if(retained_orig_idx) retained_orig_idx[0] = tree_number - 1;
 				}
 			else
 				{
@@ -2662,11 +2701,13 @@ void usertrees_search(void)
 					strcpy(retained_supers[0], user_super);
 					scores_retained_supers[0] = score;
 					best_score = score;
+					if(retained_orig_idx) retained_orig_idx[0] = tree_number - 1;
 					j=1;
 					while(scores_retained_supers[j] != -1 && j < number_retained_supers)
 						{
 						strcpy(retained_supers[j], "");
 						scores_retained_supers[j] = -1;
+						if(retained_orig_idx) retained_orig_idx[j] = -1;
 						j++;
 						}
 					}
@@ -2678,11 +2719,21 @@ void usertrees_search(void)
 						while(scores_retained_supers[j] != -1)
 							{
 							j++;
-							if(j+1 == number_retained_supers) reallocate_retained_supers();
+							if(j+1 == number_retained_supers)
+								{
+								int _old_nrs = number_retained_supers;
+								reallocate_retained_supers();
+								if(retained_orig_idx)
+									{
+									retained_orig_idx = realloc(retained_orig_idx, number_retained_supers * sizeof(int));
+									int _rr; for(_rr = _old_nrs; _rr < number_retained_supers; _rr++) retained_orig_idx[_rr] = -1;
+									}
+								}
 							}
 						retained_supers[j] = realloc(retained_supers[j], (strlen(user_super)+10)*sizeof(char));
 						strcpy(retained_supers[j], user_super);
 						scores_retained_supers[j] = score;
+						if(retained_orig_idx) retained_orig_idx[j] = tree_number - 1;
 						}
 					}
 				}
@@ -2690,13 +2741,15 @@ void usertrees_search(void)
 			} /* end of file */
 
         /**** Print out the best trees found *******/
-            
+
             i=0; j=0;
 			while(scores_retained_supers[j] != -1)
 				{
 				j++;
 				}
-			
+
+			printf2("\n%d input tree(s) evaluated:\n", tree_number);
+
 			while(scores_retained_supers[i] != -1)
 				{
 				/*if(print_source_scores && criterion==0) */
@@ -2728,10 +2781,17 @@ void usertrees_search(void)
 							ml_display_source_score(sourcetree_scores[k], k));
 						}
 					}
-				
+
 				if(outfile != NULL) fprintf(outfile, "%s\t[%f]\n", retained_supers[i], ml_display_score(scores_retained_supers[i]) );
 				tree_coordinates(retained_supers[i], FALSE, TRUE, FALSE, -1);
-				printf2("\nSupertree %d of %d %s = %f\n", i+1, j, ml_score_label(), ml_display_score(scores_retained_supers[i]) );
+				{
+				int _orig = (retained_orig_idx && retained_orig_idx[i] >= 0) ? retained_orig_idx[i] : i;
+				const char *_nm = (user_tree_names && _orig < user_tree_names_alloc && user_tree_names[_orig]) ? user_tree_names[_orig] : NULL;
+				if(_nm)
+					printf2("\nInput tree %d (%s)  %s = %f\n", _orig+1, _nm, ml_score_label(), ml_display_score(scores_retained_supers[i]) );
+				else
+					printf2("\nInput tree %d  %s = %f\n", _orig+1, ml_score_label(), ml_display_score(scores_retained_supers[i]) );
+				}
 				i++;
 				}
 
@@ -2747,7 +2807,7 @@ void usertrees_search(void)
 				else
 					run_usertrees_ml_tests(all_gene_scores, all_total_scores,
 										   n_all, nboot_tests, alpha_tests, testsfile_name,
-										   nthreads_tests);
+										   nthreads_tests, user_tree_names, user_tree_names_alloc);
 				}
 
 			/* Cleanup ML test arrays */
@@ -2758,6 +2818,17 @@ void usertrees_search(void)
 				free(all_gene_scores);
 				}
 			if(all_total_scores != NULL) free(all_total_scores);
+
+			/* Free name-tracking arrays */
+			if(user_tree_names)
+				{
+				int _fi;
+				for(_fi = 0; _fi < user_tree_names_alloc; _fi++)
+					if(user_tree_names[_fi]) free(user_tree_names[_fi]);
+				free(user_tree_names);
+				user_tree_names = NULL;
+				}
+			if(retained_orig_idx) { free(retained_orig_idx); retained_orig_idx = NULL; }
 
             fclose(userfile);
             if(outfile != NULL) fclose(outfile);

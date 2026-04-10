@@ -635,7 +635,7 @@ int main(int argc, char *argv[])
                                                     }
                                                 else
                                                     {
-                                                    if(strcmp(parsed_command[0], "deletetrees") == 0)
+                                                    if(strcmp(parsed_command[0], "excludetrees") == 0)
                                                         {
                                                         if(num_commands == 2 && parsed_command[1][0] == '?')
                                                             print_commands(17);
@@ -649,7 +649,7 @@ int main(int argc, char *argv[])
 														}
                                                     else
                                                         {
-                                                        if(strcmp(parsed_command[0], "1includetrees") == 0)
+                                                        if(strcmp(parsed_command[0], "includetrees") == 0)
                                                             {
                                                             if(num_commands == 2 && parsed_command[1][0] == '?')
                                                                 print_commands(18);
@@ -734,6 +734,20 @@ int main(int argc, char *argv[])
 
 																			else
 																				{
+																				if(strcmp(parsed_command[0], "restoretaxa") == 0)
+																					{
+																					if(number_of_taxa > 0)
+																						{
+																						if(restoretaxa_available)
+																							restoretaxa(TRUE);
+																						else
+																							printf2("Error: no deletetaxa snapshot available to restore\n");
+																						}
+																					else
+																						printf2("Error: You need to load source trees before using this command\n");
+																					}
+																				else
+																					{
 																				if(strcmp(parsed_command[0], "consensus") == 0)
 																					{
 																					if(num_commands == 2 && parsed_command[1][0] == '?')
@@ -975,6 +989,7 @@ int main(int argc, char *argv[])
 																					}
 																				}
 																			}
+																			}
 																		}
 																	}
 																}
@@ -1174,9 +1189,10 @@ void print_commands(int num)
         printf2("\nSource tree selection and modification:\n");
         printf2("\tsavetrees\t- Save source trees to file in phylip format (subsets of trees can be chosen based on a number of criteria)\n");
         printf2("\tshowtrees\t- Visualise selected source trees in ASCII format (also can save selected trees to file)\n");
-       	printf2("\tdeletetrees\t- Specify source trees to delete from memory (based on a variety of criteria)\n"); 
-      /*  printf2("\tincludetrees\t- Specify trees for inclusion in the analysis (based on a variety of criteria)\n"); */ /* we are excluding the include command because it is problematic*/
+       	printf2("\texcludetrees\t- Exclude source trees from analyses (based on a variety of criteria)\n");
+       	printf2("\tincludetrees\t- Restore previously excluded source trees (based on a variety of criteria)\n");
         printf2("\tdeletetaxa\t- Specify taxa to delete from all source trees in memory (i.e. prune from the trees while preserving branch lengths)\n");
+        printf2("\trestoretaxa\t- Restore the original trees before the last deletetaxa operation\n");
         printf2("\trandomisetrees\t- Randomises the source trees in memory, while preserving taxa composition in each tree\n");
 
         printf2("\nMiscellaneous calculations:\n");
@@ -1570,7 +1586,7 @@ void print_commands(int num)
 
 	 if(num == 17)
 		{
-		printf2("\tdeletetrees\trange | size | namecontains | containstaxa | score \n\n");
+		printf2("\texcludetrees\trange | size | namecontains | containstaxa | score \n\n");
 		printf2("\tOptions\t\tSettings\t\t\tCurrent\n");
         printf2("\t===========================================================\n");
 		
