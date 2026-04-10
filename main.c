@@ -31,11 +31,16 @@
  * ===================================================================== */
 #ifdef HAVE_READLINE
 
-/* Coloured prompt: bold green "clann" + reset, RL_PROMPT_{START,END}_IGNORE
- * wrappers (\001 / \002) tell readline not to count escape bytes toward
- * the display width, preventing cursor-position miscalculation.          */
-#define CLANN_PROMPT \
-    "\001\033[1;32m\002clann\001\033[0m\002> "
+/* Coloured prompt.
+ * GNU readline: wrap ANSI codes in \001...\002 (RL_PROMPT_START/END_IGNORE)
+ *   so readline doesn't count escape bytes toward display width.
+ * libedit (macOS): ignores/mangles those markers — use bare ANSI codes,
+ *   which libedit passes through correctly without width-correction issues.
+ * Plain fallback when not a tty (e.g. piped input).
+ * Detected at runtime via rl_library_version.                            */
+static const char *clann_prompt_str = NULL;   /* set once in readline init */
+
+#define CLANN_PROMPT  (clann_prompt_str ? clann_prompt_str : "clann> ")
 
 /* ---- completion tables ------------------------------------------------ */
 
@@ -484,6 +489,23 @@ int main(int argc, char *argv[])
 
 		/* Show all completions immediately on first Tab (no double-tap needed) */
 		rl_bind_key('\t', rl_complete);
+
+		/* Choose the right coloured prompt for this readline implementation.
+		 * GNU readline requires \001..\002 around invisible bytes so it can
+		 * correctly track display width.  libedit ("EditLine wrapper") ignores
+		 * those markers and can produce garbled output — use bare ANSI instead.
+		 * Only colour when writing to a real terminal.                       */
+		if(isatty(STDIN_FILENO))
+			{
+			int _is_libedit = (strstr(rl_library_version, "EditLine") != NULL);
+			if(_is_libedit)
+				clann_prompt_str = "\033[1;32mclann\033[0m> ";   /* libedit: bare ANSI */
+			else
+				clann_prompt_str =                               /* GNU rl: width-safe */
+				    "\001\033[1;32m\002clann\001\033[0m\002> ";
+			}
+		else
+			clann_prompt_str = "clann> ";
 		}
     #endif
     /********** END OF READLINE STUFF *************/
@@ -1290,7 +1312,12 @@ int main(int argc, char *argv[])
 				printf2("An error occurred while setting a signal handler\n");
 				}
 		   #ifdef HAVE_READLINE
+		   /* Let readline own SIGINT while reading so that Ctrl+C correctly
+		    * cancels incremental search (Ctrl+R) and other readline operations.
+		    * We restore Clann's handler immediately after readline() returns.  */
+		   signal(SIGINT, SIG_DFL);
 /*****/    command = readline(CLANN_PROMPT);
+		   signal(SIGINT, controlc4);   /* re-arm Clann's quit handler */
 /*****/    command = realloc(command, 10000*sizeof(char));
 		   #else
  	        printf2("clann> ");
