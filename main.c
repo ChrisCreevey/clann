@@ -1364,11 +1364,11 @@ void print_commands(int num)
 			printf2("\n\t  paper = Steel & Rodrigo (2008) formula: minimise beta*RF directly");
 			printf2("\n\t  lust  = L.U.st (Akanni et al. 2014) log10 scaling (beta*d*log10(e))");
 			printf2("\n\t  lnl   = report as lnL = -beta*RF  [default; matches ML tool conventions]");
-			printf2("\n\tmlalpha\t\t<float >= 0>\t\t\t%.4f  [experimental]", ml_alpha);
+			printf2("\n\tmleta\t\t<float >= 0>\t\t\t%.4f  [experimental]", ml_eta);
 			printf2("\n\t  0     = Steel & Rodrigo (2008) raw RF (default)");
 			printf2("\n\t  1     = divide RF by source-tree split count (full normalisation)");
 			printf2("\n\t  >1    = actively down-weight large trees beyond normalisation\n");
-			printf2("\n\t  Use 'mlscores alpha=auto' to estimate optimal alpha from data\n");
+			printf2("\n\t  Use 'mlscores eta=auto' to estimate optimal eta from data\n");
 			}
         }
     if(num == 5)
@@ -1408,7 +1408,7 @@ void print_commands(int num)
 				{
 				printf2("\n\tmlbeta\t\t<float > 0>\t\t\t%.4f", ml_beta);
 				printf2("\n\tmlscale\t\tpaper | lust | lnl\t\t%s", ml_scale==1?"lust":ml_scale==2?"lnl":"paper");
-				printf2("\n\tmlalpha\t\t<float >= 0>\t\t\t%.4f  [experimental]", ml_alpha);
+				printf2("\n\tmleta\t\t<float >= 0>\t\t\t%.4f  [experimental]", ml_eta);
 				}
 #ifdef _OPENMP
 			if(criterion == 0 || criterion == 2 || criterion == 3)
@@ -1485,7 +1485,7 @@ void print_commands(int num)
         printf2("\n\tcriterion\tdfit | sfit | qfit | mrp | avcon | rf | ml\t");
         printf2("\n\tmlbeta\t\t<float > 0>\t\t\t\t%.4f", ml_beta);
         printf2("\n\tmlscale\t\tpaper | lust | lnl\t\t\t%s", ml_scale == 1 ? "lust (Akanni et al. 2014)" : ml_scale == 2 ? "lnl" : "Steel & Rodrigo 2008");
-        printf2("\n\tmlalpha\t\t<float >= 0>\t\t\t\t%.4f  [experimental]", ml_alpha);
+        printf2("\n\tmleta\t\t<float >= 0>\t\t\t\t%.4f  [experimental]", ml_eta);
         if(criterion == 0) printf2("dfit");
         if(criterion == 1) printf2("mrp");
         if(criterion == 2) printf2("sfit");
@@ -1666,35 +1666,38 @@ void print_commands(int num)
 	 if(num == 31)
 		{
 		printf2("\nmlscores\t[outfile=<file>] [scan=<n>] [scanmin=<f>] [scanmax=<f>]\n");
-		printf2("\t\t[alpha=auto] [ascan=<n>] [alphamax=<f>] [fixbeta]\n\n");
+		printf2("\t\t[eta=auto] [escan=<n>] [etamax=<f>] [fixbeta]\n\n");
 		printf2("  Estimates the Steel & Rodrigo (2008) ML beta parameter for the current\n");
 		printf2("  supertree by closed-form MLE: beta = W / WD, where W is the sum of\n");
 		printf2("  source-tree weights and WD is the weighted sum of (scaled) RF distances.\n");
 		printf2("  Updates ml_beta so subsequent hs/boot runs use the estimated value.\n\n");
-		printf2("  alpha=auto [experimental]: jointly estimates the tree-size scaling\n");
-		printf2("  exponent alpha via 1-D grid search. Model:\n");
-		printf2("  log L = W*log(beta) - alpha*sum(log k_i) - beta*sum(w_i*d_i/k_i^alpha)\n");
-		printf2("  alpha=0: Steel 2008 (default); alpha=1: normalised by split count;\n");
-		printf2("  alpha>1: down-weights large trees. Updates ml_alpha after estimation.\n\n");
+		printf2("  eta=auto [experimental]: jointly estimates the tree-size scaling\n");
+		printf2("  exponent eta via 1-D grid search. Model:\n");
+		printf2("  log L = W*log(beta) - eta*sum(log k_i) - beta*sum(w_i*d_i/k_i^eta)\n");
+		printf2("  eta=0: Steel 2008 (default); eta=1: normalised by split count;\n");
+		printf2("  eta>1: down-weights large trees. Updates ml_eta after estimation.\n\n");
 		printf2("\tOptions\t\t\tSettings\t\t\tCurrent\n");
         printf2("\t===========================================================\n");
 		printf2("\n\toutfile\t\t\t<filename>\t\t\t*none\n");
-		printf2("\t\t\t\tWrite beta (and alpha) log-likelihood profile\n");
+		printf2("\t\t\t\tWrite beta (and eta) log-likelihood profile\n");
 		printf2("\tscan\t\t\t<integer>\t\t\t*100\n");
 		printf2("\t\t\t\tNumber of points in beta profile\n");
 		printf2("\tscanmin\t\t\t<float>\t\t\t\t*beta/100\n");
 		printf2("\t\t\t\tLower bound of beta scan\n");
 		printf2("\tscanmax\t\t\t<float>\t\t\t\t*beta*10\n");
 		printf2("\t\t\t\tUpper bound of beta scan\n");
-		printf2("\talpha\t\t\tauto\t\t\t\t*off\n");
-		printf2("\t\t\t\tEstimate optimal alpha from data\n");
-		printf2("\tascan\t\t\t<integer>\t\t\t*50\n");
-		printf2("\t\t\t\tNumber of points in alpha grid\n");
-		printf2("\talphamax\t\t<float>\t\t\t\t*3.0\n");
-		printf2("\t\t\t\tUpper bound of alpha grid\n");
+		printf2("\teta\t\t\tauto\t\t\t\t*off\n");
+		printf2("\t\t\t\tEstimate optimal eta from data\n");
+		printf2("\tescan\t\t\t<integer>\t\t\t*50\n");
+		printf2("\t\t\t\tNumber of points in eta grid\n");
+		printf2("\tetamax\t\t\t<float>\t\t\t\t*3.0\n");
+		printf2("\t\t\t\tUpper bound of eta grid\n");
 		printf2("\tfixbeta\t\t\t(no value)\t\t\t*off\n");
 		printf2("\t\t\t\tHold beta fixed at current ml_beta; do not recompute.\n");
-		printf2("\t\t\t\tWith alpha=auto: grid-search alpha with beta fixed.\n");
+		printf2("\t\t\t\tWith eta=auto: grid-search eta with beta fixed.\n");
+		printf2("\tsourcescores\t\t<filename>\t\t\t*none\n");
+		printf2("\t\t\t\tWrite per-source-tree lnL contributions to a TSV file.\n");
+		printf2("\t\t\t\tColumns: name, weight, lnL  (one row per active source tree).\n");
 		}
 
 	 if(num == 30)
@@ -3191,13 +3194,13 @@ void set_parameters(void)
             else
                 printf2("Error: mlscale must be 'paper', 'lust', or 'lnl'\n");
             }
-        if(strcmp(parsed_command[i], "mlalpha") == 0)
+        if(strcmp(parsed_command[i], "mleta") == 0)
             {
             double a = atof(parsed_command[i+1]);
             if(a < 0.0)
-                printf2("Error: mlalpha must be >= 0 (0=Steel 2008, 1=normalised, >1=downweight large trees)\n");
+                printf2("Error: mleta must be >= 0 (0=Steel 2008, 1=normalised, >1=downweight large trees)\n");
             else
-                { ml_alpha = a; printf2("[Experimental] ml_alpha set to %.4f\n", ml_alpha); }
+                { ml_eta = a; printf2("[Experimental] ml_eta set to %.4f\n", ml_eta); }
             }
         }
 

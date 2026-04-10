@@ -68,8 +68,9 @@ float compare_trees(int spr);
 void  rf_precompute_fund_biparts(void);
 float compare_trees_rf(int spr);
 float compare_trees_ml(int spr);
-static float       ml_display_score(float s); /* negate for lnl-scale display */
-static const char *ml_score_label(void);       /* "lnL" or "score"            */
+static float       ml_display_score(float s);                    /* total score → lnL  */
+static float       ml_display_source_score(float raw, int tidx); /* per-tree score → lnL */
+static const char *ml_score_label(void);                         /* "lnL" or "score"   */
 struct taxon * make_taxon(void);
 void intTotree(int tree_num, char *array, int num_taxa);
 int tree_build (int c, char *treestring, struct taxon *parent, int fromfile, int fund_num, int taxaorder);
@@ -242,7 +243,7 @@ float *scores_retained_supers = NULL, *partition_number = NULL, num_partitions =
 float *score_of_bootstraps = NULL, *yaptp_results = NULL, largest_length = 0, dup_weight = 1, loss_weight = 1, hgt_weight = 1, BESTSCORE = -1;
 float ml_beta = 1.0f;   /* L.U.st exponential slope parameter (default 1.0) */
 int   ml_scale = 2;     /* ML score scale: 0=paper (raw sum), 1=lust (log10), 2=lnl (default) */
-double ml_alpha = 0.0;  /* [experimental] tree-size scaling exponent: 0=Steel 2008, 1=normalised, >1=downweight large trees */
+double ml_eta = 0.0;    /* [experimental] tree-size scaling exponent: 0=Steel 2008, 1=normalised, >1=downweight large trees */
 int   bsweight = 0;     /* use per-split BS support as weights in sfit/qfit (0=off, 1=on) */
 time_t interval1, interval2;
 double sup=1;
@@ -1113,8 +1114,10 @@ void mlscores(void)
     int i, k;
     char outfile_name[10000];
     int    scan = 100, user_set_scanmin = FALSE, user_set_scanmax = FALSE;
-    int    do_alpha = FALSE, ascan = 50, fix_beta = FALSE;
-    double alpha_max = 3.0;
+    int    do_eta = FALSE, escan = 50, fix_beta = FALSE;
+    char   sourcescores_name[10000];
+    sourcescores_name[0] = '\0';
+    double eta_max = 3.0;
     float  scanmin = 0.0f, scanmax = 0.0f;
     outfile_name[0] = '\0';
 
@@ -1128,14 +1131,16 @@ void mlscores(void)
             { scanmin = (float)atof(parsed_command[i+1]); user_set_scanmin = TRUE; i++; }
         else if(strcmp(parsed_command[i], "scanmax") == 0 && i + 1 < num_commands)
             { scanmax = (float)atof(parsed_command[i+1]); user_set_scanmax = TRUE; i++; }
-        else if(strcmp(parsed_command[i], "alpha") == 0 && i + 1 < num_commands)
-            { if(strcmp(parsed_command[i+1], "auto") == 0) do_alpha = TRUE; i++; }
-        else if(strcmp(parsed_command[i], "ascan") == 0 && i + 1 < num_commands)
-            { ascan = atoi(parsed_command[i+1]); i++; }
-        else if(strcmp(parsed_command[i], "alphamax") == 0 && i + 1 < num_commands)
-            { alpha_max = atof(parsed_command[i+1]); i++; }
+        else if(strcmp(parsed_command[i], "eta") == 0 && i + 1 < num_commands)
+            { if(strcmp(parsed_command[i+1], "auto") == 0) do_eta = TRUE; i++; }
+        else if(strcmp(parsed_command[i], "escan") == 0 && i + 1 < num_commands)
+            { escan = atoi(parsed_command[i+1]); i++; }
+        else if(strcmp(parsed_command[i], "etamax") == 0 && i + 1 < num_commands)
+            { eta_max = atof(parsed_command[i+1]); i++; }
         else if(strcmp(parsed_command[i], "fixbeta") == 0)
             { fix_beta = TRUE; }
+        else if(strcmp(parsed_command[i], "sourcescores") == 0 && i + 1 < num_commands)
+            { strncpy(sourcescores_name, parsed_command[i+1], 9999); sourcescores_name[9999] = '\0'; i++; }
         }
 
     if(criterion != 7)
@@ -1152,15 +1157,15 @@ void mlscores(void)
     if(!dists_raw) { printf2("mlscores: out of memory\n"); return; }
     compute_raw_rf_dists(dists_raw);
 
-    /* Apply current global ml_alpha scaling for the standard beta MLE */
+    /* Apply current global ml_eta scaling for the standard beta MLE */
     float *dists = malloc(Total_fund_trees * sizeof(float));
     if(!dists) { free(dists_raw); printf2("mlscores: out of memory\n"); return; }
     for(i = 0; i < Total_fund_trees; i++)
         {
         if(!sourcetreetag[i]) { dists[i] = 0.0f; continue; }
         int ki = fund_bipart_sets[i].count;
-        dists[i] = (ml_alpha != 0.0 && ki > 0)
-                   ? (float)(dists_raw[i] / pow((double)ki, ml_alpha))
+        dists[i] = (ml_eta != 0.0 && ki > 0)
+                   ? (float)(dists_raw[i] / pow((double)ki, ml_eta))
                    : dists_raw[i];
         }
 
@@ -1182,20 +1187,25 @@ void mlscores(void)
         }
 
     double beta_hat = fix_beta ? (double)ml_beta : W / WD;
-    /* Full joint lnL = W*log(beta) - beta*WD - alpha*P
+    /* Full joint lnL = W*log(beta) + sum(w_i*log(w_i)) - beta*WD - eta*P
      * where P = sum_i log(k_i) for active trees with k_i > 0.
-     * When alpha=0, penalty=0 and this reduces to Steel & Rodrigo (2008). */
+     * sum(w_i*log(w_i)) accounts for individual beta_i = beta*w_i per Steel (2008).
+     * When all weights=1 this term is zero.  When eta=0, reduces to Steel (2008). */
     double lnl_penalty = 0.0;
-    if(ml_alpha != 0.0 && fund_bipart_sets != NULL)
+    if(ml_eta != 0.0 && fund_bipart_sets != NULL)
         for(i = 0; i < Total_fund_trees; i++)
             if(sourcetreetag[i] && fund_bipart_sets[i].count > 0)
                 lnl_penalty += log((double)fund_bipart_sets[i].count);
-    double logL_hat = W * log(beta_hat) - beta_hat * WD - ml_alpha * lnl_penalty;
+    double w_entropy = 0.0;
+    for(i = 0; i < Total_fund_trees; i++)
+        if(sourcetreetag[i] && tree_weights[i] > 0.0f)
+            w_entropy += (double)tree_weights[i] * log((double)tree_weights[i]);
+    double logL_hat = W * log(beta_hat) + w_entropy - beta_hat * WD - ml_eta * lnl_penalty;
     if(!fix_beta) ml_beta = (float)beta_hat;
 
     printf2("  Source trees     : %d   Weighted RF sum : %.4f\n", Total_fund_trees, (float)WD);
-    if(ml_alpha != 0.0)
-        printf2("  ml_alpha (active): %.4f  (RF distances scaled by k_i^%.4f)\n", ml_alpha, ml_alpha);
+    if(ml_eta != 0.0)
+        printf2("  ml_eta (active): %.4f  (RF distances scaled by k_i^%.4f)\n", ml_eta, ml_eta);
     if(fix_beta)
         {
         printf2("  Beta (fixed)     : %.6f\n", beta_hat);
@@ -1225,12 +1235,12 @@ void mlscores(void)
             {
             fprintf(fp, "# mlscores beta profile log-likelihood\n");
             fprintf(fp, "# Source trees: %d   Weighted RF sum: %.6f\n", Total_fund_trees, WD);
-            if(ml_alpha != 0.0)
-                fprintf(fp, "# ml_alpha: %.6f (RF distances scaled by k_i^alpha)\n", ml_alpha);
+            if(ml_eta != 0.0)
+                fprintf(fp, "# ml_eta: %.6f (RF distances scaled by k_i^eta)\n", ml_eta);
             fprintf(fp, "# Optimal beta (MLE): %.6f   Log-likelihood: %.6f\n", beta_hat, logL_hat);
-            if(ml_alpha != 0.0)
-                fprintf(fp, "# alpha penalty (alpha*sum_log_k): %.6f  (constant offset included in logL)\n",
-                        ml_alpha * lnl_penalty);
+            if(ml_eta != 0.0)
+                fprintf(fp, "# eta penalty (eta*sum_log_k): %.6f  (constant offset included in logL)\n",
+                        ml_eta * lnl_penalty);
             fprintf(fp, "# beta\tlogL\n");
             double log_min = log((double)scanmin);
             double log_max = log((double)scanmax);
@@ -1238,7 +1248,7 @@ void mlscores(void)
             for(i = 0; i < scan; i++)
                 {
                 double beta_k = exp(log_min + i * step);
-                double logL_k = W * log(beta_k) - beta_k * WD - ml_alpha * lnl_penalty;
+                double logL_k = W * log(beta_k) + w_entropy - beta_k * WD - ml_eta * lnl_penalty;
                 fprintf(fp, "%.6f\t%.6f\n", beta_k, logL_k);
                 }
             fclose(fp);
@@ -1246,18 +1256,18 @@ void mlscores(void)
             }
         }
 
-    /* --- Alpha grid search -----------------------------------------------
-     * Model: P(d_i|S,beta,alpha) = (beta/k_i^alpha) * exp(-(beta/k_i^alpha)*d_i)
-     * log L(beta,alpha) = n*log(beta) - alpha*penalty - beta*WD(alpha)
+    /* --- Eta grid search -------------------------------------------------
+     * Model: P(d_i|S,beta,eta) = (beta/k_i^eta) * exp(-(beta/k_i^eta)*d_i)
+     * log L(beta,eta) = n*log(beta) - eta*penalty - beta*WD(eta)
      * penalty = sum_i log(k_i)   [from normalisation constant of each exponential]
-     * Profiling beta: beta_hat(alpha) = W / WD(alpha)
-     * log L(alpha)   = W*log(W/WD(alpha)) - W - alpha*penalty
-     * The penalty term prevents alpha running to infinity.
+     * Profiling beta: beta_hat(eta) = W / WD(eta)
+     * log L(eta)   = W*log(W/WD(eta)) - W - eta*penalty
+     * The penalty term prevents eta running to infinity.
      * --------------------------------------------------------------------- */
-    if(do_alpha)
+    if(do_eta)
         {
-        if(ascan < 2) ascan = 2;
-        if(alpha_max <= 0.0) alpha_max = 3.0;
+        if(escan < 2) escan = 2;
+        if(eta_max <= 0.0) eta_max = 3.0;
 
         /* Penalty: sum of log(k_i) over tagged trees with splits */
         double penalty = 0.0;
@@ -1266,87 +1276,122 @@ void mlscores(void)
                 penalty += log((double)fund_bipart_sets[i].count);
 
         double best_logL_a  = -1e300;
-        double best_alpha   = 0.0;
+        double best_eta     = 0.0;
         double best_beta_a  = beta_hat;  /* stays fixed throughout if fix_beta */
 
         /* Store grid for output */
-        double *g_alpha = malloc(ascan * sizeof(double));
-        double *g_beta  = malloc(ascan * sizeof(double));
-        double *g_logL  = malloc(ascan * sizeof(double));
-        int     g_n     = 0;
+        double *g_eta  = malloc(escan * sizeof(double));
+        double *g_beta = malloc(escan * sizeof(double));
+        double *g_logL = malloc(escan * sizeof(double));
+        int     g_n    = 0;
 
-        if(!g_alpha || !g_beta || !g_logL)
-            { printf2("mlscores alpha: out of memory\n"); }
+        if(!g_eta || !g_beta || !g_logL)
+            { printf2("mlscores eta: out of memory\n"); }
         else
             {
-            for(k = 0; k < ascan; k++)
+            for(k = 0; k < escan; k++)
                 {
-                double alpha_k = (double)k * alpha_max / (ascan - 1);
+                double eta_k = (double)k * eta_max / (escan - 1);
                 double WD_k = 0.0;
                 for(i = 0; i < Total_fund_trees; i++)
                     {
                     if(!sourcetreetag[i]) continue;
                     int ki = fund_bipart_sets[i].count;
-                    double d_k = (alpha_k != 0.0 && ki > 0)
-                                 ? dists_raw[i] / pow((double)ki, alpha_k)
+                    double d_k = (eta_k != 0.0 && ki > 0)
+                                 ? dists_raw[i] / pow((double)ki, eta_k)
                                  : dists_raw[i];
                     WD_k += (double)tree_weights[i] * d_k;
                     }
                 if(WD_k <= 0.0) continue;
                 double beta_k = fix_beta ? beta_hat : W / WD_k;
-                double logL_k = W * log(beta_k) - beta_k * WD_k - alpha_k * penalty;
-                g_alpha[g_n] = alpha_k;
-                g_beta[g_n]  = beta_k;
-                g_logL[g_n]  = logL_k;
+                double logL_k = W * log(beta_k) + w_entropy - beta_k * WD_k - eta_k * penalty;
+                g_eta[g_n]  = eta_k;
+                g_beta[g_n] = beta_k;
+                g_logL[g_n] = logL_k;
                 g_n++;
                 if(logL_k > best_logL_a)
-                    { best_logL_a = logL_k; best_alpha = alpha_k; best_beta_a = beta_k; }
+                    { best_logL_a = logL_k; best_eta = eta_k; best_beta_a = beta_k; }
                 }
 
-            ml_alpha = best_alpha;
+            ml_eta = best_eta;
             if(!fix_beta) ml_beta = (float)best_beta_a;
 
-            printf2("\n  --- Tree-size scaling exponent (alpha) estimation ---\n");
+            printf2("\n  --- Tree-size scaling exponent (eta) estimation ---\n");
             printf2("  Penalty term (sum log k_i) : %.4f\n", penalty);
-            printf2("  Alpha grid  : 0 to %.2f  (%d points)\n", alpha_max, ascan);
-            printf2("  Optimal alpha : %.4f\n", best_alpha);
+            printf2("  Eta grid  : 0 to %.2f  (%d points)\n", eta_max, escan);
+            printf2("  Optimal eta : %.4f\n", best_eta);
             if(fix_beta)
                 printf2("  Beta (fixed)  : %.6f\n", best_beta_a);
             else
                 printf2("  Optimal beta  : %.6f\n", best_beta_a);
             printf2("  Log-likelihood: %.4f\n", best_logL_a);
-            printf2("  ml_alpha updated to %.4f\n", ml_alpha);
+            printf2("  ml_eta updated to %.4f\n", ml_eta);
             if(fix_beta)
                 printf2("  ml_beta unchanged (fixbeta active)\n");
             else
                 printf2("  ml_beta  updated to %.6f\n", ml_beta);
 
-            /* Append alpha profile to outfile if requested */
+            /* Append eta profile to outfile if requested */
             if(outfile_name[0] != '\0' && g_n > 0)
                 {
                 FILE *fp2 = fopen(outfile_name, "a");
                 if(!fp2)
-                    { printf2("mlscores: cannot reopen '%s' for alpha append\n", outfile_name); }
+                    { printf2("mlscores: cannot reopen '%s' for eta append\n", outfile_name); }
                 else
                     {
-                    fprintf(fp2, "\n# --- alpha profile ---\n");
-                    fprintf(fp2, "# Model: log L(alpha) = W*log(W/WD(alpha)) - W - alpha*penalty\n");
+                    fprintf(fp2, "\n# --- eta profile ---\n");
+                    fprintf(fp2, "# Model: log L(eta) = W*log(W/WD(eta)) - W - eta*penalty\n");
                     fprintf(fp2, "# Penalty (sum log k_i): %.6f\n", penalty);
-                    fprintf(fp2, "# Optimal alpha (MLE): %.6f\n", best_alpha);
+                    fprintf(fp2, "# Optimal eta (MLE): %.6f\n", best_eta);
                     fprintf(fp2, "# Optimal beta  (MLE): %.6f\n", best_beta_a);
                     fprintf(fp2, "# Joint log-likelihood: %.6f\n", best_logL_a);
-                    fprintf(fp2, "# alpha\tbeta\tlogL\n");
+                    fprintf(fp2, "# eta\tbeta\tlogL\n");
                     for(k = 0; k < g_n; k++)
-                        fprintf(fp2, "%.6f\t%.6f\t%.6f\n", g_alpha[k], g_beta[k], g_logL[k]);
+                        fprintf(fp2, "%.6f\t%.6f\t%.6f\n", g_eta[k], g_beta[k], g_logL[k]);
                     fclose(fp2);
-                    printf2("  Alpha profile appended to: %s\n", outfile_name);
+                    printf2("  Eta profile appended to: %s\n", outfile_name);
                     }
                 }
             }
 
-        free(g_alpha);
+        free(g_eta);
         free(g_beta);
         free(g_logL);
+        }
+
+    /* --- Source tree scores file ------------------------------------------ */
+    if(sourcescores_name[0] != '\0')
+        {
+        FILE *ssf = fopen(sourcescores_name, "w");
+        if(!ssf)
+            { printf2("mlscores: cannot open '%s' for writing\n", sourcescores_name); }
+        else
+            {
+            fprintf(ssf, "# mlscores source tree lnL contributions\n");
+            fprintf(ssf, "# input file: %s\n", inputfilename[0] ? inputfilename : "(unknown)");
+            fprintf(ssf, "# beta=%.6f  eta=%.6f\n", beta_hat, ml_eta);
+            fprintf(ssf, "# name\tweight\tlnL\n");
+            for(i = 0; i < Total_fund_trees; i++)
+                {
+                if(!sourcetreetag[i]) continue;
+                double w_k = (double)tree_weights[i];
+                int    ki  = (fund_bipart_sets != NULL) ? fund_bipart_sets[i].count : 0;
+                double d_k = (ml_eta != 0.0 && ki > 0)
+                             ? dists_raw[i] / pow((double)ki, ml_eta)
+                             : (double)dists_raw[i];
+                double lnL_k = w_k * log(beta_hat);
+                if(w_k > 0.0) lnL_k += w_k * log(w_k);
+                if(ml_eta != 0.0 && ki > 0)
+                    lnL_k -= ml_eta * w_k * log((double)ki);
+                lnL_k -= beta_hat * w_k * d_k;
+                if(strcmp(tree_names[i], "") != 0)
+                    fprintf(ssf, "%s\t%.6f\t%.6f\n", tree_names[i], w_k, lnL_k);
+                else
+                    fprintf(ssf, "%d\t%.6f\t%.6f\n", i+1, w_k, lnL_k);
+                }
+            fclose(ssf);
+            printf2("  Source tree scores written to: %s\n", sourcescores_name);
+            }
         }
 
     free(dists_raw);
@@ -2116,7 +2161,7 @@ static void run_usertrees_ml_tests(
         {
         fprintf(tfile, "# ML supertree topology tests\n");
         fprintf(tfile, "# Best tree: T%d  lnL=%.6f  beta=%.4f\n",
-                best_idx+1, -(double)best_score_ml, ml_beta);
+                best_idx+1, (double)ml_display_score(best_score_ml), ml_beta);
         fprintf(tfile, "# tree\tdelta_lnL\tn_inform\tn_plus\tn_minus\tWS_p\tKH_z\tKH_p\tSH_p\n");
         }
 
@@ -2204,15 +2249,18 @@ static void run_usertrees_ml_tests(
         else if(nboot == 0)
             sh_p = -1.0;  /* sentinel: skipped */
 
+        double lnL_i     = (double)ml_display_score(all_total_scores[i]);
+        double delta_lnL = lnL_i - (double)ml_display_score(all_total_scores[best_idx]);
+
         printf2("  T%-7d  lnL=%-6.3f  p=%-8.4f  z=%-5.2f p=%-5.3f %-3s  p=%-6.4f %-3s\n",
-                i+1, -(double)all_total_scores[i],
+                i+1, lnL_i,
                 ws_p,
                 kh_z, kh_p, ml_sig_label(kh_p, alpha),
                 sh_p >= 0 ? sh_p : 9.9999, sh_p >= 0 ? ml_sig_label(sh_p, alpha) : "--");
 
         if(tfile)
             fprintf(tfile, "T%d\t%.6f\t%d\t%d\t%d\t%.6f\t%.4f\t%.6f\t%.6f\n",
-                    i+1, -(delta_total),
+                    i+1, delta_lnL,
                     n_inform, n_plus, n_minus,
                     ws_p, kh_z, kh_p, sh_p >= 0 ? sh_p : -1.0);
 
@@ -2663,7 +2711,8 @@ void usertrees_search(void)
 							fprintf(sourcescoresfile, "sourcetree %s:\t", tree_names[k]);
 						else
 							fprintf(sourcescoresfile, "sourcetree %d:\t", k);
-						fprintf(sourcescoresfile, "%f\n", sourcetree_scores[k]);
+						fprintf(sourcescoresfile, "%f\n",
+							ml_display_source_score(sourcetree_scores[k], k));
 						}
 					}
 				
@@ -2898,25 +2947,20 @@ static void hs_free_thread_state(void)
 
 
 /* --- ML display helpers --------------------------------------------------
- * ml_display_score: convert internal minimisation score to the true joint MLE lnL.
+ * ml_display_score: convert internal minimisation score to lnL at the
+ * globally fixed ml_beta and ml_eta.
  *
- *   Internal score s = ml_beta * WD(alpha)  (positive, minimised during search).
+ *   Internal score s = ml_beta * WD(eta)  (positive, minimised during search).
+ *   WD = s / ml_beta
  *
- *   The true joint MLE lnL for any topology is obtained by profiling out beta:
+ *   lnL at fixed beta:
+ *     lnL = W * log(beta) - beta * WD - eta * P
+ *         = W * log(ml_beta) - s - eta * P
  *
- *     beta_hat = W / WD(alpha)  =>  lnL = W*log(beta_hat) - W - alpha*P
+ *   This value changes when ml_beta or ml_eta change, so it reflects the
+ *   parameters shown in the run header.  When ml_beta = beta_hat (MLE), this
+ *   equals the profile MLE lnL.
  *
- *   Since s = ml_beta * WD, we have WD = s / ml_beta, and therefore
- *     beta_hat = W * ml_beta / s
- *
- *   So:  lnL = W * log(W * ml_beta / s) - W - alpha * P
- *
- *   This is identical to what mlscores reports for any given topology, making
- *   values directly comparable across hs runs and mlscores calls regardless of
- *   what the fixed ml_beta happens to be.  The search objective is unaffected
- *   because minimising s is monotonically equivalent to maximising this lnL.
- *
- *   When alpha=0 and ml_beta=beta_hat, this reduces to Steel & Rodrigo (2008).
  *   For paper/lust scales the score is returned as-is (no transformation).
  *
  * ml_score_label:  returns column header "lnL" or "score".
@@ -2924,30 +2968,61 @@ static void hs_free_thread_state(void)
 static float ml_display_score(float s)
     {
     if(!(criterion == 7 && ml_scale == 2)) return s;
-    /* W = sum of active tree weights */
-    double W = 0.0;
+    double W = 0.0, penalty = 0.0, w_entropy = 0.0;
     int _i;
     for(_i = 0; _i < Total_fund_trees; _i++)
-        if(sourcetreetag[_i]) W += (double)tree_weights[_i];
-    /* alpha penalty: P = sum_i log(k_i) for active trees with k_i > 0 */
-    double penalty = 0.0;
-    if(ml_alpha != 0.0 && fund_bipart_sets != NULL)
+        if(sourcetreetag[_i])
+            {
+            double w = (double)tree_weights[_i];
+            W += w;
+            if(w > 0.0) w_entropy += w * log(w);
+            }
+    if(ml_eta != 0.0 && fund_bipart_sets != NULL)
         for(_i = 0; _i < Total_fund_trees; _i++)
             if(sourcetreetag[_i] && fund_bipart_sets[_i].count > 0)
                 penalty += log((double)fund_bipart_sets[_i].count);
-    /* True MLE lnL: W*log(W*ml_beta/s) - W - alpha*P
-     * Guard against s<=0 (degenerate: all source trees perfectly agree). */
+    /* lnL at fixed ml_beta: W*log(ml_beta) + sum(w_i*log(w_i)) - s - eta*P
+     * The sum(w_i*log(w_i)) term accounts for individual beta_i = ml_beta*w_i.
+     * When all weights are 1 this term is zero. */
     double lnL;
     double sd = (double)s;
-    if(W > 0.0 && ml_beta > 0.0 && sd > 0.0)
-        lnL = W * log(W * (double)ml_beta / sd) - W - ml_alpha * penalty;
+    if(ml_beta > 0.0 && sd >= 0.0)
+        lnL = W * log((double)ml_beta) + w_entropy - sd - ml_eta * penalty;
     else
-        lnL = -sd - ml_alpha * penalty;   /* fallback for s==0 edge case */
+        lnL = w_entropy - sd - ml_eta * penalty;   /* fallback */
     return (float)lnL;
     }
 
 static const char *ml_score_label(void)
     { return (criterion == 7 && ml_scale == 2) ? "lnL" : "score"; }
+
+/* ml_display_source_score: convert a single source-tree's raw ML score to
+ * its individual lnL contribution.
+ *
+ *   sourcetree_scores[k] = ml_beta * w_k * d_k * k_k^{-eta}
+ *                        = the beta*d term for tree k (positive, minimised).
+ *
+ *   The per-tree lnL contribution from the exponential model is:
+ *     lnL_k = w_k * log(beta / k_k^eta) - beta * w_k * d_k * k_k^{-eta}
+ *           = w_k * (log(beta) - eta*log(k_k)) - sourcetree_scores[k]
+ *
+ *   tree_idx is the source tree index (used to look up w_k and k_k).
+ */
+static float ml_display_source_score(float raw_score, int tree_idx)
+    {
+    if(!(criterion == 7 && ml_scale == 2)) return raw_score;
+    if(ml_beta <= 0.0f) return raw_score;
+    double w_k  = (double)tree_weights[tree_idx];
+    /* full per-tree lnL: w_k*log(beta_i) where beta_i = ml_beta*w_k
+     * = w_k*(log(ml_beta) + log(w_k)) - eta*w_k*log(k_k) - raw_score */
+    double lnL_k = w_k * log((double)ml_beta);
+    if(w_k > 0.0) lnL_k += w_k * log(w_k);
+    if(ml_eta != 0.0 && fund_bipart_sets != NULL
+       && fund_bipart_sets[tree_idx].count > 0)
+        lnL_k -= ml_eta * w_k * log((double)fund_bipart_sets[tree_idx].count);
+    lnL_k -= (double)raw_score;
+    return (float)lnL_k;
+    }
 
 /* --- end RF/ML functions ------------------------------------------------- */
 
@@ -3720,15 +3795,15 @@ void heuristic_search(int user, int print, int sample, int nreps)
 			else
 				printf2("Error: mlscale must be 'paper', 'lust', or 'lnl'\n");
 			}
-		if(strcmp(parsed_command[i], "mlalpha") == 0)
+		if(strcmp(parsed_command[i], "mleta") == 0)
 			{
 			double a = atof(parsed_command[i+1]);
 			if(a < 0.0)
-				printf2("Error: mlalpha must be >= 0 (0=Steel 2008, 1=normalised, >1=downweight large trees)\n");
+				printf2("Error: mleta must be >= 0 (0=Steel 2008, 1=normalised, >1=downweight large trees)\n");
 			else
 				{
-				ml_alpha = a;
-				printf2("[Experimental] ml_alpha set to %.4f (tree-size scaling exponent)\n", ml_alpha);
+				ml_eta = a;
+				printf2("[Experimental] ml_eta set to %.4f (tree-size scaling exponent)\n", ml_eta);
 				}
 			}
 		if(strcmp(parsed_command[i], "bsweight") == 0)
@@ -3820,8 +3895,8 @@ void heuristic_search(int user, int print, int sample, int nreps)
                     printf2("Robinson-Foulds distance (RF)\n");
                     break;
                 case 7:
-                    printf2("Maximum likelihood supertree (beta=%.4f, alpha=%.4f, scale=%s)\n",
-                            ml_beta, ml_alpha,
+                    printf2("Maximum likelihood supertree (beta=%.4f, eta=%.4f, scale=%s)\n",
+                            ml_beta, ml_eta,
                             ml_scale == 1 ? "lust (Akanni et al. 2014)" : ml_scale == 2 ? "lnl" : "Steel & Rodrigo 2008");
                     break;
                 default:
