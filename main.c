@@ -25,6 +25,237 @@
 #include "viz.h"
 #include "main.h"
 
+/* ===== Readline enhancements ==========================================
+ * Tab completion, named app (enables ~/.inputrc $if clann blocks),
+ * and a coloured prompt.  All guarded by HAVE_READLINE.
+ * ===================================================================== */
+#ifdef HAVE_READLINE
+
+/* Coloured prompt: bold green "clann" + reset, RL_PROMPT_{START,END}_IGNORE
+ * wrappers (\001 / \002) tell readline not to count escape bytes toward
+ * the display width, preventing cursor-position miscalculation.          */
+#define CLANN_PROMPT \
+    "\001\033[1;32m\002clann\001\033[0m\002> "
+
+/* ---- completion tables ------------------------------------------------ */
+
+static const char *clann_commands[] = {
+    "exe", "hs", "boot", "nj", "usertrees", "set", "showtrees",
+    "excludetrees", "includetrees", "deletetaxa", "restoretaxa",
+    "randomisetrees", "rfdists", "sprdists", "consensus", "reconstruct",
+    "mlscores", "generatetrees", "alltrees", "yaptp", "prunemonophylies",
+    "mapunknowns", "randomprune", "ideal", "tips", "hgtanalysis",
+    "exhaustivespr", "log", "savetrees", "help", "quit", NULL
+};
+
+static const char *opts_exe[] = {
+    "maxnamelen=", "delimiter_char=", "summary=", "autoprunemono=",
+    "autoweight=", "clanfile=", "print", NULL
+};
+static const char *vals_maxnamelen[]   = { "full", "delimited", NULL };
+static const char *vals_autoprunemono[]= { "yes", "no", NULL };
+static const char *vals_autoweight[]   = { "clan", "splitviol", NULL };
+static const char *vals_summary[]      = { "short", "full", NULL };
+
+static const char *opts_hs[] = {
+    "nreps=", "nbest=", "keep=", "savetrees=", "start=", "swap=",
+    "nsteps=", "criterion=", "missing=", "mlbeta=", "mleta=", "mlscale=",
+    "strategy=", "sample=", "progress=", "seed=", "nthreads=", "bsweight=",
+    "scan", "scanmin=", "scanmax=", "escan", "eta=", "etamax=", "fixbeta=",
+    NULL
+};
+static const char *opts_boot[] = {
+    "nreps=", "nbest=", "savetrees=", "criterion=", "missing=", "mlbeta=",
+    "mleta=", "mlscale=", "nthreads=", "seed=", NULL
+};
+static const char *opts_nj[] = {
+    "missing=", "savetrees=", NULL
+};
+static const char *opts_usertrees[] = {
+    "file=", "criterion=", "mlbeta=", "mleta=", "mlscale=", "normcorrect",
+    "savetrees=", "sourcescores=", "tests=", "testsfile=", "nboot=",
+    "nthreads=", "printsourcescores", NULL
+};
+static const char *opts_set[] = {
+    "criterion=", "seed=", "mlbeta=", "mleta=", "mlscale=", "mlscale=",
+    "autoprunemono=", "autoweight=", "clanfile=", "maxnamelen=", NULL
+};
+static const char *opts_showtrees[] = {
+    "range=", "namecontains=", "savetrees=", "filename=", "display=",
+    "fullnames", NULL
+};
+static const char *opts_excludetrees[] = {
+    "range=", "size=", "namecontains=", "containstaxa=", "score=",
+    "singlecopy", "multicopy", NULL
+};
+static const char *opts_includetrees[] = {
+    "range=", "size=", "namecontains=", "containstaxa=", "score=", NULL
+};
+static const char *opts_deletetaxa[] = { "mintaxa=", NULL };
+static const char *opts_rfdists[]    = { "filename=", "output=", "missing=", NULL };
+static const char *opts_sprdists[]   = { "filename=", "output=", NULL };
+static const char *opts_consensus[]  = { "savetrees=", "filename=", NULL };
+static const char *opts_reconstruct[]= {
+    "supertree=", "treefile=", "outfile=", "sourcedata=", "savescores=", NULL
+};
+static const char *opts_mlscores[]   = {
+    "fixbeta=", "mlbeta=", "mleta=", "mlscale=", "scan", "scanmin=",
+    "scanmax=", "escan", "eta=", "etamax=", "nbins=", "histogramfile=", NULL
+};
+static const char *opts_generatetrees[] = { "ntrees=", "savetrees=", NULL };
+static const char *opts_log[]           = { "status=", "filename=", NULL };
+static const char *opts_savetrees[]     = { "filename=", NULL };
+
+/* Value tables for options that take a fixed set of values */
+static const char *vals_criterion[] = {
+    "dfit", "sfit", "qfit", "mrp", "avcon", "recon", "rf", "ml", NULL
+};
+static const char *vals_mlscale[]   = { "lnl", "raw", NULL };
+static const char *vals_missing[]   = { "4point", "ultrametric", "none", NULL };
+static const char *vals_start[]     = { "memory", "random", NULL };
+static const char *vals_swap[]      = { "spr", "tbr", "nni", NULL };
+static const char *vals_strategy[]  = { "best", "random", NULL };
+static const char *vals_yesno[]     = { "yes", "no", NULL };
+static const char *vals_output[]    = { "matrix", "vector", NULL };
+static const char *vals_size[]      = { "equalto", "lessthan", "greaterthan", NULL };
+static const char *vals_status[]    = { "on", "off", NULL };
+
+/* Map option name → value list (for completing after "option=") */
+typedef struct { const char *opt; const char **vals; } opt_vals_t;
+static const opt_vals_t opt_val_map[] = {
+    { "criterion",    vals_criterion    },
+    { "mlscale",      vals_mlscale      },
+    { "missing",      vals_missing      },
+    { "start",        vals_start        },
+    { "swap",         vals_swap         },
+    { "strategy",     vals_strategy     },
+    { "savetrees",    vals_yesno        },
+    { "display",      vals_yesno        },
+    { "tests",        vals_yesno        },
+    { "progress",     vals_yesno        },
+    { "autoprunemono",vals_autoprunemono},
+    { "autoweight",   vals_autoweight   },
+    { "maxnamelen",   vals_maxnamelen   },
+    { "summary",      vals_summary      },
+    { "output",       vals_output       },
+    { "size",         vals_size         },
+    { "status",       vals_status       },
+    { NULL, NULL }
+};
+
+/* Map command name → option list */
+typedef struct { const char *cmd; const char **opts; } cmd_opts_t;
+static const cmd_opts_t cmd_opts_table[] = {
+    { "exe",          opts_exe          },
+    { "hs",           opts_hs           },
+    { "boot",         opts_boot         },
+    { "nj",           opts_nj           },
+    { "usertrees",    opts_usertrees    },
+    { "set",          opts_set          },
+    { "showtrees",    opts_showtrees    },
+    { "excludetrees", opts_excludetrees },
+    { "includetrees", opts_includetrees },
+    { "deletetaxa",   opts_deletetaxa   },
+    { "rfdists",      opts_rfdists      },
+    { "sprdists",     opts_sprdists     },
+    { "consensus",    opts_consensus    },
+    { "reconstruct",  opts_reconstruct  },
+    { "mlscores",     opts_mlscores     },
+    { "generatetrees",opts_generatetrees},
+    { "log",          opts_log          },
+    { "savetrees",    opts_savetrees    },
+    { NULL, NULL }
+};
+
+/* ---- completion generator --------------------------------------------- */
+
+static int           _compl_idx  = 0;
+static const char  **_compl_list = NULL;
+
+static char *_list_generator(const char *text, int state)
+    {
+    if(!state) _compl_idx = 0;
+    size_t len = strlen(text);
+    while(_compl_list && _compl_list[_compl_idx])
+        {
+        const char *s = _compl_list[_compl_idx++];
+        if(strncasecmp(s, text, len) == 0)
+            return strdup(s);
+        }
+    return NULL;
+    }
+
+static char **clann_completion(const char *text, int start, int end)
+    {
+    int i;
+    (void)end;
+
+    /* Suppress readline's default filename fallback */
+    rl_attempted_completion_over = 1;
+
+    /* ---- completing the first word: command name ---- */
+    if(start == 0)
+        {
+        _compl_list = clann_commands;
+        return rl_completion_matches(text, _list_generator);
+        }
+
+    /* ---- extract command word from line buffer ---- */
+    char cmd[64];
+    cmd[0] = '\0';
+    i = 0;
+    while(rl_line_buffer[i] == ' ' || rl_line_buffer[i] == '\t') i++;
+    int j = 0;
+    while(rl_line_buffer[i] && rl_line_buffer[i] != ' ' &&
+          rl_line_buffer[i] != '\t' && rl_line_buffer[i] != ';' && j < 63)
+        cmd[j++] = rl_line_buffer[i++];
+    cmd[j] = '\0';
+
+    /* ---- check if we are completing a value after "option=" ---- */
+    /* Walk backwards from cursor to find if there is an unfinished "opt=" */
+    const char *eq = NULL;
+    for(i = start - 1; i >= 0; i--)
+        {
+        if(rl_line_buffer[i] == '=') { eq = rl_line_buffer + i; break; }
+        if(rl_line_buffer[i] == ' ' || rl_line_buffer[i] == '\t') break;
+        }
+    if(eq)
+        {
+        /* extract the option name before '=' */
+        char optname[64]; optname[0] = '\0';
+        int k = (int)(eq - rl_line_buffer) - 1;
+        while(k >= 0 && rl_line_buffer[k] != ' ' && rl_line_buffer[k] != '\t') k--;
+        k++;
+        int on = 0;
+        while(rl_line_buffer[k] != '=' && on < 63)
+            optname[on++] = rl_line_buffer[k++];
+        optname[on] = '\0';
+        /* look up value list */
+        for(i = 0; opt_val_map[i].opt; i++)
+            {
+            if(strcmp(opt_val_map[i].opt, optname) == 0)
+                {
+                _compl_list = opt_val_map[i].vals;
+                return rl_completion_matches(text, _list_generator);
+                }
+            }
+        return NULL;
+        }
+
+    /* ---- complete option name for this command ---- */
+    for(i = 0; cmd_opts_table[i].cmd; i++)
+        {
+        if(strcmp(cmd_opts_table[i].cmd, cmd) == 0)
+            {
+            _compl_list = cmd_opts_table[i].opts;
+            return rl_completion_matches(text, _list_generator);
+            }
+        }
+
+    return NULL;
+    }
+
+#endif /* HAVE_READLINE */
 
 /* ===== CLI direct-command interface ===================================
  *
@@ -230,19 +461,29 @@ int main(int argc, char *argv[])
 
 	
 	/********** START OF READLINE STUFF ***********/
-	#ifdef HAVE_READLINE    
+	#ifdef HAVE_READLINE
 	if(command_line == FALSE)
 		{
-		PATH[0] ='\0'; HOME[0] = '\0'; 
-		
+		PATH[0] ='\0'; HOME[0] = '\0';
+
 		system("echo $HOME > clann5361temp1023");
 		tmpclann = fopen("clann5361temp1023", "r");
 		fscanf(tmpclann, "%s", HOME);
 		fclose(tmpclann);
-		remove("clann5361temp1023"); 
+		remove("clann5361temp1023");
 		strcpy(PATH, HOME);
 		strcat(PATH, "/.clannhistory");
 		read_history(PATH);
+
+		/* Name this application so users can write "$if clann" blocks in
+		 * ~/.inputrc to add Clann-specific key bindings.                 */
+		rl_readline_name = "clann";
+
+		/* Register tab-completion handler */
+		rl_attempted_completion_function = clann_completion;
+
+		/* Show all completions immediately on first Tab (no double-tap needed) */
+		rl_bind_key('\t', rl_complete);
 		}
     #endif
     /********** END OF READLINE STUFF *************/
@@ -1049,7 +1290,7 @@ int main(int argc, char *argv[])
 				printf2("An error occurred while setting a signal handler\n");
 				}
 		   #ifdef HAVE_READLINE
-/*****/    command = readline("clann> "); 
+/*****/    command = readline(CLANN_PROMPT);
 /*****/    command = realloc(command, 10000*sizeof(char));
 		   #else
  	        printf2("clann> ");
