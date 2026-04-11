@@ -38,14 +38,25 @@ if test -n "$READLINE_PREFIX"; then
     LDFLAGS="-L$READLINE_PREFIX/lib $LDFLAGS"
 fi
 
-dnl -- Step 2: check for readline ------------------------------------------
-AC_CHECK_LIB(readline, readline,
-    [AC_SUBST([LIBREADLINE], ["-lreadline -lncurses"])
+dnl -- Step 2: find terminal library (readline's link-time dependency) ------
+dnl On Linux readline typically needs -ltinfo or -lncurses to link.
+dnl Detect whichever is present so we can pass it to the readline test.
+READLINE_TERMLIB=""
+AC_CHECK_LIB([tinfo], [tgetent],
+    [READLINE_TERMLIB="-ltinfo"],
+    [AC_CHECK_LIB([ncurses], [initscr],
+        [READLINE_TERMLIB="-lncurses"],
+        [READLINE_TERMLIB=""])])
+
+dnl -- Step 3: check for readline, linking against the terminal library -----
+AC_CHECK_LIB([readline], [readline],
+    [AC_SUBST([LIBREADLINE], ["-lreadline $READLINE_TERMLIB"])
      AC_DEFINE([HAVE_READLINE], [], [Define if GNU readline or libedit is available])
     ],
     [echo "No readline found — Clann will use standard input instead"
      echo "For full CLI functionality: brew install readline  (macOS)"
-     echo "                     or:   apt install libreadline-dev  (Debian/Ubuntu)"])
+     echo "                     or:   apt install libreadline-dev  (Debian/Ubuntu)"],
+    [$READLINE_TERMLIB])
 
 
 dnl continue
