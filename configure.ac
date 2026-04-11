@@ -8,6 +8,10 @@ AM_INIT_AUTOMAKE([1.5 foreign])
 AM_MAINTAINER_MODE([disable])
 AC_CONFIG_HEADERS([config.h])
 
+dnl AC_PROG_CC must come before any AC_CHECK_LIB calls so the C compiler
+dnl is properly configured for link tests on all platforms.
+AC_PROG_CC
+
 dnl -----------------------------------------------------------------------
 dnl Readline detection.
 dnl
@@ -73,10 +77,6 @@ if test "$READLINE_FOUND" = "no"; then
         [$READLINE_TERMLIB])
 fi
 
-
-dnl continue
-
-AC_PROG_CC
 
 AC_OPENMP
 
