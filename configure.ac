@@ -12,21 +12,30 @@ dnl -----------------------------------------------------------------------
 dnl OpenMP compiler selection (macOS only).
 dnl
 dnl Apple's Clang does not ship an OpenMP runtime, so AC_OPENMP reports
-dnl "unsupported" on a stock macOS install.  When CC is not already set
-dnl by the user we search for a Homebrew GCC (gcc-14 ... gcc-11) in the
-dnl standard Homebrew prefixes (/opt/homebrew for Apple Silicon,
-dnl /usr/local for Intel/Rosetta).  If one is found it is pre-set as CC
-dnl before AC_PROG_CC runs, so AC_OPENMP automatically picks it up.
+dnl "unsupported" on a stock macOS install.  We inspect the effective
+dnl compiler's --version output; if it identifies itself as Apple Clang /
+dnl Apple LLVM we search Homebrew prefixes for a real GCC (gcc-15 ... gcc-11)
+dnl on both Apple Silicon (/opt/homebrew) and Intel (/usr/local).  When one
+dnl is found we set CC and clear the autoconf cache so AC_PROG_CC and then
+dnl AC_OPENMP pick it up automatically.
 dnl
-dnl On Linux (including HPC clusters) GCC supports OpenMP natively and no
-dnl special handling is needed.  Users who have already set CC explicitly
-dnl (e.g. CC=/opt/homebrew/bin/gcc-14 ./configure) are also left alone.
+dnl Reasons this is more robust than checking "${CC+set}":
+dnl   * CC may be set to "cc" or "gcc" which are Apple Clang symlinks on
+dnl     a stock macOS install — the old guard would silently skip the probe.
+dnl   * config.cache from a previous run can hold ac_cv_prog_CC=clang; we
+dnl     clear it whenever we override CC so the cache stays consistent.
+dnl
+dnl On Linux GCC supports OpenMP natively; no special handling is needed.
+dnl A user who explicitly supplies a non-Clang CC is left entirely alone.
 dnl -----------------------------------------------------------------------
-if test -z "${CC+set}"; then
-    case "$(uname -s 2>/dev/null)" in
-    Darwin*)
+case "$(uname -s 2>/dev/null)" in
+Darwin*)
+    dnl Determine the effective compiler: honour an explicit CC, else "cc".
+    _eff_cc="${CC:-cc}"
+    dnl If it reports itself as Apple Clang/LLVM it has no OpenMP runtime.
+    if "$_eff_cc" --version 2>&1 | grep -q 'Apple clang\|Apple LLVM'; then
         _brew_gcc=
-        for _gcc_ver in 14 13 12 11; do
+        for _gcc_ver in 15 14 13 12 11; do
             for _brew_prefix in /opt/homebrew /usr/local; do
                 if test -x "$_brew_prefix/bin/gcc-$_gcc_ver"; then
                     _brew_gcc="$_brew_prefix/bin/gcc-$_gcc_ver"
@@ -36,14 +45,16 @@ if test -z "${CC+set}"; then
         done
         if test -n "$_brew_gcc"; then
             CC="$_brew_gcc"
-            AC_MSG_NOTICE([macOS: Homebrew GCC found at $CC — will use it for OpenMP support])
+            dnl Clear any cached compiler choice from a previous configure run.
+            AS_UNSET([ac_cv_prog_CC])
+            AC_MSG_NOTICE([macOS: Apple Clang detected; switching to Homebrew GCC at $CC for OpenMP support])
         else
-            AC_MSG_NOTICE([macOS: no Homebrew GCC found; clann will be built single-threaded])
+            AC_MSG_NOTICE([macOS: Apple Clang detected and no Homebrew GCC found; clann will be built single-threaded])
             AC_MSG_NOTICE([  To enable multi-threading: brew install gcc  (then re-run ./configure)])
         fi
-        ;;
-    esac
-fi
+    fi
+    ;;
+esac
 
 dnl AC_PROG_CC must come before any AC_CHECK_LIB calls so the C compiler
 dnl is properly configured for link tests on all platforms.

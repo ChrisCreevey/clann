@@ -3215,11 +3215,12 @@ fi
 ac_config_headers="$ac_config_headers config.h"
 
 
-if test -z "${CC+set}"; then
-    case "$(uname -s 2>/dev/null)" in
-    Darwin*)
+case "$(uname -s 2>/dev/null)" in
+Darwin*)
+        _eff_cc="${CC:-cc}"
+        if "$_eff_cc" --version 2>&1 | grep -q 'Apple clang\|Apple LLVM'; then
         _brew_gcc=
-        for _gcc_ver in 14 13 12 11; do
+        for _gcc_ver in 15 14 13 12 11; do
             for _brew_prefix in /opt/homebrew /usr/local; do
                 if test -x "$_brew_prefix/bin/gcc-$_gcc_ver"; then
                     _brew_gcc="$_brew_prefix/bin/gcc-$_gcc_ver"
@@ -3229,17 +3230,18 @@ if test -z "${CC+set}"; then
         done
         if test -n "$_brew_gcc"; then
             CC="$_brew_gcc"
-            { printf "%s\n" "$as_me:${as_lineno-$LINENO}: macOS: Homebrew GCC found at $CC — will use it for OpenMP support" >&5
-printf "%s\n" "$as_me: macOS: Homebrew GCC found at $CC — will use it for OpenMP support" >&6;}
+                        { ac_cv_prog_CC=; unset ac_cv_prog_CC;}
+            { printf "%s\n" "$as_me:${as_lineno-$LINENO}: macOS: Apple Clang detected; switching to Homebrew GCC at $CC for OpenMP support" >&5
+printf "%s\n" "$as_me: macOS: Apple Clang detected; switching to Homebrew GCC at $CC for OpenMP support" >&6;}
         else
-            { printf "%s\n" "$as_me:${as_lineno-$LINENO}: macOS: no Homebrew GCC found; clann will be built single-threaded" >&5
-printf "%s\n" "$as_me: macOS: no Homebrew GCC found; clann will be built single-threaded" >&6;}
+            { printf "%s\n" "$as_me:${as_lineno-$LINENO}: macOS: Apple Clang detected and no Homebrew GCC found; clann will be built single-threaded" >&5
+printf "%s\n" "$as_me: macOS: Apple Clang detected and no Homebrew GCC found; clann will be built single-threaded" >&6;}
             { printf "%s\n" "$as_me:${as_lineno-$LINENO}:   To enable multi-threading: brew install gcc  (then re-run ./configure)" >&5
 printf "%s\n" "$as_me:   To enable multi-threading: brew install gcc  (then re-run ./configure)" >&6;}
         fi
-        ;;
-    esac
-fi
+    fi
+    ;;
+esac
 
 
 
