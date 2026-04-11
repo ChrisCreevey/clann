@@ -1002,6 +1002,7 @@ float get_recon_score(char *giventree, int numspectries, int numgenetries)
 
 		duplicate_tree(species_tree, NULL);
 		spec_copy = temp_top;
+		temp_top = NULL;
 		temp_top2 = NULL;
 		
 		
@@ -1021,7 +1022,11 @@ float get_recon_score(char *giventree, int numspectries, int numgenetries)
 			{
 			if(dospecrand > 0)
 				{
+				#ifdef _OPENMP
+				spec_start = (int)fmod(rand_r(&thread_seed), num_species_roots);
+				#else
 				spec_start = (int)fmod(rand(), num_species_roots);
+				#endif
 				spec_end = spec_start +1;
 				}
 			else
@@ -1063,6 +1068,7 @@ float get_recon_score(char *giventree, int numspectries, int numgenetries)
 
 					duplicate_tree(gene_tree, NULL);
 					copy = temp_top;
+					temp_top = NULL;
 					temp_top2 = NULL;
 					i = number_tree(gene_tree, 0);
 					best_total = -1;
@@ -1070,7 +1076,11 @@ float get_recon_score(char *giventree, int numspectries, int numgenetries)
 						{
 						if(dogenerand > 0)
 							{
+							#ifdef _OPENMP
+							gene_start = (int)fmod(rand_r(&thread_seed), i);
+							#else
 							gene_start = (int)fmod(rand(), i);
+							#endif
 							gene_end = gene_start +1;
 							}
 						else
@@ -1078,7 +1088,11 @@ float get_recon_score(char *giventree, int numspectries, int numgenetries)
 							gene_start = 0;
 							gene_end = i;
 							}						
+						#ifdef _OPENMP
+						rand2 = (int)fmod(rand_r(&thread_seed), i);
+						#else
 						rand2 = (int)fmod(rand(), i);
+						#endif
 					/*	for(j=0; j<i; j++)  */ /* For every rooting of the genetree */
 						for(j=gene_start; j<gene_end; j++)   
 							{
@@ -1140,6 +1154,7 @@ float get_recon_score(char *giventree, int numspectries, int numgenetries)
 				dismantle_tree(species_tree);
 				duplicate_tree(spec_copy, NULL);
 				species_tree = temp_top;
+				temp_top = NULL;
 				temp_top2 = NULL;
 
 				}

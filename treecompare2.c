@@ -4219,12 +4219,6 @@ void heuristic_search(int user, int print, int sample, int nreps)
 			}
 		
 #ifdef _OPENMP
-        /* criterion=recon uses shared file I/O (distributionreconfile); cannot parallelise */
-        if(nthreads > 1 && criterion == 5)
-            {
-            printf2("Warning: nthreads>1 is not supported for criterion=recon (concurrent file I/O). Falling back to nthreads=1.\n");
-            nthreads = 1;
-            }
         omp_set_num_threads(nthreads);
 #endif
         /* criterion=recon scores all trees (single-copy and multicopy); skip the filter */

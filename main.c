@@ -1641,7 +1641,7 @@ void print_commands(int num)
 
 			printf2("\n\tmaxswaps\t<integer number>\t\t*1,000,000\n\tsavetrees\t<filename>\t\t\tHeuristic_result.txt");
 #ifdef _OPENMP
-            printf2("\n\tnthreads\t<integer number>\t\t*%-3d (OpenMP threads; default=all CPUs; not available for criterion=recon)", omp_get_num_procs());
+            printf2("\n\tnthreads\t<integer number>\t\t*%-3d (OpenMP threads; default=all CPUs)", omp_get_num_procs());
 #endif
             printf2("\n\tmaxskips\t<integer number>\t\t*auto=2N² (stop replicate after this many consecutive already-visited moves; 0=disabled)");
 #ifdef _OPENMP
