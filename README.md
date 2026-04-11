@@ -16,7 +16,7 @@
 
 # Aim
 
-To construct supertrees and explore the underlying phylogenomic information from gene trees. Clann implements several well known supertree methods (including the ability to apply bootstrapping to them) can calculate consensus trees and provides methods to manage sets of gene trees, pruning selected taxa, filtering based on a number of criteria, automatically pruning species-specific duplicates and more. Also implemented is a gene-tree reconciliation approach to try to utilise genetic information from more than just single-copy gene-trees, this can be used as a criterion for estimating species trees. Feed back on these approaches are welcome! Finally, Clann can also calculate Robinson-Foulds (RF) and SPR distances between sets of trees, create randomised versions of sets of trees and implementes a PTP test for informativeness (the YAPTP test) of a set of trees provided. Clann has been continually developed since 2003 and suggestions for new features and tools are welcome.
+To construct supertrees and explore the underlying phylogenomic information from gene trees. Clann implements several supertree optimality criteria — including DFIT (most-similar supertree), Robinson-Foulds (RF), and a maximum likelihood criterion based on Steel & Rodrigo (2008) — with bootstrapping support for all criteria. It can calculate consensus trees and provides tools to manage sets of gene trees: pruning taxa, filtering by a variety of criteria, automatically pruning lineage-specific duplicates, and more. A gene-tree reconciliation approach is also implemented to utilise information from multicopy gene families for species tree estimation. Clann can calculate RF and SPR distances between sets of trees, create randomised versions of trees, and perform a PTP test for informativeness (the YAPTP test). Clann has been continually developed since 2003 and suggestions for new features and tools are welcome.
 
 
 # Referencing Clann
@@ -32,6 +32,18 @@ Creevey C.J., Fitzpatrick, D.A., Philip, G.A., Kinsella, R.J., O'Connell M.J., T
 Either or both of these publications should be cited if you use Clann in published work.
 
 For a list of papers that have cited Clann in their work see the [Clann google scholar page](https://scholar.google.co.uk/citations?view_op=view_citation&hl=en&citation_for_view=7JkjEd4AAAAJ:UeHWp8X0CEIC)
+
+# What's new in v5
+
+- **ML supertree criterion** — maximum likelihood criterion based on Steel & Rodrigo (2008), scoring candidate supertrees via the sum of exponential-decay likelihoods over RF distances to source trees. Supports Bryant & Steel (2008) normalising constant correction (`normcorrect`), including an exact subset-enumeration method (`normcorrect=exact`) for small trees.
+- **RF criterion** — Robinson-Foulds bipartition distance as an optimality criterion for `hs`, `bootstrap`, `alltrees`, and `usertrees`.
+- **ML topology tests** — Winning Sites, Kishino-Hasegawa (KH), and Shimodaira-Hasegawa (SH) tests for comparing candidate supertrees in `usertrees`.
+- **Per-source-tree score matrix** — `usertrees scorematrix=yes` outputs a tab-delimited table of per-source-tree scores against each candidate topology, including tree size and weight columns, for identifying decisive source trees.
+- **OpenMP parallelism** — `hs` and `bootstrap` run in parallel across CPU cores by default (`nthreads=` to control). Parallel replicates with periodic best-score reporting.
+- **Improved heuristic search** — best-improvement SPR strategy, convergence detection via skip-streak, bipartition-hash visited-set to avoid redundant scoring, and `start=memory` to resume from a previous result.
+- **Source tree weighting** — `autoweight=bootstrap` weights source trees by bipartition support; `autoweight=clan` weights by compatibility with user-defined clans; per-tree weights reported in `showtrees`.
+- **Interactive CLI improvements** — tab completion for commands, options and values; coloured prompt; Ctrl+R reverse history search; persistent command history (`~/.clannhistory`).
+- **Code refactoring** — split from a monolithic source into modular files (`scoring.c`, `tree_io.c`, `topology.c`, `tree_ops.c`, `consensus.c`, `viz.c`, `utils.c`).
 
 # Documentation
 
@@ -72,8 +84,9 @@ clann hs --help              # per-command help
 | Option | Values | Default |
 |--------|--------|---------|
 | `criterion` | `dfit`, `ml`, `rf`, `sfit`, `qfit`, `avcon` | `dfit` |
-| `nthreads` | integer | `1` |
+| `nthreads` | integer | all CPUs |
 | `mlbeta` | float | `1.0` |
+| `mleta` | float | `0.0` |
 | `mlscale` | `lnl`, `paper`, `lust` | `lnl` |
 | `seed` | integer | (random) |
 
@@ -93,6 +106,8 @@ clann> set criterion=ml
 clann> hs nreps=10
 clann> quit
 ```
+
+The interactive prompt supports **tab completion** for commands and options, a **coloured prompt**, and **Ctrl+R** reverse history search. Command history is saved across sessions in `~/.clannhistory`.
 
 Append `?` to any command to see its options: `hs ?`, `usertrees ?`, etc.
 
@@ -210,20 +225,24 @@ See `reconstruct ?` for full options including supplying an external species tre
 
 **Supertree reconstruction:**
 
-	hs		- Carry out a heuristic search for the best supertree using the criterion selected
+	hs		- Heuristic search for the best supertree (SPR moves, parallelised with OpenMP)
+			  Supports best-improvement strategy, convergence detection, and visited-topology deduplication
 			  (multicopy trees auto-excluded when delimiter mode is active)
-	bootstrap	- Carry out a bootstrap supertree analysis using the criterion selected
+	bootstrap	- Bootstrap supertree analysis; parallelised across replicates (all criteria supported)
 	nj		- Construct a neighbour-joining supertree
 			  (multicopy trees auto-excluded when delimiter mode is active)
 	alltrees	- Exhaustively search all possible supertrees
 			  (multicopy trees auto-excluded when delimiter mode is active)
-	usertrees	- Assess user-defined supertrees (from separate file); optionally run ML topology tests (tests=yes)
+	usertrees	- Score candidate supertrees against source trees; supports ML topology tests
+			  (Winning Sites, KH, SH), per-source-tree score matrix output (scorematrix=yes),
+			  and Bryant & Steel normalising constant correction (normcorrect / normcorrect=exact)
 	consensus	- Calculate a consensus tree of all trees containing all taxa
 
 **Source tree selection and modification:**
 
 	showtrees	- Visualise selected source trees in ASCII format (also can save selected trees to file)
 	deletetrees	- Specify source trees to delete from memory (based on a variety of criteria)
+			  Includes excludetrees= / includetrees= filtering by tree index range
 	deletetaxa	- Specify taxa to delete from all source trees in memory (i.e. prune from the trees while preserving branch lengths)
 	randomisetrees	- Randomises the source trees in memory, while preserving taxa composition in each tree
 
