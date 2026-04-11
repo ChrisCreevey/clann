@@ -257,9 +257,24 @@ static char **clann_completion(const char *text, int start, int end)
         {
         if(strcmp(cmd_opts_table[i].cmd, cmd) == 0)
             {
-            rl_attempted_completion_over = 1;
+            /* Text that looks like a filesystem path should always use
+             * filename completion, not option completion.               */
+            if(text[0] == '/' || text[0] == '.' || text[0] == '~')
+                return NULL;
+
+            /* Try option name completion.  Only suppress readline's filename
+             * fallback when we actually produce matches — that way a bare
+             * filename fragment (e.g. "mytrees") transparently falls through
+             * to path completion even for a known command like "exe".   */
             _compl_list = cmd_opts_table[i].opts;
-            return rl_completion_matches(text, _list_generator);
+            char **matches = rl_completion_matches(text, _list_generator);
+            if(matches)
+                {
+                rl_attempted_completion_over = 1;
+                return matches;
+                }
+            /* No option matched — let readline do filename/path completion */
+            return NULL;
             }
         }
 
