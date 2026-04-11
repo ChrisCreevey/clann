@@ -8,6 +8,43 @@ AM_INIT_AUTOMAKE([1.5 foreign])
 AM_MAINTAINER_MODE([disable])
 AC_CONFIG_HEADERS([config.h])
 
+dnl -----------------------------------------------------------------------
+dnl OpenMP compiler selection (macOS only).
+dnl
+dnl Apple's Clang does not ship an OpenMP runtime, so AC_OPENMP reports
+dnl "unsupported" on a stock macOS install.  When CC is not already set
+dnl by the user we search for a Homebrew GCC (gcc-14 ... gcc-11) in the
+dnl standard Homebrew prefixes (/opt/homebrew for Apple Silicon,
+dnl /usr/local for Intel/Rosetta).  If one is found it is pre-set as CC
+dnl before AC_PROG_CC runs, so AC_OPENMP automatically picks it up.
+dnl
+dnl On Linux (including HPC clusters) GCC supports OpenMP natively and no
+dnl special handling is needed.  Users who have already set CC explicitly
+dnl (e.g. CC=/opt/homebrew/bin/gcc-14 ./configure) are also left alone.
+dnl -----------------------------------------------------------------------
+if test -z "${CC+set}"; then
+    case "$(uname -s 2>/dev/null)" in
+    Darwin*)
+        _brew_gcc=
+        for _gcc_ver in 14 13 12 11; do
+            for _brew_prefix in /opt/homebrew /usr/local; do
+                if test -x "$_brew_prefix/bin/gcc-$_gcc_ver"; then
+                    _brew_gcc="$_brew_prefix/bin/gcc-$_gcc_ver"
+                    break 2
+                fi
+            done
+        done
+        if test -n "$_brew_gcc"; then
+            CC="$_brew_gcc"
+            AC_MSG_NOTICE([macOS: Homebrew GCC found at $CC — will use it for OpenMP support])
+        else
+            AC_MSG_NOTICE([macOS: no Homebrew GCC found; clann will be built single-threaded])
+            AC_MSG_NOTICE([  To enable multi-threading: brew install gcc  (then re-run ./configure)])
+        fi
+        ;;
+    esac
+fi
+
 dnl AC_PROG_CC must come before any AC_CHECK_LIB calls so the C compiler
 dnl is properly configured for link tests on all platforms.
 AC_PROG_CC
@@ -93,6 +130,15 @@ fi
 
 
 AC_OPENMP
+
+dnl Advisory when no OpenMP runtime is available.
+dnl OPENMP_CFLAGS is empty when the compiler does not support -fopenmp.
+if test -z "$OPENMP_CFLAGS"; then
+    AC_MSG_WARN([OpenMP is not supported by $CC — clann will run single-threaded.])
+    AC_MSG_WARN([On macOS:  brew install gcc   then re-run ./configure])
+    AC_MSG_WARN([On Linux:  ensure gcc (not clang) is available, or load the])
+    AC_MSG_WARN([           appropriate compiler module on your HPC system.])
+fi
 
 AC_CONFIG_FILES([Makefile])
 AC_OUTPUT
