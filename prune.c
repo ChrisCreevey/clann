@@ -44,7 +44,7 @@ void random_prune(char *fund_tree)
 	tree_top = NULL;
 	
 	temp_top = NULL;
-	tree_build(1, fund_tree, tree_top, 0, -1, 0);
+	{ int _to = 0; tree_build(1, fund_tree, tree_top, 0, -1, &_to); }
 	tree_top = temp_top;
 	temp_top = NULL;
 	

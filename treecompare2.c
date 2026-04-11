@@ -73,7 +73,7 @@ static float       ml_display_source_score(float raw, int tidx); /* per-tree sco
 static const char *ml_score_label(void);                         /* "lnL" or "score"   */
 struct taxon * make_taxon(void);
 void intTotree(int tree_num, char *array, int num_taxa);
-int tree_build (int c, char *treestring, struct taxon *parent, int fromfile, int fund_num, int taxaorder);
+int tree_build (int c, char *treestring, struct taxon *parent, int fromfile, int fund_num, int *taxaorder);
 void prune_tree(struct taxon * super_pos, int fund_num);
 int treeToInt(char *array);
 int shrink_tree (struct taxon * position);
@@ -680,7 +680,7 @@ void alltrees_search(int user)
                     tree_top = NULL;
                     }
                 temp_top = NULL;
-                tree_build(1, tree, tree_top, FALSE, -1, 0);
+                { int _to = 0; tree_build(1, tree, tree_top, FALSE, -1, &_to); }
                 tree_top = temp_top;
                 temp_top = NULL;
                 score = compare_trees(FALSE);
@@ -689,7 +689,7 @@ void alltrees_search(int user)
                 {
                 if(tree_top != NULL) { dismantle_tree(tree_top); tree_top = NULL; }
                 temp_top = NULL;
-                tree_build(1, tree, tree_top, FALSE, -1, 0);
+                { int _to = 0; tree_build(1, tree, tree_top, FALSE, -1, &_to); }
                 tree_top = temp_top;
                 temp_top = NULL;
                 if(criterion == 2)      score = compare_trees_sfit(FALSE);
@@ -785,7 +785,7 @@ void alltrees_search(int user)
                     }
                 temp_top = NULL;
                 /* retained_supers[] now stores named trees (actual taxon names), so use TRUE */
-                tree_build(1, retained_supers[i], tree_top, TRUE, -1, 0);
+                { int _to = 0; tree_build(1, retained_supers[i], tree_top, TRUE, -1, &_to); }
                 tree_top = temp_top;
                 temp_top = NULL;
 
@@ -1775,7 +1775,7 @@ void bootstrap_search(void)
                             {
                             if(tree_top != NULL) { dismantle_tree(tree_top); tree_top = NULL; }
                             temp_top = NULL;
-                            tree_build(1, retained_supers[k], tree_top, FALSE, -1, 0);
+                            { int _to = 0; tree_build(1, retained_supers[k], tree_top, FALSE, -1, &_to); }
                             tree_top = temp_top; temp_top = NULL;
                             local_best[0] = '\0';
                             print_named_tree(tree_top, local_best);
@@ -2653,7 +2653,7 @@ void usertrees_search(void)
 				tree_top = NULL;
 				}
 			temp_top = NULL;
-			tree_build(1, user_super, tree_top, TRUE, -1, 0);
+			{ int _to = 0; tree_build(1, user_super, tree_top, TRUE, -1, &_to); }
 			tree_top = temp_top;
 			temp_top = NULL;
 			/*check_tree(tree_top); */
@@ -2809,7 +2809,7 @@ void usertrees_search(void)
 					temp_top = NULL;
 
 					temp_top = NULL;
-					tree_build(1, retained_supers[i], tree_top, TRUE, -1, 0);
+					{ int _to = 0; tree_build(1, retained_supers[i], tree_top, TRUE, -1, &_to); }
 					tree_top = temp_top;
 					temp_top = NULL;
 					/*check_tree(tree_top); */
@@ -4416,7 +4416,7 @@ void heuristic_search(int user, int print, int sample, int nreps)
                         tree_top = NULL;
                         }
                     temp_top = NULL;
-                    tree_build(1, tree, tree_top, TRUE, -1, 0);
+                    { int _to = 0; tree_build(1, tree, tree_top, TRUE, -1, &_to); }
                     tree_top = temp_top;
                     temp_top = NULL;
             
@@ -4902,7 +4902,7 @@ void heuristic_search(int user, int print, int sample, int nreps)
 					 * has been cleared by the reset loop before we reach this point. */
 					if(tree_top != NULL) { dismantle_tree(tree_top); tree_top = NULL; }
 					temp_top = NULL;
-					tree_build(1, memory_start_tree, tree_top, TRUE, -1, 0);
+					{ int _to = 0; tree_build(1, memory_start_tree, tree_top, TRUE, -1, &_to); }
 					tree_top = temp_top;
 					temp_top = NULL;
 					number_tree(tree_top, 0);
@@ -5118,7 +5118,7 @@ void heuristic_search(int user, int print, int sample, int nreps)
 							tree_top = NULL;
 							}
 						temp_top = NULL;
-						tree_build(1, tree, tree_top, user, -1, 0);
+						{ int _to = 0; tree_build(1, tree, tree_top, user, -1, &_to); }
 						tree_top = temp_top;
 						temp_top = NULL;
 						
@@ -5243,7 +5243,7 @@ void heuristic_search(int user, int print, int sample, int nreps)
                         {
                         if(tree_top != NULL) { dismantle_tree(tree_top); tree_top = NULL; }
                         temp_top = NULL;
-                        tree_build(1, retained_supers[i], tree_top, TRUE, -1, 0);
+                        { int _to = 0; tree_build(1, retained_supers[i], tree_top, TRUE, -1, &_to); }
                         tree_top = temp_top;
                         temp_top = NULL;
                         for(k = 0; k < Total_fund_trees; k++) sourcetree_scores[k] = -1;
@@ -5329,7 +5329,7 @@ void heuristic_search(int user, int print, int sample, int nreps)
 								}
 							temp_top = NULL;
 							
-							tree_build(1, retained_supers[i], tree_top, TRUE, -1, 0);
+							{ int _to = 0; tree_build(1, retained_supers[i], tree_top, TRUE, -1, &_to); }
 							tree_top = temp_top;
 							temp_top = NULL;
 							
@@ -5380,7 +5380,7 @@ int do_search(char *tree, int user, int print, int maxswaps, FILE *outfile, int 
             tree_top = NULL;
             }
         temp_top = NULL;
-        tree_build(1, tree, tree_top, user, -1, 0);
+        { int _to = 0; tree_build(1, tree, tree_top, user, -1, &_to); }
         tree_top = temp_top;
         temp_top = NULL;
         /* Allocate per-replicate visited-topology hash set */
@@ -5490,7 +5490,7 @@ int do_search(char *tree, int user, int print, int maxswaps, FILE *outfile, int 
                  * by regraft() (which sets position->parent = NULL). */
                 if(tree_top != NULL) { dismantle_tree(tree_top); tree_top = NULL; }
                 temp_top = NULL;
-                tree_build(1, rep_spr_result, tree_top, TRUE, -1, 0);
+                { int _to = 0; tree_build(1, rep_spr_result, tree_top, TRUE, -1, &_to); }
                 tree_top = temp_top;
                 temp_top = NULL;
                 fix_parent_pointers(tree_top, NULL);
@@ -6262,7 +6262,7 @@ void yaptp_search(void)
 								tree_top = NULL;
 								}
 							temp_top = NULL;
-							tree_build(1, retained_supers[k], tree_top, FALSE, -1, 0);
+							{ int _to = 0; tree_build(1, retained_supers[k], tree_top, FALSE, -1, &_to); }
 							tree_top = temp_top;
 							temp_top = NULL;
 						
@@ -6959,7 +6959,7 @@ static int newick_reroot_at_tag(const char *base_nwk, int q, char *out_nwk)
 
 	/* Build an independent, cycle-free working copy */
 	temp_top = NULL;
-	tree_build(1, working, NULL, FALSE, -1, 0);
+	{ int _to = 0; tree_build(1, working, NULL, FALSE, -1, &_to); }
 	root = temp_top;
 	temp_top = NULL;
 	free(working);
@@ -7144,7 +7144,7 @@ static int tbr_new(struct taxon *master, int maxswaps, int numspectries, int num
 
 		/* Build fresh, cycle-free remaining tree */
 		temp_top = NULL;
-		tree_build(1, remaining_nwk, NULL, FALSE, -1, 0);
+		{ int _to = 0; tree_build(1, remaining_nwk, NULL, FALSE, -1, &_to); }
 		remaining_tree = temp_top; temp_top = NULL;
 		if(remaining_tree == NULL) { rep_abandon = 1; x = y; continue; }
 		tree_top = remaining_tree;
@@ -7160,7 +7160,7 @@ static int tbr_new(struct taxon *master, int maxswaps, int numspectries, int num
 		else
 			{
 			temp_top = NULL;
-			tree_build(1, base_nwk, NULL, FALSE, -1, 0);
+			{ int _to = 0; tree_build(1, base_nwk, NULL, FALSE, -1, &_to); }
 			newbie = temp_top; temp_top = NULL;
 			}
 		if(newbie == NULL) { rep_abandon = 1; goto tbr_cleanup; }
@@ -7204,7 +7204,7 @@ static int tbr_new(struct taxon *master, int maxswaps, int numspectries, int num
 				if(reroot_status != 0) { rep_abandon = 1; break; }
 
 				temp_top = NULL;
-				tree_build(1, rerooted_nwk, NULL, FALSE, -1, 0);
+				{ int _to = 0; tree_build(1, rerooted_nwk, NULL, FALSE, -1, &_to); }
 				newbie = temp_top; temp_top = NULL;
 				if(newbie == NULL) { rep_abandon = 1; break; }
 
@@ -7346,7 +7346,7 @@ static int spr_new2(struct taxon *master, int maxswaps, int numspectries, int nu
 
 		/* Build fresh, cycle-free remaining tree */
 		temp_top = NULL;
-		tree_build(1, remaining_nwk, NULL, FALSE, -1, 0);
+		{ int _to = 0; tree_build(1, remaining_nwk, NULL, FALSE, -1, &_to); }
 		remaining_tree = temp_top; temp_top = NULL;
 		if(remaining_tree == NULL) { rep_abandon = 1; x = y; continue; }
 		tree_top = remaining_tree;
@@ -7363,7 +7363,7 @@ static int spr_new2(struct taxon *master, int maxswaps, int numspectries, int nu
 		else
 			{
 			temp_top = NULL;
-			tree_build(1, subtree_nwk, NULL, FALSE, -1, 0);
+			{ int _to = 0; tree_build(1, subtree_nwk, NULL, FALSE, -1, &_to); }
 			newbie = temp_top; temp_top = NULL;
 			}
 		if(newbie == NULL) { rep_abandon = 1; goto spr2_cleanup; }
@@ -7444,7 +7444,7 @@ static float probe_candidate(const char *candidate_nwk,
 
 	if(tree_top != NULL) { dismantle_tree(tree_top); tree_top = NULL; }
 	temp_top = NULL;
-	tree_build(1, (char *)candidate_nwk, NULL, FALSE, -1, 0);
+	{ int _to = 0; tree_build(1, (char *)candidate_nwk, NULL, FALSE, -1, &_to); }
 	tree_top = temp_top;
 	temp_top = NULL;
 	if(tree_top == NULL) return -1.0f;
@@ -7523,7 +7523,7 @@ static int evaluate_candidate(const char *candidate_nwk,
 	/* Build candidate tree_top from integer-label Newick */
 	if(tree_top != NULL) { dismantle_tree(tree_top); tree_top = NULL; }
 	temp_top = NULL;
-	tree_build(1, (char *)candidate_nwk, NULL, FALSE, -1, 0);
+	{ int _to = 0; tree_build(1, (char *)candidate_nwk, NULL, FALSE, -1, &_to); }
 	tree_top = temp_top;
 	temp_top = NULL;
 	if(tree_top == NULL) { free(best_tree); free(temptree); return FALSE; }
@@ -8442,7 +8442,7 @@ int spr(struct taxon * position, int maxswaps, int numspectries, int numgenetrie
 									dismantle_tree(newbie);
 									newbie = NULL;
 									temp_top = NULL;
-									tree_build(1, debugtree, newbie, FALSE, -1, 0);
+									{ int _to = 0; tree_build(1, debugtree, newbie, FALSE, -1, &_to); }
 									newbie = temp_top;
 									temp_top = NULL;
 									
@@ -9324,7 +9324,7 @@ void generatetrees(void)
 						}
 					temp_top = NULL;
 					if(super == 1)
-						tree_build(1, retained_supers[0], tree_top, TRUE, -1, 0);
+						{ int _to = 0; tree_build(1, retained_supers[0], tree_top, TRUE, -1, &_to); }
 					else
 						{
 						if((superfile = fopen(superfilename, "r")) == NULL)
@@ -9345,7 +9345,7 @@ void generatetrees(void)
 								}
 							tmp[i] = ';'; tmp[i+1] = '\0';
 							fclose(superfile);
-							tree_build(1, tmp, tree_top, TRUE, -1, 0);
+							{ int _to = 0; tree_build(1, tmp, tree_top, TRUE, -1, &_to); }
 							}
 						}
 					tree_top = temp_top;
@@ -9444,8 +9444,8 @@ void generatetrees(void)
 						}
 					temp_top = NULL;
 					
-					if(gen_method == 1)tree_build(1, rand_tree, tree_top, FALSE, -1, 0);
-					if(gen_method == 2)tree_build(1, rand_tree, tree_top, TRUE, -1, 0);
+					if(gen_method == 1){ int _to = 0; tree_build(1, rand_tree, tree_top, FALSE, -1, &_to); }
+					if(gen_method == 2){ int _to = 0; tree_build(1, rand_tree, tree_top, TRUE, -1, &_to); }
 					tree_top = temp_top;
 					temp_top = NULL;
 			/**** evaluate its fit to the source trees in memory *****/
@@ -10228,9 +10228,9 @@ void spr_dist(void)
 			temp_top = NULL;
 			
 
-			if(starting_super != 2) tree_build(1, retained_supers[0], tree_top, TRUE, -1, 0);
+			if(starting_super != 2) { int _to = 0; tree_build(1, retained_supers[0], tree_top, TRUE, -1, &_to); }
 			else
-				tree_build(1, inputtree, tree_top, TRUE, -1, 0);
+				{ int _to = 0; tree_build(1, inputtree, tree_top, TRUE, -1, &_to); }
 
 			tree_top = temp_top;
 			temp_top = NULL;
@@ -10618,7 +10618,7 @@ int string_SPR(char * string)
 			}
 		temp_top = NULL;
 		
-		tree_build(1, string1, tree_top, FALSE, -1, 0);
+		{ int _to = 0; tree_build(1, string1, tree_top, FALSE, -1, &_to); }
 
 		tree_top = temp_top;
 		temp_top = NULL;
@@ -11004,7 +11004,7 @@ void exhaustive_SPR(char * string)
 				tree_top = NULL;
 				}
 			temp_top = NULL;
-			tree_build(1, tmp_tree, tree_top, FALSE, -1, 0);
+			{ int _to = 0; tree_build(1, tmp_tree, tree_top, FALSE, -1, &_to); }
 
 			tree_top = temp_top;
 			temp_top = NULL;

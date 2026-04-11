@@ -642,18 +642,34 @@ reconstruct [options]
 | `basescore` | `<float>` | 1.0 | Score used when resolving polytomies in gene trees. |
 | `showrecon` | `yes`, `no` | `no` | Print detailed reconciliation information for each node. |
 | `printfiles` | `yes`, `no` | `yes` | Generate detailed output files (see [Section 7](#7-output-files-reference)). |
+| nhxfile | `<filename>` | none | Prints nhx-formatted file of resulting reconstructions for all source trees. This allows viewing of the reconstructions (inclusding indications of duplications, losses, etc) with compatible tools. |
 
 **Typical workflow:**
+
 ```
 exe mydata.ph
 hs nreps=10
-reconstruct speciestree=memory
+reconstruct speciestree=memory nhxfile=my_reconstructions.nhx
 ```
 
 **Using an external species tree:**
+
 ```
 reconstruct speciestree=my_species_tree.ph dups=2.0 losses=1.0
 ```
+
+This command can also be used to view the gene-tree reconstructions from a heuristic search of treespace using the *recon* criterion:
+
+
+
+```
+exe mydata.ph
+set criterion=recon
+hs nreps=1
+reconstruct speciestree=memory nhxfile=my_reconstructions.nhx
+```
+
+
 
 ---
 

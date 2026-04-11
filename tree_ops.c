@@ -251,7 +251,7 @@ int treeToInt(char *tree)
     /* Step 1 Buid the tree in memory */
 
     temp_top = NULL;
-    tree_build(1, tree, sorted_tree, FALSE, -1, 0);
+    { int _to = 0; tree_build(1, tree, sorted_tree, FALSE, -1, &_to); }
     sorted_tree = temp_top;
     temp_top = NULL;
 
@@ -448,9 +448,9 @@ void intTotree(int tree_num, char *array, int num_taxa)
     free(string);
     }
 
-int tree_build (int c, char *treestring, struct taxon *parent, int fromfile, int fundnum, int taxaorder)
+int tree_build (int c, char *treestring, struct taxon *parent, int fromfile, int fundnum, int *taxaorder)
 	{
-	
+
 	char temp[NAME_LENGTH], tmptag[100];
 	struct taxon *position = NULL, *extra = NULL;
 	int i = 0, j =0, end = FALSE, out = FALSE, onlylength = FALSE;
@@ -459,7 +459,7 @@ int tree_build (int c, char *treestring, struct taxon *parent, int fromfile, int
 	tmptag[0] = '\0';
 	for(i=0; i<NAME_LENGTH; i++)
 		temp[i] = '\0';
-	
+
 	if(parent == NULL) temp_top = position;  /* assign the pointer in the array to the top of this tree */
 	else
 		{
@@ -483,7 +483,7 @@ int tree_build (int c, char *treestring, struct taxon *parent, int fromfile, int
 					position = extra;
 					}
                                 c++;
-				c = tree_build(c, treestring, position, fromfile, fundnum, taxaorder);
+				c = tree_build(c, treestring, position, fromfile, fundnum, taxaorder);  /* taxaorder is already a pointer — increments propagate */
 				i=0;
 				onlylength = FALSE;
 				if(treestring[c] == ':') onlylength=TRUE;
@@ -561,12 +561,12 @@ int tree_build (int c, char *treestring, struct taxon *parent, int fromfile, int
 					}
 				if(fundnum != -1)
 					{
-					position->fullname = malloc((strlen(fulltaxanames[fundnum][taxaorder])+10)*sizeof(char));
+					position->fullname = malloc((strlen(fulltaxanames[fundnum][*taxaorder])+10)*sizeof(char));
 					position->fullname[0] = '\0';
-					strcpy(position->fullname, fulltaxanames[fundnum][taxaorder]);
+					strcpy(position->fullname, fulltaxanames[fundnum][*taxaorder]);
 					}
-				taxaorder++;
-				break;		
+				(*taxaorder)++;
+				break;
 			}
 		}
         c++;

@@ -1102,7 +1102,7 @@ void showtrees(int savet)
 					tree_top = NULL;
 					}
 				temp_top = NULL;
-				tree_build(1, temptree, tree_top, 1, -1, 0);
+				{ int _to = 0; tree_build(1, temptree, tree_top, 1, -1, &_to); }
 
 				tree_top = temp_top;
 				temp_top = NULL;
@@ -1146,7 +1146,7 @@ void showtrees(int savet)
 					tree_top = NULL;
 					}
 				temp_top = NULL;
-				tree_build(1, temptree, tree_top, 1, -1, 0);
+				{ int _to = 0; tree_build(1, temptree, tree_top, 1, -1, &_to); }
 
 				tree_top = temp_top;
 				temp_top = NULL;
@@ -1489,7 +1489,7 @@ void exclude(int do_all)
 					tree_top = NULL;
 					}
 				temp_top = NULL;
-				tree_build(1, temptree, tree_top, 1, -1, 0);
+				{ int _to = 0; tree_build(1, temptree, tree_top, 1, -1, &_to); }
 
 				tree_top = temp_top;
 				temp_top = NULL;
@@ -1540,7 +1540,7 @@ void exclude(int do_all)
 					tree_top = NULL;
 					}
 				temp_top = NULL;
-				tree_build(1, temptree, tree_top, 1, -1, 0);
+				{ int _to = 0; tree_build(1, temptree, tree_top, 1, -1, &_to); }
 
 				tree_top = temp_top;
 				temp_top = NULL;
@@ -1616,7 +1616,7 @@ void exclude(int do_all)
 						tree_top = NULL;
 						}
 					temp_top = NULL;
-					tree_build(1, temptree, tree_top, 1, -1, 0);
+					{ int _to = 0; tree_build(1, temptree, tree_top, 1, -1, &_to); }
 
 					tree_top = temp_top;
 					temp_top = NULL;
@@ -1993,7 +1993,7 @@ void include(int do_all)
 					tree_top = NULL;
 					}
 				temp_top = NULL;
-				tree_build(1, temptree, tree_top, 1, -1, 0);
+				{ int _to = 0; tree_build(1, temptree, tree_top, 1, -1, &_to); }
 
 				tree_top = temp_top;
 				temp_top = NULL;
@@ -2044,7 +2044,7 @@ void include(int do_all)
 					tree_top = NULL;
 					}
 				temp_top = NULL;
-				tree_build(1, temptree, tree_top, 1, -1, 0);
+				{ int _to = 0; tree_build(1, temptree, tree_top, 1, -1, &_to); }
 
 				tree_top = temp_top;
 				temp_top = NULL;

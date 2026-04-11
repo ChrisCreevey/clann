@@ -46,6 +46,7 @@ void  nj(void);
  * Gene-tree / species-tree reconciliation
  * ----------------------------------------------------------------------- */
 void  reconstruct(int print_settings);
+void  print_nhx_tree(struct taxon *position, char *buf);
 float tree_map(struct taxon *gene_top, struct taxon *species_top, int print);
 void  label_gene_tree(struct taxon *gene_position, struct taxon *species_top, int *presence, int xnum);
 int   reconstruct_map(struct taxon *position, struct taxon *species_top);

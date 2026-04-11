@@ -28,7 +28,7 @@
 /* -----------------------------------------------------------------------
  * Tree building / parsing
  * ----------------------------------------------------------------------- */
-int   tree_build(int c, char *treestring, struct taxon *parent, int fromfile, int fund_num, int taxaorder);
+int   tree_build(int c, char *treestring, struct taxon *parent, int fromfile, int fund_num, int *taxaorder);
 int   basic_tree_build(int c, char *treestring, struct taxon *parent, int fullnames);
 struct taxon *make_taxon(void);
 int   unroottree(char *tree);

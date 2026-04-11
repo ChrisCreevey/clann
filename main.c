@@ -101,7 +101,8 @@ static const char *opts_rfdists[]    = { "filename=", "output=", "missing=", NUL
 static const char *opts_sprdists[]   = { "filename=", "output=", NULL };
 static const char *opts_consensus[]  = { "savetrees=", "filename=", NULL };
 static const char *opts_reconstruct[]= {
-    "supertree=", "treefile=", "outfile=", "sourcedata=", "savescores=", NULL
+    "speciestree=", "showrecon=", "printfiles=", "nhxfile=",
+    "dups=", "losses=", "basescore=", NULL
 };
 static const char *opts_mlscores[]   = {
     "fixbeta=", "mlbeta=", "mleta=", "mlscale=", "scan", "scanmin=",
@@ -1953,7 +1954,7 @@ void print_commands(int num)
 		printf2("\tOptions\t\tSettings\t\t\tCurrent\n");
         printf2("\t===========================================================\n");
 		printf2("\n\tduplications\t<value>\t\t\t\t*1.0\n\tlosses\t\t<value>\t\t\t\t*1.0");
-		printf2("\n\tshowrecon\tyes | no\t\t\t*no\n\tbasescore\t<value>\t\t\t\t*1.0\n\tprintfiles\tyes | no\t\t\t*yes\n\tspeciestree\tmemory | first | <file>\t\t*memory");
+		printf2("\n\tshowrecon\tyes | no\t\t\t*no\n\tbasescore\t<value>\t\t\t\t*1.0\n\tprintfiles\tyes | no\t\t\t*yes\n\tspeciestree\tmemory | first | <file>\t\t*memory\n\tnhxfile\t\t<filename>\t\t\t*none\n\t   prints nhx-formatted file of resulting reconstructions for all source trees");
 		}
      if(num == 25)
         {

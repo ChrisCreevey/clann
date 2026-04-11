@@ -84,7 +84,7 @@ extern struct taxon *temp_top;
  * ----------------------------------------------------------------------- */
 void  totext(int c, char *array);
 void  memory_error(int error_num);
-int   tree_build(int c, char *treestring, struct taxon *parent, int fromfile, int fund_num, int taxaorder);
+int   tree_build(int c, char *treestring, struct taxon *parent, int fromfile, int fund_num, int *taxaorder);
 int   basic_tree_build(int c, char *treestring, struct taxon *parent, int fullnames);
 void  dismantle_tree(struct taxon *position);
 int   count_taxa(struct taxon *position, int count);

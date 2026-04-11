@@ -815,7 +815,7 @@ void mapunknowns()
 	/* build the tree in memory */
 	/****** We now need to build the Supertree in memory *******/
 	temp_top = NULL;
-	tree_build(1, temptree, species_tree, 1, -1, 0);
+	{ int _to = 0; tree_build(1, temptree, species_tree, 1, -1, &_to); }
 	species_tree = temp_top;
 	temp_top = NULL;
 	/** add an extra node to the top of the tree */
@@ -837,7 +837,7 @@ void mapunknowns()
 		/* build the tree in memory */
 		/****** We now need to build the Supertree in memory *******/
 		temp_top = NULL;
-		tree_build(1, temptree, gene_tree, 1, -1, 0);
+		{ int _to = 0; tree_build(1, temptree, gene_tree, 1, -1, &_to); }
 		gene_tree = temp_top;
 		temp_top = NULL;
 		strcpy(temptree1, temptree);
@@ -994,7 +994,7 @@ float get_recon_score(char *giventree, int numspectries, int numgenetries)
 		/* build the tree in memory */
 		/****** We now need to build the Supertree in memory *******/
 		temp_top = NULL;
-		tree_build(1, temptree, species_tree, 1, -1, 0);
+		{ int _to = 0; tree_build(1, temptree, species_tree, 1, -1, &_to); }
 		species_tree = temp_top;
 		temp_top = NULL;
 
@@ -1052,7 +1052,7 @@ float get_recon_score(char *giventree, int numspectries, int numgenetries)
 					/****** We now need to build the genetree in memory *******/
 					temp_top = NULL;
 					taxaorder=0;
-					tree_build(1, temptree, gene_tree, 1, l, 0);
+					tree_build(1, temptree, gene_tree, 1, l, &taxaorder);
 					gene_tree = temp_top;
 					temp_top = NULL;
 					strcpy(temptree1, temptree);
@@ -1313,6 +1313,109 @@ void make_unrooted(struct taxon * position)
 		}
 	}
 
+/* -----------------------------------------------------------------------
+ * NHX (New Hampshire eXtended) output for reconciled gene trees
+ *
+ * Conventions:
+ *   Real gene-copy leaf:  GeneCopyName[&&NHX:S=Species:D=N]
+ *   Loss leaf:            Species*LOST[&&NHX:S=Species]
+ *   Duplication node:     (...)[&&NHX:D=Y]   (+ :S= when mapped to a leaf species)
+ *   Speciation node:      (...)[&&NHX:D=N]   (+ :S= when mapped to a leaf species)
+ *
+ * Readable natively by Archaeopteryx (http://www.phylosoft.org/archaeopteryx/)
+ * which renders D=Y nodes as filled squares and D=N as circles.
+ * Also readable by ETE3 (Python) and ggtree (R/Bioconductor).
+ * ----------------------------------------------------------------------- */
+
+static void nhx_sibling_chain(struct taxon *pos, char *buf)
+	{
+	int first = 1;
+	while (pos != NULL)
+		{
+		if (!first) strcat(buf, ",");
+		first = 0;
+
+		if (pos->daughter != NULL)
+			{
+			/* Internal node */
+			strcat(buf, "(");
+			nhx_sibling_chain(pos->daughter, buf);
+			strcat(buf, ")");
+			/* Build NHX annotation */
+			char nhx[512];
+			if (pos->loss == 2)
+				snprintf(nhx, sizeof(nhx), "[&&NHX:D=Y");
+			else
+				snprintf(nhx, sizeof(nhx), "[&&NHX:D=N");
+			/* Add S= only when this node maps to a named leaf species */
+			if (pos->tag >= 0 && pos->tag < number_of_taxa)
+				{
+				size_t used = strlen(nhx);
+				snprintf(nhx + used, sizeof(nhx) - used, ":S=%s", taxa_names[pos->tag]);
+				}
+			strncat(nhx, "]", sizeof(nhx) - strlen(nhx) - 1);
+			strcat(buf, nhx);
+			}
+		else
+			{
+			/* Leaf node */
+			char nhx[512];
+			nhx[0] = '\0';
+			if (pos->loss == -1)
+				{
+				/* Loss leaf: Species*LOST[&&NHX:S=Species] */
+				const char *sname = NULL;
+				if (pos->name >= 0 && pos->name < number_of_taxa)
+					sname = taxa_names[pos->name];
+				else if (pos->tag >= 0 && pos->tag < number_of_taxa)
+					sname = taxa_names[pos->tag];
+				if (sname != NULL)
+					{
+					strcat(buf, sname);
+					strcat(buf, "*LOST");
+					snprintf(nhx, sizeof(nhx), "[&&NHX:S=%s]", sname);
+					}
+				}
+			else
+				{
+				/* Real gene-copy leaf */
+				if (pos->fullname != NULL)
+					strcat(buf, pos->fullname);
+				else if (pos->name >= 0 && pos->name < number_of_taxa)
+					strcat(buf, taxa_names[pos->name]);
+				if (pos->name >= 0 && pos->name < number_of_taxa)
+					snprintf(nhx, sizeof(nhx), "[&&NHX:S=%s:D=N]", taxa_names[pos->name]);
+				}
+			strcat(buf, nhx);
+			}
+		pos = pos->next_sibling;
+		}
+	}
+
+/* Entry point — called with tree_top (the extra wrapper node), mirrors print_fullnamed_tree */
+void print_nhx_tree(struct taxon *position, char *buf)
+	{
+	int first = 1;
+	strcat(buf, "(");
+	while (position != NULL)
+		{
+		if (!first) strcat(buf, ",");
+		first = 0;
+		if (position->daughter != NULL)
+			nhx_sibling_chain(position->daughter, buf);
+		else
+			{
+			/* Bare leaf at top level (unusual but handle gracefully) */
+			if (position->fullname != NULL)
+				strcat(buf, position->fullname);
+			else if (position->name >= 0 && position->name < number_of_taxa)
+				strcat(buf, taxa_names[position->name]);
+			}
+		position = position->next_sibling;
+		}
+	strcat(buf, ")");
+	}
+
 void reconstruct(int print_settings)  /* Carry out gene-tree reconciliation of source trees against a species tree */
 	{
 	struct taxon *position = NULL, *species_tree = NULL, *gene_tree = NULL, *best_mapping = NULL, *unknown_fund = NULL, *pos = NULL, *copy = NULL, *newbie = NULL;
@@ -1322,15 +1425,18 @@ void reconstruct(int print_settings)  /* Carry out gene-tree reconciliation of s
 	char *temptree1 = malloc(TREE_LENGTH * sizeof(char));
 	char *temptree2 = malloc(TREE_LENGTH * sizeof(char));
 	char reconfilename[100], otherfilename[100], *tmp1 = NULL, c = '\0', speciestree_file[1000];
+	char nhxfilename[1000];
+	FILE *nhxfile = NULL;
 	if(!temptree1 || !temptree2) { free(temptree1); free(temptree2); printf2("Error: out of memory in reconstruct\n"); return; }
 	FILE *reconstructionfile = NULL, *descendentsfile = NULL, *genebirthfile = NULL;
-	
+
 	temptree = malloc(TREE_LENGTH*sizeof(char));
 	temptree[0] = '\0';
 	speciestree_file[0] = '\0';
 	temptree1[0] = '\0';
 	reconfilename[0] ='\0';
 	otherfilename[0] = '\0';
+	nhxfilename[0] = '\0';
 	
 	tmp1 = malloc(TREE_LENGTH*sizeof(char));
 	tmp1[0] = '\0';
@@ -1364,6 +1470,17 @@ void reconstruct(int print_settings)  /* Carry out gene-tree reconciliation of s
 		if(strcmp(parsed_command[i], "basescore") == 0)
 			{
 			basescore = atoi(parsed_command[i+1]);
+			}
+		if(strcmp(parsed_command[i], "nhxfile") == 0)
+			{
+			if(strcmp(parsed_command[i+1], "yes") == 0)
+				{
+				/* Default filename: inputfilename.nhx */
+				strncpy(nhxfilename, inputfilename, sizeof(nhxfilename)-10);
+				strncat(nhxfilename, ".nhx", sizeof(nhxfilename)-strlen(nhxfilename)-1);
+				}
+			else
+				strncpy(nhxfilename, parsed_command[i+1], sizeof(nhxfilename)-1);
 			}
 		}
 
@@ -1508,7 +1625,7 @@ void reconstruct(int print_settings)  /* Carry out gene-tree reconciliation of s
 		/* build the tree in memory */
 		/****** We now need to build the Species tree in memory *******/
 		temp_top = NULL;
-		tree_build(1, temptree, species_tree, TRUE, -1, 0); 
+		{ int _to = 0; tree_build(1, temptree, species_tree, TRUE, -1, &_to); }
 		species_tree = temp_top;
 		temp_top = NULL;
 		/** add an extra node to the top of the tree */
@@ -1519,6 +1636,175 @@ void reconstruct(int print_settings)  /* Carry out gene-tree reconciliation of s
 		temp_top = NULL;
 		number_tree1(species_tree, number_of_taxa);
 		num_species_internal = count_internal_branches(species_tree, 0);
+
+		/* ---------------------------------------------------------------
+		 * Find the optimal rooting of the species tree by trying every
+		 * possible rooting and summing the minimum dup+loss score across
+		 * all gene trees.  Only the inner scoring is done here (no output,
+		 * no file writing).  The actual output pass that follows uses the
+		 * best-rooted species tree.
+		 * --------------------------------------------------------------- */
+		{
+		struct taxon *spec_orig = NULL, *spec_work = NULL, *spec_rr = NULL;
+		struct taxon *gt = NULL, *gt_copy = NULL, *gt_root = NULL, *gt_pos = NULL;
+		int n_spec_br, sr, ll, jr, gt_n;
+		int best_spec_br = -1;
+		float best_spec_total = -1.0f, sr_total, best_gt, sc, sto;
+		int gt_to;
+
+		/* Duplicate the entire species_tree wrapper (parent==NULL → temp_top is set) */
+		duplicate_tree(species_tree, NULL);
+		spec_orig = temp_top;   /* spec_orig = wrapper copy; spec_orig->parent == NULL */
+		temp_top = NULL;
+
+		/* Count branches on the copy, not the live tree */
+		n_spec_br = number_tree(spec_orig->daughter, 0);
+
+		printf2("Searching for optimal species tree rooting (%d rootings × %d gene trees)...\n",
+		        n_spec_br, Total_fund_trees - gene_tree_start);
+
+		for(sr = 0; sr < n_spec_br; sr++)
+			{
+			/* Fresh copy of species tree for this rooting trial.
+			 * Duplicate from wrapper (parent==NULL) so temp_top is set. */
+			{
+			struct taxon *sw_wrap = NULL;
+			duplicate_tree(spec_orig, NULL);
+			sw_wrap = temp_top;
+			temp_top = NULL;
+			spec_work = sw_wrap->daughter;
+			/* Detach from wrapper so reroot_tree parent-walk stops here */
+			spec_work->parent = NULL;
+			sw_wrap->daughter  = NULL;
+			free(sw_wrap);
+			}
+
+			/* Index branches, get branch sr, reroot */
+			number_tree(spec_work, 0);
+			{
+			struct taxon *sr_br = get_branch(spec_work, sr);
+			temp_top = spec_work;
+			reroot_tree(sr_br);
+			}
+			/* Wrap rerooted tree */
+			spec_rr = make_taxon();
+			spec_rr->daughter = temp_top;
+			if(temp_top) temp_top->parent = spec_rr;
+			temp_top = NULL;
+			/* Tag nodes for reconciliation */
+			number_tree1(spec_rr, number_of_taxa);
+
+			sr_total = 0.0f;
+			for(ll = gene_tree_start; ll < Total_fund_trees; ll++)
+				{
+				strcpy(temptree, fundamentals[ll]);
+				unroottree(temptree);
+				temp_top = NULL;
+				gt_to = 0;
+				tree_build(1, temptree, NULL, FALSE, -1, &gt_to);
+				gt = temp_top;
+				temp_top = NULL;
+				tree_top = gt;
+				compress_tree1(gt);
+				gt = tree_top;
+				tree_top = NULL;
+
+				gt_n = number_tree(gt, 0);
+				best_gt = -1.0f;
+
+				if(gt_n > 2)
+					{
+					duplicate_tree(gt, NULL);
+					gt_copy = temp_top;
+					temp_top = NULL;
+
+					for(jr = 0; jr < gt_n; jr++)
+						{
+						gt_pos = get_branch(gt, jr);
+						temp_top = gt;
+						reroot_tree(gt_pos);
+						gt_root = make_taxon();
+						gt_root->daughter = temp_top;
+						if(temp_top) temp_top->parent = gt_root;
+						temp_top = NULL;
+
+						sc = tree_map(gt_root, spec_rr, FALSE);
+						if(sc < best_gt || best_gt < 0.0f) best_gt = sc;
+
+						dismantle_tree(gt_root);
+						gt_root = NULL;
+
+						duplicate_tree(gt_copy, NULL);
+						gt = temp_top;
+						temp_top = NULL;
+						number_tree(gt, 0);
+						}
+					dismantle_tree(gt_copy);
+					gt_copy = NULL;
+					/* gt was last restored from copy — dismantle it */
+					dismantle_tree(gt);
+					gt = NULL;
+					}
+				else
+					{
+					gt_root = make_taxon();
+					gt_root->daughter = gt;
+					if(gt) gt->parent = gt_root;
+					sc = tree_map(gt_root, spec_rr, FALSE);
+					if(sc < best_gt || best_gt < 0.0f) best_gt = sc;
+					dismantle_tree(gt_root);
+					gt_root = NULL;
+					gt = NULL;
+					}
+
+				if(best_gt >= 0.0f) sr_total += best_gt;
+				}  /* end gene tree loop */
+
+			if(sr_total < best_spec_total || best_spec_total < 0.0f)
+				{
+				best_spec_total = sr_total;
+				best_spec_br = sr;
+				}
+
+			dismantle_tree(spec_rr);
+			spec_rr = NULL;
+			}  /* end species tree rooting loop */
+
+		/* Apply the best rooting to the live species_tree.
+		 * Duplicate from wrapper (parent==NULL) then detach daughter before rerooting. */
+		{
+		struct taxon *sw_wrap = NULL;
+		duplicate_tree(spec_orig, NULL);
+		sw_wrap = temp_top;
+		temp_top = NULL;
+		spec_work = sw_wrap->daughter;
+		spec_work->parent = NULL;
+		sw_wrap->daughter  = NULL;
+		free(sw_wrap);
+		}
+		number_tree(spec_work, 0);
+		{
+		struct taxon *best_br = get_branch(spec_work, best_spec_br);
+		temp_top = spec_work;
+		reroot_tree(best_br);
+		}
+		/* Replace the wrapper's daughter with the best-rooted tree */
+		dismantle_tree(species_tree->daughter);
+		species_tree->daughter = temp_top;
+		if(temp_top) temp_top->parent = species_tree;
+		temp_top = NULL;
+		number_tree1(species_tree, number_of_taxa);
+		num_species_internal = count_internal_branches(species_tree, 0);
+
+		dismantle_tree(spec_orig);
+		spec_orig = NULL;
+
+		printf2("Optimal species tree rooting found (total dup+loss score: %.4f)\n", best_spec_total);
+		}
+		/* ---------------------------------------------------------------
+		 * End optimal rooting search
+		 * --------------------------------------------------------------- */
+
 		if(printfiles)
 			{
 			fprintf(reconstructionfile, "Tree name\t");
@@ -1535,6 +1821,19 @@ void reconstruct(int print_settings)  /* Carry out gene-tree reconciliation of s
 			}
 		
 		
+		/* Open NHX output file if requested */
+		if(nhxfilename[0] != '\0')
+			{
+			nhxfile = fopen(nhxfilename, "w");
+			if(nhxfile == NULL)
+				{
+				printf2("Warning: could not open NHX output file '%s' — NHX output disabled.\n", nhxfilename);
+				nhxfilename[0] = '\0';
+				}
+			else
+				printf2("NHX reconciliation output will be written to: %s\n", nhxfilename);
+			}
+
 		for(l=gene_tree_start; l<Total_fund_trees; l++)
 			{
 			temp_top = NULL;
@@ -1548,7 +1847,7 @@ void reconstruct(int print_settings)  /* Carry out gene-tree reconciliation of s
 			temp_top = NULL;
 			how_many++;
 			taxaorder=0;
-			tree_build(1, temptree, gene_tree, FALSE, l, 0);
+			tree_build(1, temptree, gene_tree, FALSE, l, &taxaorder);
 			gene_tree = temp_top;
 
 			temp_top = NULL;
@@ -1637,8 +1936,21 @@ void reconstruct(int print_settings)  /* Carry out gene-tree reconciliation of s
 			tree_top = best_mapping;
 			/** ADD IN PRINTFULLNAMED TREE HERE **/
 			temptree[0] = '\0';
-			print_fullnamed_tree(tree_top, temptree, l); 
+			print_fullnamed_tree(tree_top, temptree, l);
 			/*print_named_tree(tree_top, temptree); */
+
+			/* NHX output: write reconciled tree with duplication/loss annotations */
+			if(nhxfile != NULL)
+				{
+				temptree1[0] = '\0';
+				print_nhx_tree(tree_top, temptree1);
+				/* Write tree name as a comment, then the NHX Newick on the next line */
+				if(strcmp(tree_names[l], "") != 0)
+					fprintf(nhxfile, "# %s  (score=%.4f)\n", tree_names[l], best_total);
+				else
+					fprintf(nhxfile, "# tree_%d  (score=%.4f)\n", l, best_total);
+				fprintf(nhxfile, "%s;\n\n", temptree1);
+				}
 
 			if(dorecon == TRUE)
 				{
@@ -1727,10 +2039,16 @@ void reconstruct(int print_settings)  /* Carry out gene-tree reconciliation of s
 	if(printfiles)
 		{
 		fclose(distributionreconfile);
-		fclose(reconstructionfile);	
+		fclose(reconstructionfile);
 		fclose(genebirthfile);
 		fclose(onetoonefile);
 		fclose(strictonetoonefile);
+		}
+	if(nhxfile != NULL)
+		{
+		fclose(nhxfile);
+		printf2("NHX output written to: %s\n", nhxfilename);
+		nhxfile = NULL;
 		}
 	tree_top = NULL;
 	free(temptree);
@@ -1876,7 +2194,7 @@ void hgt_reconstruction()
 	/* build the tree in memory */
 	/****** We now need to build the Species tree in memory *******/
 	temp_top = NULL;
-	tree_build(1, temptree, species_tree, 1, -1, 0);
+	{ int _to = 0; tree_build(1, temptree, species_tree, 1, -1, &_to); }
 	species_tree = temp_top;
 	temp_top = NULL;
 	/** add an extra node to the top of the tree */
@@ -1906,7 +2224,7 @@ void hgt_reconstruction()
 		/****** We now need to build the genetree in memory *******/
 		temp_top = NULL;
 		taxaorder=0;
-		tree_build(1, temptree, gene_tree, 1, l, 0);
+		tree_build(1, temptree, gene_tree, 1, l, &taxaorder);
 		gene_tree = temp_top;
 		temp_top = NULL;
 			
