@@ -3028,6 +3028,99 @@ void restore_singlecopy_filter(int *saved)
 	}
 /* ------------------------------------------------------ */
 
+/* vs_create, vs_free, vs_clear, vs_contains, vs_insert,
+ * lm_create, lm_free, lm_record, lm_merge, lm_write,
+ * sth_aux, tree_topo_hash: moved to topology.c */
+
+
+/* --- ML display helpers --------------------------------------------------
+ * ml_display_score: convert internal minimisation score to lnL at the
+ * globally fixed ml_beta and ml_eta.
+ *
+ *   Internal score s = ml_beta * WD(eta)  (positive, minimised during search).
+ *   WD = s / ml_beta
+ *
+ *   lnL at fixed beta:
+ *     lnL = W * log(beta) - beta * WD - eta * P
+ *         = W * log(ml_beta) - s - eta * P
+ *
+ *   This value changes when ml_beta or ml_eta change, so it reflects the
+ *   parameters shown in the run header.  When ml_beta = beta_hat (MLE), this
+ *   equals the profile MLE lnL.
+ *
+ *   For paper/lust scales the score is returned as-is (no transformation).
+ *
+ * ml_score_label:  returns column header "lnL" or "score".
+ */
+static float ml_display_score(float s)
+    {
+    if(!(criterion == 7 && ml_scale == 2)) return s;
+    double W = 0.0, penalty = 0.0, w_entropy = 0.0;
+    int _i;
+    for(_i = 0; _i < Total_fund_trees; _i++)
+        if(sourcetreetag[_i])
+            {
+            double w = (double)tree_weights[_i];
+            W += w;
+            if(w > 0.0) w_entropy += w * log(w);
+            }
+    if(ml_eta != 0.0 && fund_bipart_sets != NULL)
+        for(_i = 0; _i < Total_fund_trees; _i++)
+            if(sourcetreetag[_i] && fund_bipart_sets[_i].count > 0)
+                penalty += log((double)fund_bipart_sets[_i].count);
+    /* lnL at fixed ml_beta: W*log(ml_beta) + sum(w_i*log(w_i)) - s - eta*P
+     * The sum(w_i*log(w_i)) term accounts for individual beta_i = ml_beta*w_i.
+     * When all weights are 1 this term is zero. */
+    double lnL;
+    double sd = (double)s;
+    if(ml_beta > 0.0 && sd >= 0.0)
+        lnL = W * log((double)ml_beta) + w_entropy - sd - ml_eta * penalty;
+    else
+        lnL = w_entropy - sd - ml_eta * penalty;   /* fallback */
+    /* Bryant & Steel (2008) normalising constant correction: subtract sum(w_i * log Z_i) */
+    if(ml_do_normcorr && ml_norm_logZ != NULL)
+        for(_i = 0; _i < Total_fund_trees; _i++)
+            if(sourcetreetag[_i] && tree_weights[_i] > 0.0f)
+                lnL -= (double)tree_weights[_i] * ml_norm_logZ[_i];
+    return (float)lnL;
+    }
+
+static const char *ml_score_label(void)
+    { return (criterion == 7 && ml_scale == 2) ? "lnL" : "score"; }
+
+/* ml_display_source_score: convert a single source-tree's raw ML score to
+ * its individual lnL contribution.
+ *
+ *   sourcetree_scores[k] = ml_beta * w_k * d_k * k_k^{-eta}
+ *                        = the beta*d term for tree k (positive, minimised).
+ *
+ *   The per-tree lnL contribution from the exponential model is:
+ *     lnL_k = w_k * log(beta / k_k^eta) - beta * w_k * d_k * k_k^{-eta}
+ *           = w_k * (log(beta) - eta*log(k_k)) - sourcetree_scores[k]
+ *
+ *   tree_idx is the source tree index (used to look up w_k and k_k).
+ */
+static float ml_display_source_score(float raw_score, int tree_idx)
+    {
+    if(!(criterion == 7 && ml_scale == 2)) return raw_score;
+    if(ml_beta <= 0.0f) return raw_score;
+    double w_k  = (double)tree_weights[tree_idx];
+    /* full per-tree lnL: w_k*log(beta_i) where beta_i = ml_beta*w_k
+     * = w_k*(log(ml_beta) + log(w_k)) - eta*w_k*log(k_k) - raw_score */
+    double lnL_k = w_k * log((double)ml_beta);
+    if(w_k > 0.0) lnL_k += w_k * log(w_k);
+    if(ml_eta != 0.0 && fund_bipart_sets != NULL
+       && fund_bipart_sets[tree_idx].count > 0)
+        lnL_k -= ml_eta * w_k * log((double)fund_bipart_sets[tree_idx].count);
+    lnL_k -= (double)raw_score;
+    /* Bryant & Steel (2008) normalising constant correction for this source tree */
+    if(ml_do_normcorr && ml_norm_logZ != NULL && tree_idx >= 0 && tree_idx < Total_fund_trees)
+        lnL_k -= w_k * ml_norm_logZ[tree_idx];
+    return (float)lnL_k;
+    }
+
+/* --- end RF/ML functions ------------------------------------------------- */
+
 
 #ifdef _OPENMP
 /*  hs_alloc_thread_state --------------------------------------------------
@@ -3160,98 +3253,6 @@ static void hs_free_thread_state(void)
     }
 
 
-/* vs_create, vs_free, vs_clear, vs_contains, vs_insert,
- * lm_create, lm_free, lm_record, lm_merge, lm_write,
- * sth_aux, tree_topo_hash: moved to topology.c */
-
-
-/* --- ML display helpers --------------------------------------------------
- * ml_display_score: convert internal minimisation score to lnL at the
- * globally fixed ml_beta and ml_eta.
- *
- *   Internal score s = ml_beta * WD(eta)  (positive, minimised during search).
- *   WD = s / ml_beta
- *
- *   lnL at fixed beta:
- *     lnL = W * log(beta) - beta * WD - eta * P
- *         = W * log(ml_beta) - s - eta * P
- *
- *   This value changes when ml_beta or ml_eta change, so it reflects the
- *   parameters shown in the run header.  When ml_beta = beta_hat (MLE), this
- *   equals the profile MLE lnL.
- *
- *   For paper/lust scales the score is returned as-is (no transformation).
- *
- * ml_score_label:  returns column header "lnL" or "score".
- */
-static float ml_display_score(float s)
-    {
-    if(!(criterion == 7 && ml_scale == 2)) return s;
-    double W = 0.0, penalty = 0.0, w_entropy = 0.0;
-    int _i;
-    for(_i = 0; _i < Total_fund_trees; _i++)
-        if(sourcetreetag[_i])
-            {
-            double w = (double)tree_weights[_i];
-            W += w;
-            if(w > 0.0) w_entropy += w * log(w);
-            }
-    if(ml_eta != 0.0 && fund_bipart_sets != NULL)
-        for(_i = 0; _i < Total_fund_trees; _i++)
-            if(sourcetreetag[_i] && fund_bipart_sets[_i].count > 0)
-                penalty += log((double)fund_bipart_sets[_i].count);
-    /* lnL at fixed ml_beta: W*log(ml_beta) + sum(w_i*log(w_i)) - s - eta*P
-     * The sum(w_i*log(w_i)) term accounts for individual beta_i = ml_beta*w_i.
-     * When all weights are 1 this term is zero. */
-    double lnL;
-    double sd = (double)s;
-    if(ml_beta > 0.0 && sd >= 0.0)
-        lnL = W * log((double)ml_beta) + w_entropy - sd - ml_eta * penalty;
-    else
-        lnL = w_entropy - sd - ml_eta * penalty;   /* fallback */
-    /* Bryant & Steel (2008) normalising constant correction: subtract sum(w_i * log Z_i) */
-    if(ml_do_normcorr && ml_norm_logZ != NULL)
-        for(_i = 0; _i < Total_fund_trees; _i++)
-            if(sourcetreetag[_i] && tree_weights[_i] > 0.0f)
-                lnL -= (double)tree_weights[_i] * ml_norm_logZ[_i];
-    return (float)lnL;
-    }
-
-static const char *ml_score_label(void)
-    { return (criterion == 7 && ml_scale == 2) ? "lnL" : "score"; }
-
-/* ml_display_source_score: convert a single source-tree's raw ML score to
- * its individual lnL contribution.
- *
- *   sourcetree_scores[k] = ml_beta * w_k * d_k * k_k^{-eta}
- *                        = the beta*d term for tree k (positive, minimised).
- *
- *   The per-tree lnL contribution from the exponential model is:
- *     lnL_k = w_k * log(beta / k_k^eta) - beta * w_k * d_k * k_k^{-eta}
- *           = w_k * (log(beta) - eta*log(k_k)) - sourcetree_scores[k]
- *
- *   tree_idx is the source tree index (used to look up w_k and k_k).
- */
-static float ml_display_source_score(float raw_score, int tree_idx)
-    {
-    if(!(criterion == 7 && ml_scale == 2)) return raw_score;
-    if(ml_beta <= 0.0f) return raw_score;
-    double w_k  = (double)tree_weights[tree_idx];
-    /* full per-tree lnL: w_k*log(beta_i) where beta_i = ml_beta*w_k
-     * = w_k*(log(ml_beta) + log(w_k)) - eta*w_k*log(k_k) - raw_score */
-    double lnL_k = w_k * log((double)ml_beta);
-    if(w_k > 0.0) lnL_k += w_k * log(w_k);
-    if(ml_eta != 0.0 && fund_bipart_sets != NULL
-       && fund_bipart_sets[tree_idx].count > 0)
-        lnL_k -= ml_eta * w_k * log((double)fund_bipart_sets[tree_idx].count);
-    lnL_k -= (double)raw_score;
-    /* Bryant & Steel (2008) normalising constant correction for this source tree */
-    if(ml_do_normcorr && ml_norm_logZ != NULL && tree_idx >= 0 && tree_idx < Total_fund_trees)
-        lnL_k -= w_k * ml_norm_logZ[tree_idx];
-    return (float)lnL_k;
-    }
-
-/* --- end RF/ML functions ------------------------------------------------- */
 
 
 /*  hs_same_topology -------------------------------------------------------

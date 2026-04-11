@@ -3246,24 +3246,6 @@ ac_config_headers="$ac_config_headers config.h"
 
 
 
-READLINE_PREFIX=""
-for candidate in \
-        "$(brew --prefix readline 2>/dev/null)" \
-        /usr/local/opt/readline \
-        /opt/homebrew/opt/readline ; do
-    if test -n "$candidate" && test -f "$candidate/include/readline/readline.h"; then
-        READLINE_PREFIX="$candidate"
-        break
-    fi
-done
-
-if test -n "$READLINE_PREFIX"; then
-    { printf "%s\n" "$as_me:${as_lineno-$LINENO}: Found GNU readline at $READLINE_PREFIX — preferring over system libedit" >&5
-printf "%s\n" "$as_me: Found GNU readline at $READLINE_PREFIX — preferring over system libedit" >&6;}
-    CPPFLAGS="-I$READLINE_PREFIX/include $CPPFLAGS"
-    LDFLAGS="-L$READLINE_PREFIX/lib $LDFLAGS"
-fi
-
 READLINE_TERMLIB=""
 
 
@@ -4643,16 +4625,29 @@ printf "%s\n" "$ac_cv_lib_ncurses_initscr" >&6; }
 if test "x$ac_cv_lib_ncurses_initscr" = xyes
 then :
   READLINE_TERMLIB="-lncurses"
-else case e in #(
-  e) READLINE_TERMLIB="" ;;
-esac
 fi
  ;;
 esac
 fi
 
 
-{ printf "%s\n" "$as_me:${as_lineno-$LINENO}: checking for readline in -lreadline" >&5
+READLINE_FOUND=no
+READLINE_TRIED=""
+for candidate in \
+        "$(brew --prefix readline 2>/dev/null)" \
+        /opt/homebrew/opt/readline \
+        /usr/local/opt/readline ; do
+        case " $READLINE_TRIED " in *" $candidate "*) continue ;; esac
+    READLINE_TRIED="$READLINE_TRIED $candidate"
+    if test -n "$candidate" && test -f "$candidate/include/readline/readline.h"; then
+        { printf "%s\n" "$as_me:${as_lineno-$LINENO}: Trying GNU readline at $candidate" >&5
+printf "%s\n" "$as_me: Trying GNU readline at $candidate" >&6;}
+        SAVED_CPPFLAGS="$CPPFLAGS"
+        SAVED_LDFLAGS="$LDFLAGS"
+        CPPFLAGS="-I$candidate/include $CPPFLAGS"
+        LDFLAGS="-L$candidate/lib $LDFLAGS"
+        { ac_cv_lib_readline_readline=; unset ac_cv_lib_readline_readline;}
+        { printf "%s\n" "$as_me:${as_lineno-$LINENO}: checking for readline in -lreadline" >&5
 printf %s "checking for readline in -lreadline... " >&6; }
 if test ${ac_cv_lib_readline_readline+y}
 then :
@@ -4702,14 +4697,78 @@ then :
 
 printf "%s\n" "#define HAVE_READLINE /**/" >>confdefs.h
 
-
+             READLINE_FOUND=yes
 else case e in #(
-  e) echo "No readline found — Clann will use standard input instead"
-     echo "For full CLI functionality: brew install readline  (macOS)"
-     echo "                     or:   apt install libreadline-dev  (Debian/Ubuntu)" ;;
+  e)              CPPFLAGS="$SAVED_CPPFLAGS"
+             LDFLAGS="$SAVED_LDFLAGS" ;;
 esac
 fi
 
+        if test "$READLINE_FOUND" = "yes"; then break; fi
+    fi
+done
+
+if test "$READLINE_FOUND" = "no"; then
+    { ac_cv_lib_readline_readline=; unset ac_cv_lib_readline_readline;}
+    { printf "%s\n" "$as_me:${as_lineno-$LINENO}: checking for readline in -lreadline" >&5
+printf %s "checking for readline in -lreadline... " >&6; }
+if test ${ac_cv_lib_readline_readline+y}
+then :
+  printf %s "(cached) " >&6
+else case e in #(
+  e) ac_check_lib_save_LIBS=$LIBS
+LIBS="-lreadline $READLINE_TERMLIB $LIBS"
+cat confdefs.h - <<_ACEOF >conftest.$ac_ext
+/* end confdefs.h.  */
+
+/* Override any GCC internal prototype to avoid an error.
+   Use char because int might match the return type of a GCC
+   builtin and then its argument prototype would still apply.
+   The 'extern "C"' is for builds by C++ compilers;
+   although this is not generally supported in C code supporting it here
+   has little cost and some practical benefit (sr 110532).  */
+#ifdef __cplusplus
+extern "C"
+#endif
+char readline (void);
+int
+main (void)
+{
+return readline ();
+  ;
+  return 0;
+}
+_ACEOF
+if ac_fn_c_try_link "$LINENO"
+then :
+  ac_cv_lib_readline_readline=yes
+else case e in #(
+  e) ac_cv_lib_readline_readline=no ;;
+esac
+fi
+rm -f core conftest.err conftest.$ac_objext conftest.beam \
+    conftest$ac_exeext conftest.$ac_ext
+LIBS=$ac_check_lib_save_LIBS ;;
+esac
+fi
+{ printf "%s\n" "$as_me:${as_lineno-$LINENO}: result: $ac_cv_lib_readline_readline" >&5
+printf "%s\n" "$ac_cv_lib_readline_readline" >&6; }
+if test "x$ac_cv_lib_readline_readline" = xyes
+then :
+  LIBREADLINE="-lreadline $READLINE_TERMLIB"
+
+
+printf "%s\n" "#define HAVE_READLINE /**/" >>confdefs.h
+
+         READLINE_FOUND=yes
+else case e in #(
+  e) echo "No readline found — Clann will use standard input instead"
+         echo "For full CLI functionality: brew install readline  (macOS)"
+         echo "                     or:   apt install libreadline-dev  (Debian/Ubuntu)" ;;
+esac
+fi
+
+fi
 
 
 
