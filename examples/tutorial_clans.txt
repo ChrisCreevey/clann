@@ -1,0 +1,39 @@
+# Clan file for the Clann tutorial mammal dataset
+# (tutorial_single.ph / bsweight_demo.ph)
+#
+# Format: one clan per line, taxon names space-separated.
+# Lines starting with '#' are comments; blank lines are ignored.
+#
+# A clan is a set of taxa expected to be monophyletic (form a single
+# connected subtree) in every correctly inferred gene tree, regardless
+# of where the tree is rooted.  Gene trees that violate a clan are
+# likely to contain hidden paralogy, mis-assigned orthologs, or
+# reconstruction artefacts.
+#
+# Clans with fewer than 2 members present in a given gene tree are
+# skipped as untestable.  Clans where all tree taxa are members are
+# skipped as trivially satisfied.
+# -----------------------------------------------------------------------
+
+# --- Primate clans (nested from most specific to broadest) ----------
+# Human and chimpanzee are universally recognised as sister taxa.
+Human Chimp
+
+# The three African great apes form a clan relative to Orangutan/Macaque.
+Human Chimp Gorilla
+
+# All four great apes (Hominidae).
+Human Chimp Gorilla Orangutan
+
+# All primates represented in this dataset.
+Human Chimp Gorilla Orangutan Macaque
+
+# --- Rodent clan ----------------------------------------------------
+Mouse Rat
+
+# --- Carnivore clan -------------------------------------------------
+Dog Cat
+
+# --- Non-primate mammals (rodents + carnivores) --------------------
+# Together these form the outgroup to the primates in this dataset.
+Mouse Rat Dog Cat

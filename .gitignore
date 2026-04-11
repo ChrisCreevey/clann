@@ -6,6 +6,7 @@
 # Compiled binary and object files
 # -----------------------------------------------------------------------------
 clann
+clann_test
 *.o
 *.Po
 *.0
@@ -83,6 +84,7 @@ all_raxml_bestTrees.txt
 prune_test.txt
 prune_test.txt_info.txt
 prune_test.txt_info.txt.zip
+html/*
 
 # -----------------------------------------------------------------------------
 # Examples output (generated files inside examples/, not source inputs)
@@ -120,3 +122,5 @@ examples/alltrees.ph
 mltest_results.txt
 alltrees.ph
 all_topo.ph
+Doxyfile
+my_reconstructions.nhx

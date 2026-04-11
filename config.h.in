@@ -1,6 +1,6 @@
 /* config.h.in.  Generated from configure.ac by autoheader.  */
 
-/* READLINE DEF */
+/* Define if GNU readline or libedit is available */
 #undef HAVE_READLINE
 
 /* Name of package */
