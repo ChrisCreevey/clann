@@ -79,7 +79,7 @@ static const char *opts_nj[] = {
 static const char *opts_usertrees[] = {
     "file=", "criterion=", "mlbeta=", "mleta=", "mlscale=", "normcorrect",
     "savetrees=", "sourcescores=", "tests=", "testsfile=", "nboot=",
-    "nthreads=", "printsourcescores", NULL
+    "nthreads=", "printsourcescores", "scorematrix=", "scorematrixfile=", NULL
 };
 static const char *opts_set[] = {
     "criterion=", "seed=", "mlbeta=", "mleta=", "mlscale=", "mlscale=",
@@ -195,12 +195,15 @@ static char **clann_completion(const char *text, int start, int end)
     int i;
     (void)end;
 
-    /* Suppress readline's default filename fallback */
-    rl_attempted_completion_over = 1;
+    /* rl_attempted_completion_over is set to 1 only when we provide our own
+     * completions.  Leaving it 0 (the default) on the fallthrough paths lets
+     * readline revert to its built-in filename/path completion, so arguments
+     * that are file paths (e.g. "execute myfile.nex") still get tab-expanded. */
 
     /* ---- completing the first word: command name ---- */
     if(start == 0)
         {
+        rl_attempted_completion_over = 1;
         _compl_list = clann_commands;
         return rl_completion_matches(text, _list_generator);
         }
@@ -235,15 +238,17 @@ static char **clann_completion(const char *text, int start, int end)
         while(rl_line_buffer[k] != '=' && on < 63)
             optname[on++] = rl_line_buffer[k++];
         optname[on] = '\0';
-        /* look up value list */
+        /* look up value list — if found, suppress filename fallback */
         for(i = 0; opt_val_map[i].opt; i++)
             {
             if(strcmp(opt_val_map[i].opt, optname) == 0)
                 {
+                rl_attempted_completion_over = 1;
                 _compl_list = opt_val_map[i].vals;
                 return rl_completion_matches(text, _list_generator);
                 }
             }
+        /* unknown option= — let filename completion handle it */
         return NULL;
         }
 
@@ -252,11 +257,13 @@ static char **clann_completion(const char *text, int start, int end)
         {
         if(strcmp(cmd_opts_table[i].cmd, cmd) == 0)
             {
+            rl_attempted_completion_over = 1;
             _compl_list = cmd_opts_table[i].opts;
             return rl_completion_matches(text, _list_generator);
             }
         }
 
+    /* Unknown command — fall back to readline filename completion */
     return NULL;
     }
 
@@ -483,6 +490,12 @@ int main(int argc, char *argv[])
 		/* Name this application so users can write "$if clann" blocks in
 		 * ~/.inputrc to add Clann-specific key bindings.                 */
 		rl_readline_name = "clann";
+
+		/* Disable history expansion (bash-style "!" substitution).
+		 * It is not used in Clann and its side-effect of encoding spaces
+		 * as \040 in history entries retrieved via Ctrl+R causes commands
+		 * to be returned garbled.                                        */
+		rl_variable_bind("enable-history-expansion", "off");
 
 		/* Register tab-completion handler */
 		rl_attempted_completion_function = clann_completion;
@@ -1319,6 +1332,20 @@ int main(int argc, char *argv[])
 /*****/    command = readline(CLANN_PROMPT);
 		   signal(SIGINT, controlc4);   /* re-arm Clann's quit handler */
 /*****/    command = realloc(command, 10000*sizeof(char));
+		   /* Decode \040 → space: readline history expansion encodes spaces as
+		    * \040 in stored entries; old history files may still contain them. */
+		   if(command)
+		       {
+		       char *_p = command, *_q = command;
+		       while(*_p)
+		           {
+		           if(_p[0]=='\\' && _p[1]=='0' && _p[2]=='4' && _p[3]=='0')
+		               { *_q++ = ' '; _p += 4; }
+		           else
+		               { *_q++ = *_p++; }
+		           }
+		       *_q = '\0';
+		       }
 		   #else
  	        printf2("clann> ");
  	        fflush(stdout);

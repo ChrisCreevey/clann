@@ -2302,7 +2302,7 @@ void usertrees_search(void)
     {
     FILE *userfile = NULL, *outfile = NULL, *sourcescoresfile = NULL;
     int keep = 0, nbest = 0, error = FALSE, i=0, tree_number = 0, j=0, k=0, prev = 0, print_source_scores = FALSE;
-    int    do_normcorr_local = FALSE;   /* set by normcorrect option; enables Bryant & Steel Z_T correction */
+    int    do_normcorr_local = 0;       /* 0=off, 1=approx, 2=exact (normcorrect option) */
     char  **user_tree_names     = NULL;   /* [tree_number]: name from [..] bracket for each input tree */
     int     user_tree_names_alloc = 0;
     int    *retained_orig_idx   = NULL;   /* [j]: 0-based input tree index for retained_supers[j] */
@@ -2320,6 +2320,13 @@ void usertrees_search(void)
     float **all_gene_scores = NULL;
     float  *all_total_scores = NULL;
     strcpy(testsfile_name, "mltest_results.txt");
+    /* Score matrix state */
+    int    do_scorematrix    = FALSE;
+    char   scorematrixfile_name[10000];
+    float **matrix_scores    = NULL;   /* [tree_idx][Total_fund_trees] per-source scores */
+    float  *matrix_total     = NULL;   /* [tree_idx] total score per input tree           */
+    int    matrix_alloc      = 0;
+    strcpy(scorematrixfile_name, "usertrees_scorematrix.txt");
     char *user_super = NULL, c = '\0', *best_tree = malloc(TREE_LENGTH * sizeof(char)), *temp = NULL;
     if(!best_tree) { printf2("Error: out of memory in usertrees_search\n"); return; }
     float score = 0, best_score = 0;
@@ -2341,6 +2348,13 @@ void usertrees_search(void)
 					sourcescoresfile = fopen("sourcetree_scores.txt", "w");
 					}
 				}
+            if(strcmp(parsed_command[i], "scorematrix") == 0)
+                {
+                if(strcmp(parsed_command[i+1], "yes") == 0)
+                    do_scorematrix = TRUE;
+                }
+            if(strcmp(parsed_command[i], "scorematrixfile") == 0)
+                strncpy(scorematrixfile_name, parsed_command[i+1], 9999);
             if(criterion == 3)
                 {
                 if(strcmp(parsed_command[i], "weight") == 0)
@@ -2416,7 +2430,12 @@ void usertrees_search(void)
                     run_ml_tests = TRUE;
                 }
             if(strcmp(parsed_command[i], "normcorrect") == 0)
-                do_normcorr_local = TRUE;
+                {
+                if(parsed_command[i+1] && strcmp(parsed_command[i+1], "exact") == 0)
+                    do_normcorr_local = 2;
+                else
+                    do_normcorr_local = 1;
+                }
             if(strcmp(parsed_command[i], "nboot") == 0)
                 nboot_tests = atoi(parsed_command[i+1]);
             if(strcmp(parsed_command[i], "testsfile") == 0)
@@ -2591,7 +2610,14 @@ void usertrees_search(void)
         if(do_normcorr_local && criterion == 7 && ml_scale == 2)
             {
             ml_norm_logZ = calloc(Total_fund_trees, sizeof(double));
-            if(ml_norm_logZ) { ml_do_normcorr = 1; printf2("  Normalising constant correction: enabled (Bryant & Steel 2008, large-beta approx)\n"); }
+            if(ml_norm_logZ)
+                {
+                ml_do_normcorr = do_normcorr_local;
+                if(do_normcorr_local == 2)
+                    printf2("  Normalising constant correction: exact subset enumeration (n<=20; fallback to approx for larger pruned trees)\n");
+                else
+                    printf2("  Normalising constant correction: enabled (Bryant & Steel 2008, large-beta approx)\n");
+                }
             else printf2("  Warning: normcorrect allocation failed; correction disabled\n");
             }
 
@@ -2654,6 +2680,25 @@ void usertrees_search(void)
 				}
 
 			/*printf("%s\t[%f]\n", user_super, score); */
+
+			/* Capture per-source scores for score matrix (all criteria) */
+			if(do_scorematrix && sourcetree_scores)
+				{
+				if(tree_number == matrix_alloc)
+					{
+					matrix_alloc += 64;
+					matrix_scores = realloc(matrix_scores, matrix_alloc * sizeof(float *));
+					matrix_total  = realloc(matrix_total,  matrix_alloc * sizeof(float));
+					}
+				if(matrix_scores && matrix_total)
+					{
+					matrix_scores[tree_number] = malloc(Total_fund_trees * sizeof(float));
+					if(matrix_scores[tree_number])
+						for(k = 0; k < Total_fund_trees; k++)
+							matrix_scores[tree_number][k] = sourcetree_scores[k];
+					matrix_total[tree_number] = score;
+					}
+				}
 
 			c = getc(userfile);
 			utn_buf[0] = '\0';
@@ -2796,6 +2841,93 @@ void usertrees_search(void)
 				}
 
 			trees_in_memory = i;
+
+			/* Write per-source-tree score matrix if requested */
+			if(do_scorematrix && matrix_scores && tree_number > 0)
+				{
+				int _active = 0;
+				FILE *_mf = NULL;
+				for(k = 0; k < Total_fund_trees; k++)
+					if(sourcetreetag[k]) _active++;
+				_mf = fopen(scorematrixfile_name, "w");
+				if(!_mf)
+					printf2("Warning: could not open score matrix file '%s'\n", scorematrixfile_name);
+				else
+					{
+					/* ---- comment header ---- */
+					fprintf(_mf, "# usertrees score matrix\n");
+					fprintf(_mf, "# criterion=%s  source_trees=%d  input_trees=%d\n",
+						ml_score_label(), _active, tree_number);
+					fprintf(_mf, "# Total %s per input tree:\n", ml_score_label());
+					for(i = 0; i < tree_number; i++)
+						{
+						const char *_cn = (user_tree_names && i < user_tree_names_alloc
+						                   && user_tree_names[i]) ? user_tree_names[i] : NULL;
+						if(_cn)
+							fprintf(_mf, "#   Tree_%d(%s)\t%s=%g\n",
+								i+1, _cn, ml_score_label(),
+								(double)ml_display_score(matrix_total[i]));
+						else
+							fprintf(_mf, "#   Tree_%d\t%s=%g\n",
+								i+1, ml_score_label(),
+								(double)ml_display_score(matrix_total[i]));
+						}
+					fprintf(_mf, "#\n");
+
+					/* ---- column header row ---- */
+					fprintf(_mf, "SourceTree\tSize\tWeight");
+					for(i = 0; i < tree_number; i++)
+						{
+						const char *_cn = (user_tree_names && i < user_tree_names_alloc
+						                   && user_tree_names[i]) ? user_tree_names[i] : NULL;
+						if(_cn)
+							fprintf(_mf, "\tTree_%d(%s)", i+1, _cn);
+						else
+							fprintf(_mf, "\tTree_%d", i+1);
+						}
+					fprintf(_mf, "\n");
+
+					/* ---- data rows: one per active source tree ---- */
+					for(k = 0; k < Total_fund_trees; k++)
+						{
+						if(!sourcetreetag[k]) continue;
+						/* row label: number, with name if available */
+						if(tree_names && tree_names[k] && strcmp(tree_names[k], "") != 0)
+							fprintf(_mf, "%d(%s)", k+1, tree_names[k]);
+						else
+							fprintf(_mf, "%d", k+1);
+						/* tree size: count of taxa present in this source tree */
+						{ int _sz = 0, _t;
+						  if(presence_of_taxa && presence_of_taxa[k])
+						      for(_t = 0; _t < number_of_taxa; _t++)
+						          if(presence_of_taxa[k][_t]) _sz++;
+						  fprintf(_mf, "\t%d", _sz); }
+						/* tree weight */
+						fprintf(_mf, "\t%g", (double)(tree_weights ? tree_weights[k] : 1.0f));
+						/* score columns */
+						for(i = 0; i < tree_number; i++)
+							{
+							float _v = (matrix_scores[i]) ? matrix_scores[i][k] : -1.0f;
+							fprintf(_mf, "\t%g",
+								(double)ml_display_source_score(_v, k));
+							}
+						fprintf(_mf, "\n");
+						}
+					fclose(_mf);
+					printf2("\nScore matrix (%d source trees × %d input trees) written to %s\n",
+						_active, tree_number, scorematrixfile_name);
+					}
+				}
+
+			/* Cleanup score matrix arrays */
+			if(matrix_scores)
+				{
+				for(i = 0; i < tree_number; i++)
+					if(matrix_scores[i]) free(matrix_scores[i]);
+				free(matrix_scores);
+				matrix_scores = NULL;
+				}
+			if(matrix_total) { free(matrix_total); matrix_total = NULL; }
 
 			/* Run ML topology tests if requested */
 			if(run_ml_tests)

@@ -3214,6 +3214,24 @@ ac_config_headers="$ac_config_headers config.h"
 
 
 
+READLINE_PREFIX=""
+for candidate in \
+        "$(brew --prefix readline 2>/dev/null)" \
+        /usr/local/opt/readline \
+        /opt/homebrew/opt/readline ; do
+    if test -n "$candidate" && test -f "$candidate/include/readline/readline.h"; then
+        READLINE_PREFIX="$candidate"
+        break
+    fi
+done
+
+if test -n "$READLINE_PREFIX"; then
+    { printf "%s\n" "$as_me:${as_lineno-$LINENO}: Found GNU readline at $READLINE_PREFIX — preferring over system libedit" >&5
+printf "%s\n" "$as_me: Found GNU readline at $READLINE_PREFIX — preferring over system libedit" >&6;}
+    CPPFLAGS="-I$READLINE_PREFIX/include $CPPFLAGS"
+    LDFLAGS="-L$READLINE_PREFIX/lib $LDFLAGS"
+fi
+
 
 
 
@@ -4551,9 +4569,9 @@ printf "%s\n" "#define HAVE_READLINE /**/" >>confdefs.h
 
 
 else case e in #(
-  e)
-			echo "No readline found, Clann will use standard input instead"
-			echo "Please install readline for full IO functionality"   ;;
+  e) echo "No readline found — Clann will use standard input instead"
+     echo "For full CLI functionality: brew install readline  (macOS)"
+     echo "                     or:   apt install libreadline-dev  (Debian/Ubuntu)" ;;
 esac
 fi
 
@@ -7062,11 +7080,5 @@ if test -n "$ac_unrecognized_opts" && test "$enable_option_checking" != no; then
   { printf "%s\n" "$as_me:${as_lineno-$LINENO}: WARNING: unrecognized options: $ac_unrecognized_opts" >&5
 printf "%s\n" "$as_me: WARNING: unrecognized options: $ac_unrecognized_opts" >&2;}
 fi
-
-
-
-
-
-
 
 

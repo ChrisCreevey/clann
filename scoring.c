@@ -119,6 +119,126 @@ static int count_cherries_newick(const char *nwk)
     return cherries;
     }
 
+/* ---- Exact Bryant & Steel normalising constant ----------------------------
+ * Computes log Z_T(beta) exactly via subset enumeration over B(T):
+ *
+ *   Z_T = exp(-2*beta*(n-3)) * sum_{S ⊆ B(T)} (exp(2*beta)-1)^|S| * N(S)
+ *
+ * N(S) = product over connected components C of the contracted-edge subgraph
+ *        (edges of B(T) NOT in S) of (2*|C|-1)!!
+ * where |C| = number of internal nodes merged into the super-node for C.
+ *
+ * Component sizes come from Union-Find: contracting edge (u,v) merges the
+ * two internal node groups.  A group of k merged nodes has degree k+2 in the
+ * partial tree, contributing (2k-1)!! binary resolutions.
+ *
+ * Limited to pruned trees with at most NORMCORR_EXACT_MAX_N taxa (2^(n-3)
+ * subsets; for n=20 that is 2^17 = 131 072 iterations).  Larger trees fall
+ * back to the large-beta approximation automatically.
+ * -------------------------------------------------------------------------- */
+#define NORMCORR_EXACT_MAX_N 20
+
+/* Globals used by the recursive Newick parser (not thread-safe, but the
+ * normcorr path in usertrees is single-threaded). */
+static int _ncp_nc, _ncp_ec;
+static int _ncp_eu[NORMCORR_EXACT_MAX_N], _ncp_ev[NORMCORR_EXACT_MAX_N];
+
+/* Recursive descent: returns the internal node ID for this subtree, or -1
+ * for a leaf.  Populates _ncp_eu/_ncp_ev for each internal edge found.     */
+static int _ncp_parse(const char *nwk, int *p)
+    {
+    if(nwk[*p] != '(')
+        {
+        /* leaf — skip token and optional branch length */
+        while(nwk[*p] && nwk[*p] != ',' && nwk[*p] != ')' && nwk[*p] != ';')
+            (*p)++;
+        return -1;
+        }
+    (*p)++;                           /* skip '(' */
+    int my_id = _ncp_nc++;
+    while(nwk[*p] != ')' && nwk[*p] && nwk[*p] != ';')
+        {
+        if(nwk[*p] == ',') { (*p)++; continue; }
+        int child = _ncp_parse(nwk, p);
+        if(child >= 0)                /* internal child → record edge */
+            { _ncp_eu[_ncp_ec] = my_id; _ncp_ev[_ncp_ec] = child; _ncp_ec++; }
+        }
+    (*p)++;                           /* skip ')' */
+    /* skip optional label */
+    while(nwk[*p] && nwk[*p] != ',' && nwk[*p] != ')' && nwk[*p] != ';' && nwk[*p] != ':')
+        (*p)++;
+    /* skip optional branch length */
+    if(nwk[*p] == ':')
+        { (*p)++; while(nwk[*p] && nwk[*p] != ',' && nwk[*p] != ')' && nwk[*p] != ';') (*p)++; }
+    return my_id;
+    }
+
+static double log_normconst_exact(const char *pruned_nwk, int n, double beta)
+    {
+    int m  = n - 3;   /* internal bipartitions */
+    int nn = n - 2;   /* internal nodes        */
+    int e, i;
+
+    /* Parse tree topology */
+    _ncp_nc = 0; _ncp_ec = 0;
+    int pos = 0;
+    _ncp_parse(pruned_nwk, &pos);
+    /* _ncp_ec should equal m; _ncp_nc should equal nn */
+
+    double x     = exp(2.0 * beta) - 1.0;
+    double ex    = exp(-2.0 * beta * (double)m);
+
+    /* Precompute powers of x */
+    double pow_x[NORMCORR_EXACT_MAX_N + 1];
+    pow_x[0] = 1.0;
+    for(i = 1; i <= m; i++) pow_x[i] = pow_x[i-1] * x;
+
+    double sum = 0.0;
+    unsigned int total = 1u << m;
+
+    for(unsigned int S = 0; S < total; S++)
+        {
+        /* Union-Find over nn internal nodes; contract edges NOT in S */
+        int uf[NORMCORR_EXACT_MAX_N], sz[NORMCORR_EXACT_MAX_N];
+        for(i = 0; i < nn; i++) { uf[i] = i; sz[i] = 1; }
+
+        for(e = 0; e < m; e++)
+            {
+            if(S & (1u << e)) continue;   /* edge in S = kept, not contracted */
+            int u = _ncp_eu[e], v = _ncp_ev[e];
+            while(uf[u] != u) u = uf[u];
+            while(uf[v] != v) v = uf[v];
+            if(u != v)
+                {
+                if(sz[u] < sz[v]) { int t = u; u = v; v = t; }
+                uf[v] = u; sz[u] += sz[v];
+                }
+            }
+
+        /* N(S) = prod over components with size k>=2 of (2k-1)!! */
+        double N = 1.0;
+        for(i = 0; i < nn; i++)
+            {
+            if(uf[i] == i && sz[i] >= 2)
+                {
+                double df = 1.0;
+                int f;
+                for(f = 1; f <= 2*sz[i]-1; f += 2) df *= (double)f;
+                N *= df;
+                }
+            }
+
+        /* popcount(S) */
+        int nbits = 0;
+        unsigned int tmp = S;
+        while(tmp) { nbits += (int)(tmp & 1u); tmp >>= 1; }
+
+        sum += pow_x[nbits] * N;
+        }
+
+    return log(ex * sum);
+    }
+
 /* log_normconst_approx: approximate log(Z_T) for the Bryant & Steel (2008)
  * normalising constant using the truncated large-beta expansion:
  *
@@ -1092,11 +1212,23 @@ float compare_trees_ml(int spr)
             int super_cnt = collect_biparts_newick(pruned_nwk, total_hash, super_bp);
 
             /* Bryant & Steel (2008) normalising constant correction (usertrees normcorrect).
-             * Computed here while pruned_nwk is still valid for T|X_i. */
+             * Computed here while pruned_nwk is still valid for T|X_i.
+             * ml_do_normcorr==1: large-beta approx; ml_do_normcorr==2: exact subset enum. */
             if(ml_do_normcorr && ml_norm_logZ != NULL)
                 {
-                int nc = count_cherries_newick(pruned_nwk);
-                ml_norm_logZ[i] = log_normconst_approx(ntaxa_i, nc, (double)ml_beta);
+                if(ml_do_normcorr == 2 && ntaxa_i <= NORMCORR_EXACT_MAX_N)
+                    ml_norm_logZ[i] = log_normconst_exact(pruned_nwk, ntaxa_i, (double)ml_beta);
+                else
+                    {
+                    if(ml_do_normcorr == 2)
+                        {
+                        static int _exact_warned = 0;
+                        if(!_exact_warned)
+                            { printf2("  Note: normcorrect=exact: trees with >%d taxa use large-beta approx\n", NORMCORR_EXACT_MAX_N); _exact_warned = 1; }
+                        }
+                    int nc = count_cherries_newick(pruned_nwk);
+                    ml_norm_logZ[i] = log_normconst_approx(ntaxa_i, nc, (double)ml_beta);
+                    }
                 }
 
             reset_tree(tree_top);
