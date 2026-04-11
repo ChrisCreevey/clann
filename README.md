@@ -60,6 +60,70 @@ A complete reference for every command and its options is provided in **[USER_MA
 
 A tutorial walking through the new features in clann is provided in **[TUTORIAL.md](TUTORIAL.md)**.
 
+# Installation
+
+## Package managers (recommended)
+
+**Conda (Bioconda):**
+
+```bash
+conda install -c bioconda -c conda-forge clann
+```
+
+Or with `mamba` for faster solves:
+
+```bash
+mamba install -c bioconda -c conda-forge clann
+```
+
+**Homebrew (macOS / Linux):**
+
+```bash
+brew tap ChrisCreevey/clann
+brew install clann
+```
+
+Or, once accepted into [homebrew-bio](https://github.com/brewsci/homebrew-bio):
+
+```bash
+brew tap brewsci/bio
+brew install clann
+```
+
+See **[PACKAGING.md](PACKAGING.md)** for detailed submission and update instructions for both channels.
+
+---
+
+## Building from source
+
+### Prerequisites
+
+| Dependency | Purpose | Install |
+|---|---|---|
+| GCC ≥ 4.9 | Compiler | `apt install build-essential` / `brew install gcc` |
+| GNU readline | Interactive prompt (tab completion, history) | `apt install libreadline-dev` / `brew install readline` |
+| GCC with OpenMP | Parallel heuristic search | included in Linux GCC; `brew install gcc` on macOS |
+
+On **macOS**, Apple's Clang does not ship an OpenMP runtime. `configure` automatically detects Apple Clang and switches to a Homebrew GCC (`gcc-15` … `gcc-11`) if one is installed. If none is found, Clann builds single-threaded and prints:
+
+```
+To enable multi-threading: brew install gcc  (then re-run ./configure)
+```
+
+### Build steps
+
+```bash
+./configure
+make
+sudo make install    # optional — installs clann to /usr/local/bin
+```
+
+To keep the binary in the source directory instead, skip `make install` and run `./clann` directly.
+
+See the **[INSTALL](INSTALL)** file for full prerequisites, macOS notes, and troubleshooting (permission errors, automake version mismatches, etc.).
+
+---
+
 # Usage
 
 ## Direct command-line (recommended)

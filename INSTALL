@@ -1,37 +1,111 @@
-to install type:
-   "./configure"
+Installing Clann
+================
 
-followed by:
-	 "make"
+Quick summary
+-------------
 
-Clann will then be located in this directory
+  ./configure
+  make
+  sudo make install        # optional — installs to /usr/local/bin
 
-######
-
-	Note: If running "make" returns an error such as:
-
-		CDPATH="${ZSH_VERSION+.}:" && cd . && aclocal-1.16
-		/bin/sh: aclocal-1.16: command not found
-		make: *** [aclocal.m4] Error 127
-
-	try running:
-		"autoreconf -f -i"
-	followed by:
-		"./configure"
-		"make"
-	to resolve the issue (Thanks to Michael Broe for suggesting this fix).
-
-#######
-
-the use of "make install" may not work depending on write privileges
-
-=======
+Clann is also available via Conda and Homebrew; see PACKAGING.md or the
+README.md for those instructions.
 
 
-# Special Note: if you get this message when doing the "./configure" command:
-"-bash: ./configure: Permission denied"
-# then do the following command: 
-"chmod +x configure"
-and then continue on to:
-"make"
+Prerequisites
+-------------
+
+Required:
+  * A C compiler — GCC 4.9 or later is recommended.
+
+Optional but strongly recommended:
+  * GNU readline (libreadline-dev / readline-devel) — enables tab completion,
+    command history, and Ctrl+R reverse search in the interactive prompt.
+    Without it Clann falls back to plain standard-input and line editing is
+    not available.
+
+Optional (for multi-threaded parallel search):
+  * A GCC with OpenMP support (-fopenmp).
+    On Linux this is standard in any gcc package.
+    On macOS, Apple's Clang does NOT ship OpenMP; configure.ac will
+    automatically detect Apple Clang and switch to a Homebrew GCC if one is
+    installed.  Install one with:  brew install gcc
+
+
+Installing prerequisites
+------------------------
+
+Debian / Ubuntu:
+  sudo apt install build-essential libreadline-dev
+
+Red Hat / CentOS / Fedora:
+  sudo yum install gcc readline-devel
+  # or on newer releases:
+  sudo dnf install gcc readline-devel
+
+macOS (Homebrew):
+  brew install gcc readline
+  # gcc is needed for OpenMP; readline gives the full interactive prompt.
+
+Conda (any platform):
+  # All dependencies are pulled in automatically when building via conda-build;
+  # see PACKAGING.md for the full Conda install workflow.
+
+
+Building from source
+--------------------
+
+1. Run configure:
+
+     ./configure
+
+   On macOS with Apple Clang, configure will search for a Homebrew GCC
+   (gcc-15 … gcc-11) in /opt/homebrew and /usr/local and switch to it
+   automatically for OpenMP support.  If no Homebrew GCC is found, Clann
+   builds single-threaded with a notice:
+     "To enable multi-threading: brew install gcc (then re-run ./configure)"
+
+   If readline is not found, configure prints the installation hint and
+   continues; Clann will build without readline support.
+
+2. Compile:
+
+     make
+
+   To use multiple cores during compilation:
+     make -j$(nproc)        # Linux
+     make -j$(sysctl -n hw.ncpu)   # macOS
+
+3. Install (optional):
+
+     sudo make install
+
+   This installs the clann binary to /usr/local/bin (or the prefix chosen
+   with --prefix=... when running configure).  If you prefer to keep the
+   binary in the source directory, skip this step and run ./clann directly.
+
+
+Troubleshooting
+---------------
+
+"Permission denied" when running ./configure:
+  chmod +x configure
+  ./configure
+
+Automake version mismatch error, e.g.:
+  CDPATH="${ZSH_VERSION+.}:" && cd . && aclocal-1.16
+  /bin/sh: aclocal-1.16: command not found
+  make: *** [aclocal.m4] Error 127
+
+  Regenerate the build system files and retry:
+    autoreconf -f -i
+    ./configure
+    make
+  (Thanks to Michael Broe for suggesting this fix.)
+
+"make install" permission error:
+  Either run with sudo, or configure with a user-writable prefix:
+    ./configure --prefix=$HOME/.local
+    make
+    make install
 
