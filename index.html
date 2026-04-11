@@ -1,151 +1,882 @@
 <!DOCTYPE html>
-<html>
-  <head>
-    <meta charset='utf-8'>
-    <meta http-equiv="X-UA-Compatible" content="chrome=1">
-    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
-    <link href='https://fonts.googleapis.com/css?family=Architects+Daughter' rel='stylesheet' type='text/css'>
-    <link rel="stylesheet" type="text/css" href="stylesheets/stylesheet.css" media="screen">
-    <link rel="stylesheet" type="text/css" href="stylesheets/github-light.css" media="screen">
-    <link rel="stylesheet" type="text/css" href="stylesheets/print.css" media="print">
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Clann: Investigating phylogenetic information through supertree analyses. A free software tool for phylogenomics.">
+  <title>Clann — Phylogenomic Supertree Analysis</title>
 
-    <!--[if lt IE 9]>
-    <script src="//html5shiv.googlecode.com/svn/trunk/html5.js"></script>
-    <![endif]-->
+  <!-- Fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
 
-    <title>Clann by ChrisCreevey</title>
-  </head>
+  <!-- Marked.js for markdown rendering -->
+  <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
 
-  <body>
-    <header>
-      <div class="inner">
-        <h1>Clann</h1>
-        <h2>Clann: Investigating phylogenetic information through supertree analyses.</h2>
-        <a href="https://github.com/ChrisCreevey/clann" class="button"><small>View project on</small> GitHub</a>
+  <!-- Highlight.js for code syntax highlighting -->
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github.min.css">
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+
+  <style>
+    /* ── CSS Custom Properties ─────────────────────────────────── */
+    :root {
+      --brand:       #1a6b4a;
+      --brand-dark:  #124d35;
+      --brand-light: #e8f5ee;
+      --brand-mid:   #2d9164;
+      --accent:      #f0a500;
+      --text:        #1e2530;
+      --text-muted:  #5a6473;
+      --border:      #d8e0e8;
+      --bg:          #f7f9fc;
+      --surface:     #ffffff;
+      --code-bg:     #f4f6f8;
+      --nav-h:       60px;
+      --sidebar-w:   260px;
+      --toc-w:       220px;
+      --radius:      8px;
+      --shadow:      0 2px 12px rgba(0,0,0,0.08);
+      --shadow-lg:   0 8px 32px rgba(0,0,0,0.12);
+      --transition:  0.2s ease;
+    }
+
+    /* ── Reset ─────────────────────────────────────────────────── */
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    html { scroll-behavior: smooth; }
+    body {
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+      font-size: 16px;
+      line-height: 1.65;
+      color: var(--text);
+      background: var(--bg);
+    }
+    a { color: var(--brand); text-decoration: none; }
+    a:hover { color: var(--brand-mid); text-decoration: underline; }
+    img { max-width: 100%; }
+
+    /* ── Top Navigation ─────────────────────────────────────────── */
+    #topnav {
+      position: fixed; top: 0; left: 0; right: 0; z-index: 1000;
+      height: var(--nav-h);
+      background: var(--brand-dark);
+      display: flex; align-items: center;
+      padding: 0 1.5rem;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.25);
+    }
+    #topnav .brand {
+      font-size: 1.4rem; font-weight: 700; color: #fff;
+      letter-spacing: -0.3px; margin-right: 2.5rem; flex-shrink: 0;
+      cursor: pointer;
+    }
+    #topnav .brand span { color: var(--accent); }
+    #nav-links {
+      display: flex; align-items: center; gap: 0.25rem; flex: 1;
+      list-style: none;
+    }
+    #nav-links li { position: relative; }
+    #nav-links li a, #nav-links li button {
+      display: flex; align-items: center; gap: 0.3rem;
+      padding: 0.4rem 0.85rem;
+      color: rgba(255,255,255,0.85);
+      font-size: 0.9rem; font-weight: 500;
+      border-radius: var(--radius);
+      transition: background var(--transition), color var(--transition);
+      cursor: pointer; background: none; border: none; font-family: inherit;
+    }
+    #nav-links li a:hover,
+    #nav-links li button:hover,
+    #nav-links li a.active,
+    #nav-links li button.active {
+      background: rgba(255,255,255,0.12);
+      color: #fff; text-decoration: none;
+    }
+    .nav-arrow { font-size: 0.65rem; opacity: 0.7; transition: transform var(--transition); }
+    /* Dropdown */
+    .dropdown-menu {
+      display: none; position: absolute; top: calc(100% + 6px); left: 0;
+      background: var(--surface); border: 1px solid var(--border);
+      border-radius: var(--radius); box-shadow: var(--shadow-lg);
+      min-width: 240px; overflow: hidden; z-index: 200;
+    }
+    .dropdown-menu a {
+      display: block; padding: 0.6rem 1rem;
+      color: var(--text); font-size: 0.875rem;
+      border-bottom: 1px solid var(--border);
+      transition: background var(--transition);
+    }
+    .dropdown-menu a:last-child { border-bottom: none; }
+    .dropdown-menu a:hover { background: var(--brand-light); color: var(--brand); text-decoration: none; }
+    .dropdown-menu .menu-label {
+      display: block; padding: 0.5rem 1rem 0.25rem;
+      font-size: 0.68rem; font-weight: 700; text-transform: uppercase;
+      letter-spacing: 0.1em; color: var(--text-muted); background: var(--bg);
+    }
+    li.has-dropdown:hover .dropdown-menu { display: block; }
+    li.has-dropdown:hover .nav-arrow { transform: rotate(180deg); }
+
+    /* Nav right side */
+    #nav-right {
+      margin-left: auto; display: flex; align-items: center; gap: 0.5rem;
+    }
+    .nav-badge {
+      font-size: 0.72rem; font-weight: 700;
+      background: var(--accent); color: #1e2530;
+      padding: 0.15rem 0.55rem; border-radius: 20px;
+    }
+    .nav-gh-btn {
+      display: flex; align-items: center; gap: 0.4rem;
+      padding: 0.35rem 0.85rem;
+      background: rgba(255,255,255,0.12);
+      color: #fff; font-size: 0.85rem; font-weight: 500;
+      border-radius: var(--radius);
+      border: 1px solid rgba(255,255,255,0.2);
+      transition: background var(--transition);
+    }
+    .nav-gh-btn:hover { background: rgba(255,255,255,0.22); text-decoration: none; color: #fff; }
+
+    /* Mobile menu toggle */
+    #menu-toggle {
+      display: none; background: none; border: none; cursor: pointer;
+      color: #fff; font-size: 1.4rem; margin-left: auto; padding: 0.25rem;
+    }
+
+    /* ── Page Layout ────────────────────────────────────────────── */
+    #page-wrapper {
+      display: flex;
+      margin-top: var(--nav-h);
+      min-height: calc(100vh - var(--nav-h));
+    }
+
+    /* ── Left Sidebar ────────────────────────────────────────────── */
+    #sidebar {
+      width: var(--sidebar-w); flex-shrink: 0;
+      background: var(--surface); border-right: 1px solid var(--border);
+      padding: 1.5rem 0; overflow-y: auto;
+      position: sticky; top: var(--nav-h);
+      height: calc(100vh - var(--nav-h));
+    }
+    #sidebar .sidebar-section { margin-bottom: 1.5rem; }
+    #sidebar .sidebar-title {
+      padding: 0 1.25rem 0.4rem;
+      font-size: 0.68rem; font-weight: 700; text-transform: uppercase;
+      letter-spacing: 0.1em; color: var(--text-muted);
+    }
+    #sidebar a {
+      display: flex; align-items: center; gap: 0.6rem;
+      padding: 0.45rem 1.25rem;
+      font-size: 0.875rem; color: var(--text-muted);
+      border-left: 3px solid transparent;
+      transition: all var(--transition);
+    }
+    #sidebar a .icon { font-size: 1rem; flex-shrink: 0; }
+    #sidebar a:hover { color: var(--brand); background: var(--brand-light); text-decoration: none; }
+    #sidebar a.active {
+      color: var(--brand); font-weight: 600;
+      border-left-color: var(--brand);
+      background: var(--brand-light);
+    }
+
+    /* ── Main Content ───────────────────────────────────────────── */
+    #main-content {
+      flex: 1; min-width: 0;
+      padding: 2.5rem 2rem 4rem;
+      max-width: 900px;
+    }
+    #content-area { width: 100%; }
+
+    /* ── Right TOC ──────────────────────────────────────────────── */
+    #toc-sidebar {
+      width: var(--toc-w); flex-shrink: 0;
+      padding: 2rem 1rem 2rem 0.5rem;
+      position: sticky; top: var(--nav-h);
+      height: calc(100vh - var(--nav-h));
+      overflow-y: auto;
+    }
+    #toc-sidebar .toc-title {
+      font-size: 0.68rem; font-weight: 700; text-transform: uppercase;
+      letter-spacing: 0.1em; color: var(--text-muted);
+      margin-bottom: 0.75rem; padding-left: 0.5rem;
+    }
+    #toc-nav { list-style: none; }
+    #toc-nav li a {
+      display: block; padding: 0.25rem 0.5rem;
+      font-size: 0.8rem; color: var(--text-muted);
+      border-left: 2px solid var(--border);
+      transition: all var(--transition); line-height: 1.4;
+    }
+    #toc-nav li a:hover { color: var(--brand); border-left-color: var(--brand); text-decoration: none; }
+    #toc-nav li a.active { color: var(--brand); border-left-color: var(--brand); font-weight: 500; }
+    #toc-nav li.toc-h3 a { padding-left: 1.25rem; font-size: 0.75rem; }
+
+    /* ── Loading Spinner ────────────────────────────────────────── */
+    #loading {
+      display: none; flex-direction: column; align-items: center;
+      justify-content: center; padding: 5rem 2rem; color: var(--text-muted);
+    }
+    .spinner {
+      width: 40px; height: 40px; border-radius: 50%;
+      border: 3px solid var(--border); border-top-color: var(--brand);
+      animation: spin 0.8s linear infinite; margin-bottom: 1rem;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* ── Home Page ──────────────────────────────────────────────── */
+    .hero {
+      background: linear-gradient(135deg, var(--brand-dark) 0%, var(--brand) 60%, var(--brand-mid) 100%);
+      border-radius: 12px; padding: 3rem 2.5rem; margin-bottom: 2.5rem;
+      color: #fff; position: relative; overflow: hidden;
+    }
+    .hero::before {
+      content: ''; position: absolute; top: -40px; right: -40px;
+      width: 220px; height: 220px; border-radius: 50%;
+      background: rgba(255,255,255,0.06);
+    }
+    .hero::after {
+      content: ''; position: absolute; bottom: -70px; left: 35%;
+      width: 300px; height: 300px; border-radius: 50%;
+      background: rgba(255,255,255,0.04);
+    }
+    .hero h1 {
+      font-size: 2.8rem; font-weight: 700; margin-bottom: 0.4rem;
+      letter-spacing: -0.5px; position: relative;
+    }
+    .hero h1 .version {
+      font-size: 1rem; font-weight: 500; opacity: 0.75;
+      margin-left: 0.5rem; vertical-align: middle;
+    }
+    .hero .tagline {
+      font-size: 1.1rem; opacity: 0.9; max-width: 600px;
+      line-height: 1.7; margin-bottom: 1.75rem; position: relative;
+    }
+    .hero-btns { display: flex; gap: 0.75rem; flex-wrap: wrap; position: relative; }
+    .btn {
+      display: inline-flex; align-items: center; gap: 0.4rem;
+      padding: 0.6rem 1.3rem; border-radius: var(--radius);
+      font-size: 0.9rem; font-weight: 600;
+      transition: all var(--transition); cursor: pointer;
+      white-space: nowrap;
+    }
+    .btn-primary { background: var(--accent); color: #1e2530; }
+    .btn-primary:hover { background: #fdb81e; text-decoration: none; color: #1e2530; }
+    .btn-outline {
+      background: rgba(255,255,255,0.12); color: #fff;
+      border: 1px solid rgba(255,255,255,0.3);
+    }
+    .btn-outline:hover { background: rgba(255,255,255,0.22); text-decoration: none; color: #fff; }
+    .btn-green { background: var(--brand); color: #fff; }
+    .btn-green:hover { background: var(--brand-dark); text-decoration: none; color: #fff; }
+
+    /* Feature cards */
+    .card-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(210px, 1fr));
+      gap: 1rem; margin-bottom: 2.5rem;
+    }
+    .card {
+      background: var(--surface); border: 1px solid var(--border);
+      border-radius: var(--radius); padding: 1.25rem;
+      transition: box-shadow var(--transition), transform var(--transition);
+    }
+    .card:hover { box-shadow: var(--shadow); transform: translateY(-2px); }
+    .card-icon { font-size: 1.6rem; margin-bottom: 0.6rem; }
+    .card h3 { font-size: 0.95rem; font-weight: 600; margin-bottom: 0.35rem; }
+    .card p { font-size: 0.82rem; color: var(--text-muted); line-height: 1.55; }
+
+    /* Doc list */
+    .doc-list { list-style: none; margin-bottom: 2.5rem; }
+    .doc-list li {
+      display: flex; align-items: flex-start; gap: 1rem;
+      padding: 1rem 1.25rem; margin-bottom: 0.5rem;
+      background: var(--surface); border: 1px solid var(--border);
+      border-radius: var(--radius); cursor: pointer;
+      transition: all var(--transition);
+    }
+    .doc-list li:hover { border-color: var(--brand); box-shadow: var(--shadow); }
+    .doc-icon { font-size: 1.8rem; flex-shrink: 0; line-height: 1; margin-top: 0.1rem; }
+    .doc-info h3 { font-size: 0.95rem; font-weight: 600; color: var(--brand); margin-bottom: 0.2rem; }
+    .doc-info p { font-size: 0.82rem; color: var(--text-muted); line-height: 1.5; margin: 0; }
+
+    /* Citations */
+    .citation-block {
+      background: var(--brand-light); border-left: 4px solid var(--brand);
+      border-radius: 0 var(--radius) var(--radius) 0;
+      padding: 0.9rem 1.25rem; margin-bottom: 0.75rem;
+    }
+    .citation-block p { font-size: 0.875rem; line-height: 1.6; margin: 0; }
+
+    /* Quick install */
+    .install-block {
+      background: #1e2530; border-radius: var(--radius);
+      padding: 1.25rem 1.5rem; margin: 1rem 0;
+      font-family: 'JetBrains Mono', monospace; font-size: 0.85rem;
+      color: #e8eff7; overflow-x: auto; line-height: 1.8;
+    }
+    .install-block .comment { color: #7cb88a; }
+    .install-block .cmd { color: #79b8ff; }
+
+    /* Section headings on home/download */
+    .section-heading {
+      font-size: 1.15rem; font-weight: 700; color: var(--text);
+      margin: 2rem 0 1rem; padding-bottom: 0.5rem;
+      border-bottom: 2px solid var(--border);
+    }
+
+    /* ── Markdown Content ───────────────────────────────────────── */
+    .md-body { line-height: 1.78; }
+    .md-body h1 {
+      font-size: 1.9rem; font-weight: 700; margin: 0 0 0.75rem;
+      color: var(--brand-dark); padding-bottom: 0.6rem;
+      border-bottom: 2px solid var(--border);
+    }
+    .md-body h2 {
+      font-size: 1.35rem; font-weight: 700; margin: 2.5rem 0 0.75rem;
+      color: var(--brand-dark); padding-bottom: 0.35rem;
+      border-bottom: 1px solid var(--border);
+    }
+    .md-body h3 { font-size: 1.05rem; font-weight: 600; margin: 1.8rem 0 0.5rem; color: var(--text); }
+    .md-body h4 { font-size: 0.95rem; font-weight: 600; margin: 1.4rem 0 0.4rem; color: var(--text-muted); }
+    .md-body p { margin: 0.75rem 0; }
+    .md-body ul, .md-body ol { margin: 0.75rem 0 0.75rem 1.6rem; }
+    .md-body li { margin: 0.3rem 0; }
+    .md-body blockquote {
+      margin: 1rem 0; padding: 0.75rem 1.25rem;
+      background: var(--brand-light); border-left: 4px solid var(--brand);
+      border-radius: 0 var(--radius) var(--radius) 0;
+    }
+    .md-body blockquote p { margin: 0; }
+    .md-body code {
+      font-family: 'JetBrains Mono', monospace; font-size: 0.84em;
+      background: var(--code-bg); padding: 0.15em 0.4em;
+      border-radius: 4px; border: 1px solid var(--border);
+    }
+    .md-body pre {
+      background: #1e2530; border-radius: var(--radius);
+      padding: 1.25rem; overflow-x: auto; margin: 1rem 0;
+      border: 1px solid #2d3748;
+    }
+    .md-body pre code {
+      background: none; border: none; padding: 0;
+      font-size: 0.875rem; color: #e8eff7; line-height: 1.6;
+    }
+    .md-body table {
+      width: 100%; border-collapse: collapse; margin: 1rem 0;
+      font-size: 0.875rem; overflow-x: auto; display: block;
+    }
+    .md-body th {
+      background: var(--brand-dark); color: #fff;
+      padding: 0.55rem 0.9rem; text-align: left; font-weight: 600;
+      white-space: nowrap;
+    }
+    .md-body td { padding: 0.5rem 0.9rem; border-bottom: 1px solid var(--border); }
+    .md-body tr:nth-child(even) td { background: var(--bg); }
+    .md-body tr:hover td { background: var(--brand-light); }
+    .md-body hr { border: none; border-top: 2px solid var(--border); margin: 2rem 0; }
+    .md-body a { color: var(--brand); font-weight: 500; }
+    .md-body strong { font-weight: 700; }
+    .md-body img { border-radius: var(--radius); box-shadow: var(--shadow); }
+
+    /* Doc page header */
+    .doc-page-header {
+      display: flex; align-items: flex-start; gap: 1rem; margin-bottom: 2rem;
+      padding-bottom: 1.25rem; border-bottom: 2px solid var(--border);
+      flex-wrap: wrap;
+    }
+    .doc-page-icon { font-size: 2.2rem; flex-shrink: 0; line-height: 1; margin-top: 0.2rem; }
+    .doc-page-header h1 {
+      font-size: 1.6rem; margin: 0; color: var(--brand-dark);
+      border: none; padding: 0;
+    }
+    .doc-page-header p { font-size: 0.875rem; color: var(--text-muted); margin: 0.2rem 0 0; }
+    .doc-page-header .source-link {
+      margin-left: auto; font-size: 0.8rem; color: var(--text-muted);
+      white-space: nowrap; padding-top: 0.3rem;
+    }
+    .doc-page-header .source-link a { color: var(--brand-mid); }
+
+    /* ── Download Page ──────────────────────────────────────────── */
+    .download-card {
+      background: var(--surface); border: 1px solid var(--border);
+      border-radius: var(--radius); padding: 1.25rem 1.5rem; margin-bottom: 0.75rem;
+      display: flex; align-items: center; gap: 1.25rem; flex-wrap: wrap;
+    }
+    .download-card .dl-icon { font-size: 1.8rem; flex-shrink: 0; }
+    .download-card h3 { font-size: 0.95rem; font-weight: 600; margin-bottom: 0.2rem; }
+    .download-card p { font-size: 0.83rem; color: var(--text-muted); margin: 0; }
+    .download-card .dl-btn { margin-left: auto; flex-shrink: 0; }
+
+    /* ── Footer ─────────────────────────────────────────────────── */
+    footer {
+      background: var(--surface); border-top: 1px solid var(--border);
+      padding: 1.1rem 2rem; font-size: 0.78rem; color: var(--text-muted);
+      display: flex; align-items: center; justify-content: space-between;
+      flex-wrap: wrap; gap: 0.5rem;
+    }
+    footer a { color: var(--brand-mid); }
+
+    /* ── Responsive ─────────────────────────────────────────────── */
+    @media (max-width: 1100px) { #toc-sidebar { display: none; } }
+    @media (max-width: 768px) {
+      #sidebar { display: none; }
+      #sidebar.open {
+        display: block; position: fixed; z-index: 500;
+        top: var(--nav-h); left: 0; width: 260px;
+        box-shadow: var(--shadow-lg);
+      }
+      #main-content { padding: 1.5rem 1rem 3rem; }
+      .hero { padding: 1.75rem 1.25rem; }
+      .hero h1 { font-size: 2rem; }
+      .card-grid { grid-template-columns: 1fr 1fr; }
+      #nav-links { display: none; }
+      #nav-links.open {
+        display: flex; flex-direction: column; align-items: flex-start;
+        position: fixed; top: var(--nav-h); left: 0; right: 0;
+        background: var(--brand-dark); padding: 1rem; z-index: 500;
+        border-bottom: 1px solid rgba(255,255,255,0.1);
+      }
+      #menu-toggle { display: block; }
+      #nav-right { display: none; }
+      .doc-page-header .source-link { display: none; }
+    }
+    @media (max-width: 480px) {
+      .card-grid { grid-template-columns: 1fr; }
+      .hero-btns { flex-direction: column; }
+    }
+  </style>
+</head>
+<body>
+
+<!-- ── Top Navigation ──────────────────────────────────────────── -->
+<nav id="topnav">
+  <div class="brand" onclick="showPage('home')">🌿 <span>Clann</span></div>
+
+  <button id="menu-toggle" aria-label="Toggle menu" onclick="toggleMenu()">☰</button>
+
+  <ul id="nav-links">
+    <li><a href="#home" onclick="showPage('home')" id="nav-home" class="active">Home</a></li>
+    <li><a href="#manual" onclick="showDoc('manual')" id="nav-manual">Manual</a></li>
+    <li><a href="#tutorial" onclick="showDoc('tutorial')" id="nav-tutorial">Tutorial</a></li>
+    <li class="has-dropdown">
+      <button id="nav-notes">Notes <span class="nav-arrow">▼</span></button>
+      <div class="dropdown-menu">
+        <span class="menu-label">Technical Notes</span>
+        <a href="#notes-ml" onclick="showDoc('notes-ml')">📐 ML Parameter Estimation</a>
+        <a href="#notes-rf" onclick="showDoc('notes-rf')">🔢 RF Hash Method</a>
+        <a href="#notes-ts" onclick="showDoc('notes-ts')">🗺️ Tree-Space Landscape</a>
       </div>
-    </header>
+    </li>
+    <li><a href="#download" onclick="showPage('download')" id="nav-download">Download</a></li>
+  </ul>
 
-    <div id="content-wrapper">
-      <div class="inner clearfix">
-        <section id="main-content">
-          <h3>
-<a id="what-is-clann" class="anchor" href="#what-is-clann" aria-hidden="true"><span aria-hidden="true" class="octicon octicon-link"></span></a>What is Clann?.</h3>
+  <div id="nav-right">
+    <span class="nav-badge">v5</span>
+    <a href="https://github.com/ChrisCreevey/clann" target="_blank" class="nav-gh-btn">
+      <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>
+      GitHub
+    </a>
+  </div>
+</nav>
 
-<p>Clann (the Irish word for "family"), is a free software program designed and written by <a href="https://github.com/ChrisCreevey">Chris Creevey</a> with <a href="http://mcinerneylab.com/">James McInerney</a>.</p>
+<!-- ── Page Wrapper ────────────────────────────────────────────── -->
+<div id="page-wrapper">
 
-<p><b>Clann constructs supertrees and allows exploration of the underlying phylogenomic information in gene trees.</b></p><p> Clann implements several well known supertree methods (including the ability to apply bootstrapping to them) can calculate consensus trees and provides methods to manage sets of gene trees, pruning selected taxa, filtering based on a number of criteria, automatically pruning species-specific duplicates and more.</p><p>Also implemented is a gene-tree reconciliation approach to try to utilise genetic information from more than just single-copy gene-trees, this can be used as a criterion for estimating species trees. Feed back on these approaches are welcome!</p><p>Finally, Clann can also calculate Robinson-Doulds (RF) and SPR distances between sets of trees, create randomised versions of sets of trees and implementes a PTP test for informativeness (the YAPTP test) of a set of trees provided.</p><p> Clann has been continually developed since 2003 and suggestions for new features and tools are welcome.</p>
-          
-<p>You can see a list of the many papers that have used Clann at <a href="https://scholar.google.co.uk/citations?view_op=view_citation&hl=en&user=7JkjEd4AAAAJ&citation_for_view=7JkjEd4AAAAJ:UeHWp8X0CEIC" target="_blank">Clanns Google Scholar Page</a><p>
-
-<h3>
-<a id="where-has-clann-been-described" class="anchor" href="#where-has-clann-been-described" aria-hidden="true"><span aria-hidden="true" class="octicon octicon-link"></span></a>Where has Clann been described?</h3>
-
-<p>Creevey C. J. and McInerney, J. O. (2005) Clann: Investigating phylogenetic information through supertree analyses. <strong>Bioinformatics</strong> 21 (3): 390-2. <a href="http://bioinformatics.oxfordjournals.org/content/21/3/390" target="_blank">pdf</a></p>
-<p>Creevey C.J., Fitzpatrick DA, Philip GK, Kinsella RJ, O'connell MJ, Pentony MM, Travers SA, Wilkinson M, McInerney JO. (2004) Does a tree-like phylogeny only exist at the tips in the prokaryotes? <strong>Proc R Soc Lond B Biol Sci.</strong> 271(1557):2551-8. <a href="http://rspb.royalsocietypublishing.org/content/271/1557/2551.abstract" target="_blank">pdf</a></p>
-
-<h3>
-<a id="program-and-manual" class="anchor" href="#program-and-manual" aria-hidden="true"><span aria-hidden="true" class="octicon octicon-link"></span></a>Program and manual</h3>
-
-<p>Downlods of the latest build are on the right of this page, and the manual can be found <a href="https://github.com/ChrisCreevey/clann/blob/master/Docs/Clann3%20manual.pdf">here</a></p>
-<h3><a id="short-primer-on-clann" class="anchor" href="#short-primer-on-clann" aria-hidden="true"><span aria-hidden="true" class="octicon octicon-link"></span></a>A short primer on the use of clann:</h3>
-
-<p>Creevey, C.J. and McInerney, J.O. (2009) Trees from Trees: Constructing Phylogenetic Supertrees Using CLANN. In: DNA sequence analysis, Ed. David Posada. Humana Press. 537:139-161.<a href="McInerney-chapter.pdf" target="_blank"> pdf</a></p>
-
-<h3>
-<a id="support-or-contact" class="anchor" href="#support-or-contact" aria-hidden="true"><span aria-hidden="true" class="octicon octicon-link"></span></a>Support or Contact</h3>
-
-<p>Having trouble with Clann? Check out our <a href="https://github.com/ChrisCreevey/clann/blob/master/Docs/Clann3%20manual.pdf" target="_blank">documentation</a> or contact Chris <a href="http://www.creeveylab.org/2014/06/contact.html" target="_blank">here</a>.</p>
-<h3>
-<a id="Installing Clann" class="anchor" href="#installing-clann" aria-hidden="true"><span aria-hidden="true" class="octicon octicon-link"></span></a>Installing Clann</h3>
-<pre>
-  <code>
-  to install type:
-   "./configure"
-  followed by:
-	 "make
-	 
-   Clann will then be located in this directory, this can then be copied to a directory on your path (like '~/bin'). 
-   The use of "make install" may not work depending on write privileges
-  </code>
- </pre>
-
-
-<h3>
-<a id="Using Clann" class="anchor" href="#using-clann" aria-hidden="true"><span aria-hidden="true" class="octicon octicon-link"></span></a>Using Clann</h3>
-<p>
-<pre>
-  <code>
-   Usage: "clann -lnh [-c commands file] [tree file]"
-   
-   Where [tree file] is an optional Nexus or Phylip formatted file of phylogenetic trees
-   -l turn on logging of screen output to file "clann.log"
-   -n turns off interactive mode - requires commands to be provided in a nexus 'clann block' or with '-c'
-   -c <file name> specifies a file with commands to be executed (each seperated by ';')
-   -h prints help message
-  </code>
-</pre>
-
-<pre>
-  <code>
-  The following commands are always available:
-
-  execute	- Read in a file of source trees
-  help		- Display this message
-  quit		- Quit Clann
-  set		- Set global parameters such as optimality criterion for carrying reconstructing a supertree
-  !		- Run a shell session, while preserving the current Clann session (type 'exit' to return)
-  tips		- Show tips and hints for better use of Clann
-  log		- Control logging of screen output to a log file
-  
-  The following commands are only available when there are source trees in memory:
-
-  Supertree reconstruction:
-  hs		- Carry out a heuristic search for the best supertree usign the criterion selected
-  bootstrap	- Carry out a bootstrap supertree analysis using the criterion selected
-  nj		- Construct a neighbour-joining supertree
-  alltrees	- Exhaustively search all possible supertrees
-  usertrees	- Assess user-defined supertrees (from seperate file), to find the best scoring
-  consensus	- Calculate a consensus tree of all trees containing all taxa
-  
-  Source tree selection and modification:
-  savetrees	- Save source trees to file in phylip format (subsets of trees can be chseon based on a number of criteria)
-  showtrees	- Visualise selected source trees in ASCII format (also can save selected trees to file)
-  deletetrees	- Specify source trees to delete from memory (based on a variety of criteria)
-  deletetaxa	- Specify taxa to delete from all source trees in memory (i.e. prune from the trees while preserving branch lengths)
-  randomisetrees- Randomises the source trees in memory, while preserving taxa composition in each tree
-  
-  Miscellaneous calculations:
-  rfdists		- Calculate Robinson-Foulds distances between all source trees
-  generatetrees	- Generate random supertrees & assess  against source trees in memory
-  yaptp		- "Yet another permutation-tail-probability" test - performs a randomisation test
-  
-  Experimental Options:
-  reconstruct	- Carry out a gene-tree reconciliation (source trees against a species tree)
-  prunemonophylies - Prunes clades which consist of multiple sequences from the same species, to a single representative
-  sprdists	- Carry out estimation of SPR distances of real data versus ideal and randomised versions of the data
-  
-  Type a command followed by '?' in interactive mode to get information on the options available i.e.: "exe ?" Full descriptions of the commands are available in the manual
-  </code>
-</pre>
-
-        </section>
-
-        <aside id="sidebar">
-          <a href="https://github.com/ChrisCreevey/clann/zipball/master" class="button">
-            <small>Download</small>
-            .zip file
-          </a>
-          <a href="https://github.com/ChrisCreevey/clann/tarball/master" class="button">
-            <small>Download</small>
-            .tar.gz file
-          </a>
-
-          <p class="repo-owner"><a href="https://github.com/ChrisCreevey/clann"></a> is maintained by <a href="https://github.com/ChrisCreevey">ChrisCreevey</a>.</p>
-
-        </aside>
-      </div>
+  <!-- Left Sidebar -->
+  <aside id="sidebar">
+    <div class="sidebar-section">
+      <div class="sidebar-title">Getting Started</div>
+      <a href="#home" onclick="showPage('home')" id="sb-home" class="active">
+        <span class="icon">🏠</span> Overview
+      </a>
+      <a href="#download" onclick="showPage('download')" id="sb-download">
+        <span class="icon">⬇️</span> Download &amp; Install
+      </a>
     </div>
+    <div class="sidebar-section">
+      <div class="sidebar-title">Documentation</div>
+      <a href="#manual" onclick="showDoc('manual')" id="sb-manual">
+        <span class="icon">📖</span> User Manual
+      </a>
+      <a href="#tutorial" onclick="showDoc('tutorial')" id="sb-tutorial">
+        <span class="icon">🎓</span> Tutorial
+      </a>
+    </div>
+    <div class="sidebar-section">
+      <div class="sidebar-title">Technical Notes</div>
+      <a href="#notes-ml" onclick="showDoc('notes-ml')" id="sb-notes-ml">
+        <span class="icon">📐</span> ML Parameter Estimation
+      </a>
+      <a href="#notes-rf" onclick="showDoc('notes-rf')" id="sb-notes-rf">
+        <span class="icon">🔢</span> RF Hash Method
+      </a>
+      <a href="#notes-ts" onclick="showDoc('notes-ts')" id="sb-notes-ts">
+        <span class="icon">🗺️</span> Tree-Space Landscape
+      </a>
+    </div>
+    <div class="sidebar-section">
+      <div class="sidebar-title">External Links</div>
+      <a href="https://github.com/ChrisCreevey/clann" target="_blank">
+        <span class="icon">🐙</span> GitHub Repository
+      </a>
+      <a href="https://scholar.google.co.uk/citations?view_op=view_citation&hl=en&user=7JkjEd4AAAAJ&citation_for_view=7JkjEd4AAAAJ:UeHWp8X0CEIC" target="_blank">
+        <span class="icon">📄</span> Google Scholar
+      </a>
+      <a href="McInerney-chapter.pdf" target="_blank">
+        <span class="icon">📑</span> Book Chapter (2009)
+      </a>
+    </div>
+  </aside>
 
-  
-  </body>
+  <!-- Main Content -->
+  <main id="main-content">
+    <div id="content-area"></div>
+    <div id="loading"><div class="spinner"></div><p>Loading documentation…</p></div>
+  </main>
+
+  <!-- Right TOC (shown only for doc pages) -->
+  <aside id="toc-sidebar" style="display:none">
+    <div class="toc-title">On This Page</div>
+    <ul id="toc-nav"></ul>
+  </aside>
+
+</div>
+
+<!-- Footer -->
+<footer>
+  <span>Clann is free software —
+    <a href="https://github.com/ChrisCreevey/clann/blob/master/COPYING.txt">GPL licensed</a>.
+    Developed by <a href="https://github.com/ChrisCreevey">Chris Creevey</a>.
+  </span>
+  <span>Cite: Creevey &amp; McInerney (2005) <em>Bioinformatics</em> 21(3):390–2</span>
+</footer>
+
+<script>
+/* ── Document registry ─────────────────────────────────────────── */
+const DOCS = {
+  manual:     { file:'USER_MANUAL.md',                    icon:'📖', title:'User Manual',               desc:'Complete reference for all commands and options' },
+  tutorial:   { file:'TUTORIAL.md',                       icon:'🎓', title:'Tutorial',                   desc:'Hands-on guide with worked examples across seven parts' },
+  'notes-ml': { file:'NOTES_ml_parameter_estimation.md',  icon:'📐', title:'ML Parameter Estimation',   desc:'Statistical model, closed-form MLE for β and the η scaling exponent' },
+  'notes-rf': { file:'NOTES_rf_hash_method.md',           icon:'🔢', title:'RF Hash Method',             desc:'Robinson-Foulds distances via 64-bit integer hashing' },
+  'notes-ts': { file:'NOTES_treespace_landscape.md',      icon:'🗺️', title:'Tree-Space Landscape',       desc:'Visualising and analysing the heuristic search landscape' }
+};
+const RAW = 'https://raw.githubusercontent.com/ChrisCreevey/clann/master/';
+const cache = {};
+
+/* ── marked / hljs setup ─────────────────────────────────────── */
+marked.use({ breaks: false, gfm: true });
+
+/* ── Active nav state ─────────────────────────────────────────── */
+function setActive(id) {
+  document.querySelectorAll('#nav-links a, #nav-links button, #sidebar a').forEach(el => el.classList.remove('active'));
+  const hits = ['nav-' + id, 'sb-' + id, 'nav-notes'];
+  // for notes sub-pages, also highlight the Notes button
+  if (!id.startsWith('notes-')) hits.pop();
+  hits.forEach(h => { const el = document.getElementById(h); if (el) el.classList.add('active'); });
+}
+
+/* ── TOC ──────────────────────────────────────────────────────── */
+function buildTOC() {
+  const toc = document.getElementById('toc-nav');
+  const tocSide = document.getElementById('toc-sidebar');
+  toc.innerHTML = '';
+  const headings = [...document.querySelectorAll('#content-area h2, #content-area h3')];
+  if (!headings.length) { tocSide.style.display = 'none'; return; }
+  tocSide.style.display = '';
+  headings.forEach((h, i) => {
+    if (!h.id) h.id = 'h-' + i;
+    const li = document.createElement('li');
+    li.className = h.tagName === 'H3' ? 'toc-h3' : 'toc-h2';
+    const a = document.createElement('a');
+    a.href = '#' + h.id;
+    a.textContent = h.textContent;
+    a.addEventListener('click', e => { e.preventDefault(); h.scrollIntoView({behavior:'smooth', block:'start'}); });
+    li.appendChild(a); toc.appendChild(li);
+  });
+  // scrollspy
+  let obs = new IntersectionObserver(entries => {
+    entries.forEach(en => {
+      if (en.isIntersecting) {
+        toc.querySelectorAll('a').forEach(a => a.classList.remove('active'));
+        const act = toc.querySelector('a[href="#' + en.target.id + '"]');
+        if (act) act.classList.add('active');
+      }
+    });
+  }, { rootMargin: '-60px 0px -70% 0px' });
+  headings.forEach(h => obs.observe(h));
+}
+
+/* ── Home page HTML ───────────────────────────────────────────── */
+function homeHTML() {
+  return `
+<div class="hero">
+  <h1>Clann <span class="version">v5</span></h1>
+  <p class="tagline">Investigating phylogenetic information through supertree analyses —
+     a free, open-source tool for phylogenomics, from single-copy to multi-copy gene families.</p>
+  <div class="hero-btns">
+    <a href="#download" onclick="showPage('download')" class="btn btn-primary">⬇️ Download</a>
+    <a href="#tutorial" onclick="showDoc('tutorial')" class="btn btn-outline">🎓 Tutorial</a>
+    <a href="#manual" onclick="showDoc('manual')" class="btn btn-outline">📖 Manual</a>
+    <a href="https://github.com/ChrisCreevey/clann" target="_blank" class="btn btn-outline">🐙 GitHub</a>
+  </div>
+</div>
+
+<h2 class="section-heading">What is Clann?</h2>
+<p><strong>Clann</strong> (the Irish word for "family") is a free software program by
+  <a href="https://github.com/ChrisCreevey">Chris Creevey</a> and
+  <a href="http://mcinerneylab.com/">James McInerney</a>.
+  It constructs supertrees and allows deep exploration of the phylogenomic signal in collections of gene trees.
+  Clann has been continually developed since 2003 and is used across hundreds of published studies.</p>
+
+<h2 class="section-heading">What's New in v5</h2>
+<div class="card-grid">
+  <div class="card"><div class="card-icon">🧮</div><h3>ML Supertrees</h3><p>Maximum-likelihood criterion based on the Steel &amp; Rodrigo (2008) model with closed-form MLE for β.</p></div>
+  <div class="card"><div class="card-icon">🌲</div><h3>RF Criterion</h3><p>Fast Robinson-Foulds supertrees via 64-bit integer hashing — dramatically faster than naive RF computation.</p></div>
+  <div class="card"><div class="card-icon">⚡</div><h3>OpenMP Parallelism</h3><p>Multi-threaded heuristic search and SPR moves. Scale to all available CPU cores with <code>nthreads=N</code>.</p></div>
+  <div class="card"><div class="card-icon">🔬</div><h3>ML Topology Tests</h3><p>KH, SH, AU and weighted-AU tests for statistically comparing candidate supertrees.</p></div>
+  <div class="card"><div class="card-icon">🔗</div><h3>Multi-copy Gene Trees</h3><p>Delimiter-based reconciliation handles paralogues so you can use more than strictly single-copy families.</p></div>
+  <div class="card"><div class="card-icon">⚖️</div><h3>Source Tree Weighting</h3><p>Weight source trees by clan support, split-violation score, or mean bootstrap value across bipartitions.</p></div>
+  <div class="card"><div class="card-icon">🗺️</div><h3>Tree-Space Landscape</h3><p>Record every tree visited during search for downstream landscape visualisation and analysis.</p></div>
+  <div class="card"><div class="card-icon">💬</div><h3>Interactive CLI</h3><p>Tab-completion, full command history and rich inline help for fast interactive exploration.</p></div>
+</div>
+
+<h2 class="section-heading">Documentation</h2>
+<ul class="doc-list">
+  <li onclick="showDoc('manual')">
+    <div class="doc-icon">📖</div>
+    <div class="doc-info"><h3>User Manual</h3><p>Complete reference covering every command and option — installation, input formats, key concepts, worked examples and output file descriptions.</p></div>
+  </li>
+  <li onclick="showDoc('tutorial')">
+    <div class="doc-icon">🎓</div>
+    <div class="doc-info"><h3>Tutorial</h3><p>Seven-part hands-on guide: basic HS search, OpenMP parallelism, ML vs RF comparison, topology tests, multi-copy gene trees, tree-space landscape, and Snakemake pipeline integration.</p></div>
+  </li>
+  <li onclick="showDoc('notes-ml')">
+    <div class="doc-icon">📐</div>
+    <div class="doc-info"><h3>Technical Note — ML Parameter Estimation</h3><p>Statistical foundations: the Steel &amp; Rodrigo model, closed-form MLE for β, the η scaling exponent, and the Bryant &amp; Steel normalising constant Z<sub>T</sub>.</p></div>
+  </li>
+  <li onclick="showDoc('notes-rf')">
+    <div class="doc-icon">🔢</div>
+    <div class="doc-info"><h3>Technical Note — RF Hash Method</h3><p>Seven-step algorithm for fast RF distances using 64-bit integer hashing, with a fully worked 4-taxon example and hash collision analysis.</p></div>
+  </li>
+  <li onclick="showDoc('notes-ts')">
+    <div class="doc-icon">🗺️</div>
+    <div class="doc-info"><h3>Technical Note — Tree-Space Landscape</h3><p>Visualising the search landscape: MDS scatter plots, score histograms, SPR neighbour graphs and 3-D score surfaces, with complete Python code examples.</p></div>
+  </li>
+  <li onclick="window.open('McInerney-chapter.pdf','_blank')">
+    <div class="doc-icon">📑</div>
+    <div class="doc-info"><h3>Book Chapter (2009)</h3><p>Creevey &amp; McInerney. "Trees from Trees: Constructing Phylogenetic Supertrees Using CLANN." <em>DNA Sequence Analysis</em>, Humana Press, 537:139–161.</p></div>
+  </li>
+</ul>
+
+<h2 class="section-heading">Quick Install</h2>
+<div class="install-block">
+<span class="comment"># Clone the repository</span>
+<span class="cmd">git clone https://github.com/ChrisCreevey/clann.git &amp;&amp; cd clann</span>
+
+<span class="comment"># Configure and build</span>
+<span class="cmd">./configure &amp;&amp; make -j4</span>
+
+<span class="comment"># Copy to your PATH (optional)</span>
+<span class="cmd">cp clann ~/bin/</span>
+</div>
+<p style="font-size:0.875rem;color:var(--text-muted);margin-top:0.5rem">
+  Requires a C compiler. GNU readline is recommended for the interactive CLI
+  (<code>brew install readline</code> on macOS,
+  <code>apt install libreadline-dev</code> on Debian/Ubuntu,
+  <code>module load libs/gcc/14.1.0</code> on HPC).
+  OpenMP is optional but recommended for parallel searches.
+</p>
+
+<h2 class="section-heading">Cite Clann</h2>
+<div class="citation-block">
+  <p>Creevey C.J. and McInerney J.O. (2005) Clann: Investigating phylogenetic information through supertree analyses.
+    <strong>Bioinformatics</strong> 21(3):390–2.
+    <a href="http://bioinformatics.oxfordjournals.org/content/21/3/390" target="_blank">→ PDF</a></p>
+</div>
+<div class="citation-block">
+  <p>Creevey C.J., Fitzpatrick D.A., Philip G.K. et al. (2004) Does a tree-like phylogeny only exist at the tips in the prokaryotes?
+    <strong>Proc R Soc Lond B</strong> 271(1557):2551–8.
+    <a href="http://rspb.royalsocietypublishing.org/content/271/1557/2551.abstract" target="_blank">→ PDF</a></p>
+</div>
+<p style="font-size:0.82rem;color:var(--text-muted);margin-top:0.75rem">
+  See the full list of papers that have used Clann on
+  <a href="https://scholar.google.co.uk/citations?view_op=view_citation&hl=en&user=7JkjEd4AAAAJ&citation_for_view=7JkjEd4AAAAJ:UeHWp8X0CEIC" target="_blank">Google Scholar</a>.
+</p>
+
+<h2 class="section-heading">Support</h2>
+<p>Found a bug or have a feature request? Please open an issue on
+  <a href="https://github.com/ChrisCreevey/clann/issues" target="_blank">GitHub</a>.
+  For other enquiries, contact Chris via the
+  <a href="http://www.creeveylab.org/2014/06/contact.html" target="_blank">Creevey Lab website</a>.</p>`;
+}
+
+/* ── Download page HTML ───────────────────────────────────────── */
+function downloadHTML() {
+  return `
+<h1 style="font-size:1.8rem;font-weight:700;color:var(--brand-dark);margin-bottom:0.4rem">Download &amp; Install</h1>
+<p style="color:var(--text-muted);margin-bottom:2rem">Clann is open-source and free under the GPL licence. Source archives and full build instructions are below.</p>
+
+<h2 class="section-heading">Source Archives</h2>
+<div class="download-card">
+  <div class="dl-icon">📦</div>
+  <div><h3>ZIP Archive</h3><p>Latest master branch as a .zip file</p></div>
+  <a href="https://github.com/ChrisCreevey/clann/zipball/master" class="btn btn-green dl-btn">⬇️ .zip</a>
+</div>
+<div class="download-card">
+  <div class="dl-icon">📦</div>
+  <div><h3>TAR.GZ Archive</h3><p>Latest master branch as a .tar.gz file</p></div>
+  <a href="https://github.com/ChrisCreevey/clann/tarball/master" class="btn btn-green dl-btn">⬇️ .tar.gz</a>
+</div>
+<div class="download-card">
+  <div class="dl-icon">🐙</div>
+  <div><h3>Clone via Git</h3><p>Recommended — stay up to date with a simple <code>git pull</code></p></div>
+  <a href="https://github.com/ChrisCreevey/clann" target="_blank" class="btn btn-green dl-btn">View on GitHub</a>
+</div>
+
+<h2 class="section-heading">Build from Source</h2>
+<div class="install-block">
+<span class="comment"># Clone</span>
+<span class="cmd">git clone https://github.com/ChrisCreevey/clann.git &amp;&amp; cd clann</span>
+
+<span class="comment"># Configure (detects readline and OpenMP automatically)</span>
+<span class="cmd">./configure</span>
+
+<span class="comment"># Build  (-jN for parallel compilation)</span>
+<span class="cmd">make -j4</span>
+
+<span class="comment"># Optional: copy to your PATH</span>
+<span class="cmd">cp clann ~/bin/</span>
+</div>
+
+<h2 class="section-heading">Dependencies</h2>
+<div class="card-grid">
+  <div class="card">
+    <div class="card-icon">🔧</div>
+    <h3>C Compiler (required)</h3>
+    <p>GCC ≥ 8 or Clang ≥ 10. Available on all major platforms via system package managers.</p>
+  </div>
+  <div class="card">
+    <div class="card-icon">📝</div>
+    <h3>GNU Readline <em>(recommended)</em></h3>
+    <p>Enables tab-completion and history in interactive mode.<br><br>
+      macOS: <code>brew install readline</code><br>
+      Debian/Ubuntu: <code>apt install libreadline-dev</code><br>
+      RedHat/Rocky: <code>dnf install readline-devel</code>
+    </p>
+  </div>
+  <div class="card">
+    <div class="card-icon">⚡</div>
+    <h3>OpenMP <em>(optional)</em></h3>
+    <p>Multi-threaded searches. Included with GCC by default.<br><br>
+      macOS (Clang): <code>brew install libomp</code><br>
+      HPC: load a GCC module — OpenMP is bundled.
+    </p>
+  </div>
+</div>
+
+<h2 class="section-heading">HPC / Cluster (Rocky Linux, etc.)</h2>
+<p style="margin-bottom:0.75rem">On HPC systems using Lmod modules, load a GCC module to get the compiler, OpenMP runtime, and typically readline:</p>
+<div class="install-block">
+<span class="cmd">module load libs/gcc/14.1.0</span>
+<span class="cmd">./configure &amp;&amp; make -j8</span>
+</div>
+<p style="font-size:0.875rem;color:var(--text-muted);margin-top:0.5rem">
+  If readline headers are not available, Clann builds and runs without them — it falls back to standard line input automatically, which is fine for batch/non-interactive use.
+</p>`;
+}
+
+/* ── Fetch and render a markdown doc ─────────────────────────── */
+async function showDoc(id) {
+  const doc = DOCS[id];
+  if (!doc) return;
+  setActive(id);
+  scrollToTop();
+  history.replaceState(null, '', '#' + id);
+
+  const area = document.getElementById('content-area');
+  const loading = document.getElementById('loading');
+
+  if (cache[id]) {
+    loading.style.display = 'none';
+    area.style.display = ''; area.innerHTML = cache[id];
+    hljs.highlightAll(); buildTOC(); return;
+  }
+
+  area.style.display = 'none';
+  loading.style.display = 'flex';
+  document.getElementById('toc-sidebar').style.display = 'none';
+
+  try {
+    const r = await fetch(RAW + doc.file);
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    const md = await r.text();
+    const html = `
+<div class="doc-page-header">
+  <span class="doc-page-icon">${doc.icon}</span>
+  <div>
+    <h1>${doc.title}</h1>
+    <p>${doc.desc}</p>
+  </div>
+  <span class="source-link">
+    <a href="https://github.com/ChrisCreevey/clann/blob/master/${doc.file}" target="_blank">View on GitHub ↗</a>
+  </span>
+</div>
+<div class="md-body">${marked.parse(md)}</div>`;
+    cache[id] = html;
+    area.innerHTML = html; area.style.display = '';
+    loading.style.display = 'none';
+    hljs.highlightAll(); buildTOC();
+  } catch(e) {
+    area.innerHTML = `
+<div style="padding:3rem 2rem;text-align:center;color:var(--text-muted)">
+  <div style="font-size:3rem;margin-bottom:1rem">⚠️</div>
+  <h2 style="color:var(--text);margin-bottom:0.5rem">Could not load document</h2>
+  <p>Unable to fetch <code>${doc.file}</code> from GitHub.</p>
+  <p style="margin-top:0.75rem">
+    <a href="https://github.com/ChrisCreevey/clann/blob/master/${doc.file}" target="_blank" class="btn btn-green">Open on GitHub ↗</a>
+  </p>
+  <p style="font-size:0.78rem;margin-top:1rem;color:#aaa">${e}</p>
+</div>`;
+    area.style.display = ''; loading.style.display = 'none';
+  }
+}
+
+/* ── Static pages ─────────────────────────────────────────────── */
+function showPage(id) {
+  setActive(id);
+  scrollToTop();
+  history.replaceState(null, '', '#' + id);
+  document.getElementById('toc-sidebar').style.display = 'none';
+  document.getElementById('toc-nav').innerHTML = '';
+  document.getElementById('loading').style.display = 'none';
+  const area = document.getElementById('content-area');
+  area.style.display = '';
+  area.innerHTML = id === 'download' ? downloadHTML() : homeHTML();
+}
+
+/* ── Helpers ─────────────────────────────────────────────────── */
+function scrollToTop() { window.scrollTo({top:0}); }
+function toggleMenu() {
+  document.getElementById('nav-links').classList.toggle('open');
+  document.getElementById('sidebar').classList.toggle('open');
+}
+
+/* ── Hash routing ─────────────────────────────────────────────── */
+function route() {
+  const h = location.hash.replace('#','');
+  if (DOCS[h])          showDoc(h);
+  else if (h==='download') showPage('download');
+  else                  showPage('home');
+}
+
+window.addEventListener('DOMContentLoaded', route);
+window.addEventListener('hashchange', route);
+
+// Close mobile menus on link click
+document.addEventListener('click', e => {
+  if (e.target.closest('#nav-links a, #nav-links button')) {
+    document.getElementById('nav-links').classList.remove('open');
+    document.getElementById('sidebar').classList.remove('open');
+  }
+});
+</script>
+</body>
 </html>
