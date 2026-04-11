@@ -14,21 +14,14 @@ class Clann < Formula
   depends_on "readline"
 
   # OpenMP parallel search replicates.
-  # Apple clang does not ship OpenMP; use libomp from llvm.
+  # configure.ac auto-detects Apple Clang and switches to Homebrew GCC for
+  # OpenMP support.  Declaring gcc here ensures it is installed so that
+  # auto-detection succeeds on macOS.
   on_macos do
-    depends_on "libomp"
+    depends_on "gcc"
   end
 
   def install
-    # For macOS: point the compiler at libomp so AC_OPENMP succeeds.
-    if OS.mac?
-      libomp = Formula["libomp"]
-      ENV.append "CPPFLAGS", "-I#{libomp.opt_include}"
-      ENV.append "LDFLAGS",  "-L#{libomp.opt_lib}"
-      ENV.append "CFLAGS",   "-Xpreprocessor -fopenmp"
-      ENV.append "LIBS",     "-lomp"
-    end
-
     system "./configure", "--disable-silent-rules",
                           "--prefix=#{prefix}",
                           "--with-readline=#{Formula["readline"].opt_prefix}"
