@@ -1,0 +1,50 @@
+{% set version = "5.0.0" %}
+{% set tag = "V5.0" %}
+
+package:
+  name: clann
+  version: {{ version }}
+
+source:
+  url: https://github.com/ChrisCreevey/clann/archive/refs/tags/{{ tag }}.tar.gz
+  sha256: a047e592b301aef8646f4284832ce8a8caa789e2927d9cf7678df04f2d8523eb
+
+build:
+  number: 0
+
+requirements:
+  build:
+    - {{ compiler('c') }}
+    - make
+    - autoconf
+    - automake
+    - libtool
+  host:
+    - readline
+    - libgomp    # [linux]
+    - llvm-openmp  # [osx]
+  run:
+    - readline
+
+test:
+  commands:
+    - clann --help
+
+about:
+  home: https://github.com/ChrisCreevey/clann
+  license: GPL-2.0-or-later
+  license_file: COPYING.txt
+  summary: Investigating phylogenetic information through supertree analyses
+  description: |
+    Clann constructs supertrees and explores the phylogenomic information contained
+    in sets of gene trees. It implements several supertree optimality criteria
+    including DFIT (most-similar supertree), Robinson-Foulds (RF), and a maximum
+    likelihood criterion based on Steel & Rodrigo (2008). Bootstrapping, gene-tree
+    reconciliation, RF/SPR distance calculation, and a YAPTP informativeness test
+    are also provided. Clann supports parallel heuristic search via OpenMP.
+  doc_url: https://github.com/ChrisCreevey/clann/blob/master/USER_MANUAL.md
+  dev_url: https://github.com/ChrisCreevey/clann
+
+extra:
+  recipe-maintainers:
+    - ChrisCreevey

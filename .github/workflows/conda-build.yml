@@ -1,0 +1,44 @@
+name: Conda build
+
+on:
+  push:
+    tags:
+      - 'V*'
+    paths:
+      - 'conda-recipe/**'
+  pull_request:
+    paths:
+      - 'conda-recipe/**'
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: conda-build (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Miniconda
+        uses: conda-incubator/setup-miniconda@v3
+        with:
+          auto-update-conda: true
+          python-version: "3.11"
+          channels: conda-forge,bioconda,defaults
+          channel-priority: strict
+
+      - name: Install conda-build
+        shell: bash -el {0}
+        run: conda install -y conda-build conda-verify
+
+      - name: Build conda package
+        shell: bash -el {0}
+        run: conda build --no-test conda-recipe/
+
+      - name: Test conda package
+        shell: bash -el {0}
+        run: conda build --test conda-recipe/
