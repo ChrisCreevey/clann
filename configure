@@ -4710,65 +4710,48 @@ fi
 done
 
 if test "$READLINE_FOUND" = "no"; then
-    { ac_cv_lib_readline_readline=; unset ac_cv_lib_readline_readline;}
-    { printf "%s\n" "$as_me:${as_lineno-$LINENO}: checking for readline in -lreadline" >&5
-printf %s "checking for readline in -lreadline... " >&6; }
-if test ${ac_cv_lib_readline_readline+y}
-then :
-  printf %s "(cached) " >&6
-else case e in #(
-  e) ac_check_lib_save_LIBS=$LIBS
-LIBS="-lreadline $READLINE_TERMLIB $LIBS"
-cat confdefs.h - <<_ACEOF >conftest.$ac_ext
+    for _rl_tl in "" "-ltinfo" "-lncurses" "-lcurses"; do
+        _rl_save_LIBS="$LIBS"
+        LIBS="-lreadline $_rl_tl $LIBS"
+        { printf "%s\n" "$as_me:${as_lineno-$LINENO}: checking for readline with extra libs: '$_rl_tl'" >&5
+printf %s "checking for readline with extra libs: '$_rl_tl'... " >&6; }
+        cat confdefs.h - <<_ACEOF >conftest.$ac_ext
 /* end confdefs.h.  */
-
-/* Override any GCC internal prototype to avoid an error.
-   Use char because int might match the return type of a GCC
-   builtin and then its argument prototype would still apply.
-   The 'extern "C"' is for builds by C++ compilers;
-   although this is not generally supported in C code supporting it here
-   has little cost and some practical benefit (sr 110532).  */
-#ifdef __cplusplus
-extern "C"
-#endif
-char readline (void);
+extern char *readline(const char *);
 int
 main (void)
 {
-return readline ();
+readline(""); return 0;
   ;
   return 0;
 }
 _ACEOF
 if ac_fn_c_try_link "$LINENO"
 then :
-  ac_cv_lib_readline_readline=yes
-else case e in #(
-  e) ac_cv_lib_readline_readline=no ;;
-esac
-fi
-rm -f core conftest.err conftest.$ac_objext conftest.beam \
-    conftest$ac_exeext conftest.$ac_ext
-LIBS=$ac_check_lib_save_LIBS ;;
-esac
-fi
-{ printf "%s\n" "$as_me:${as_lineno-$LINENO}: result: $ac_cv_lib_readline_readline" >&5
-printf "%s\n" "$ac_cv_lib_readline_readline" >&6; }
-if test "x$ac_cv_lib_readline_readline" = xyes
-then :
-  LIBREADLINE="-lreadline $READLINE_TERMLIB"
+  { printf "%s\n" "$as_me:${as_lineno-$LINENO}: result: yes" >&5
+printf "%s\n" "yes" >&6; }
+             LIBREADLINE="-lreadline $_rl_tl"
 
 
 printf "%s\n" "#define HAVE_READLINE /**/" >>confdefs.h
 
-         READLINE_FOUND=yes
+             READLINE_FOUND=yes
 else case e in #(
-  e) echo "No readline found — Clann will use standard input instead"
-         echo "For full CLI functionality: brew install readline  (macOS)"
-         echo "                     or:   apt install libreadline-dev  (Debian/Ubuntu)" ;;
+  e) { printf "%s\n" "$as_me:${as_lineno-$LINENO}: result: no" >&5
+printf "%s\n" "no" >&6; } ;;
 esac
 fi
-
+rm -f core conftest.err conftest.$ac_objext conftest.beam \
+    conftest$ac_exeext conftest.$ac_ext
+        LIBS="$_rl_save_LIBS"
+        if test "$READLINE_FOUND" = "yes"; then break; fi
+    done
+fi
+if test "$READLINE_FOUND" = "no"; then
+    echo "No readline found — Clann will use standard input instead"
+    echo "Install: apt install libreadline-dev  (Debian/Ubuntu)"
+    echo "         yum install readline-devel   (RedHat/CentOS/Fedora)"
+    echo "         brew install readline        (macOS)"
 fi
 
 

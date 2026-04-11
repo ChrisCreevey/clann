@@ -65,16 +65,30 @@ for candidate in \
 done
 
 dnl -- Step 3: fall back to system readline --------------------------------
+dnl Try plain, then with each terminal lib in turn.  Use AC_LINK_IFELSE
+dnl directly to avoid AC_CHECK_LIB cache collisions across iterations.
 if test "$READLINE_FOUND" = "no"; then
-    AS_UNSET([ac_cv_lib_readline_readline])
-    AC_CHECK_LIB([readline], [readline],
-        [AC_SUBST([LIBREADLINE], ["-lreadline $READLINE_TERMLIB"])
-         AC_DEFINE([HAVE_READLINE], [], [Define if GNU readline is available])
-         READLINE_FOUND=yes],
-        [echo "No readline found — Clann will use standard input instead"
-         echo "For full CLI functionality: brew install readline  (macOS)"
-         echo "                     or:   apt install libreadline-dev  (Debian/Ubuntu)"],
-        [$READLINE_TERMLIB])
+    for _rl_tl in "" "-ltinfo" "-lncurses" "-lcurses"; do
+        _rl_save_LIBS="$LIBS"
+        LIBS="-lreadline $_rl_tl $LIBS"
+        AC_MSG_CHECKING([for readline with extra libs: '$_rl_tl'])
+        AC_LINK_IFELSE(
+            [AC_LANG_PROGRAM([[extern char *readline(const char *);]],
+                             [[readline(""); return 0;]])],
+            [AC_MSG_RESULT([yes])
+             AC_SUBST([LIBREADLINE], ["-lreadline $_rl_tl"])
+             AC_DEFINE([HAVE_READLINE], [], [Define if GNU readline is available])
+             READLINE_FOUND=yes],
+            [AC_MSG_RESULT([no])])
+        LIBS="$_rl_save_LIBS"
+        if test "$READLINE_FOUND" = "yes"; then break; fi
+    done
+fi
+if test "$READLINE_FOUND" = "no"; then
+    echo "No readline found — Clann will use standard input instead"
+    echo "Install: apt install libreadline-dev  (Debian/Ubuntu)"
+    echo "         yum install readline-devel   (RedHat/CentOS/Fedora)"
+    echo "         brew install readline        (macOS)"
 fi
 
 
