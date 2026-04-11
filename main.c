@@ -59,7 +59,7 @@ static const char *opts_exe[] = {
 };
 static const char *vals_maxnamelen[]   = { "full", "delimited", NULL };
 static const char *vals_autoprunemono[]= { "yes", "no", NULL };
-static const char *vals_autoweight[]   = { "clan", "splitviol", NULL };
+static const char *vals_autoweight[]   = { "clan", "splitviol", "bootstrap", NULL };
 static const char *vals_summary[]      = { "short", "full", NULL };
 
 static const char *opts_hs[] = {
@@ -1541,13 +1541,15 @@ void print_commands(int num)
 		printf2("\n\t  (prune monophyletic same-species clades from multicopy trees at load time;");
 		printf2("\n\t   trees that become single-copy after pruning join the supertree pool;");
 		printf2("\n\t   original unpruned trees are preserved for 'reconstruct')");
-		printf2("\n\tautoweight\tclan | splitviol\t\t*off");
+		printf2("\n\tautoweight\tclan | splitviol | bootstrap\t*off");
+		printf2("\n\t  bootstrap: weights = mean bootstrap support across bipartitions (no clanfile needed)");
+		printf2("\n\t             labels >1 treated as percentages and divided by 100;");
+		printf2("\n\t             trees with no bootstrap labels are assigned weight 1.0");
 		printf2("\n\t  clan:      weights = compatible_clans / testable_clans  (per-clan metric)");
 		printf2("\n\t  splitviol: weights = 1 - violated_splits / total_splits  (per-split metric)");
-		printf2("\n\t  Both modes report split score range alongside weights.");
+		printf2("\n\t  clan and splitviol both report split score range; require clanfile=<file>.");
 		printf2("\n\t  A split is 'violated' only when non-clan taxa appear on both sides");
 		printf2("\n\t  (internal clan splits are not counted as violations).");
-		printf2("\n\t  Requires clanfile=<file>.");
 		printf2("\n\tclanfile\t<filename>\t\t\t*none");
 		printf2("\n\t  (clan file: one clan per line, taxon names separated by spaces or commas,");
 		printf2("\n\t   lines beginning with '#' are comments)");
@@ -2617,10 +2619,65 @@ cleanup:
     free(clan_sizes);
     }
 
+static void compute_autoweights_bootstrap(void)
+    {
+    int i, n_tagged = 0, n_no_bs = 0;
+    float wmin = 1e30f, wmax = -1e30f;
+
+    for(i = 0; i < Total_fund_trees; i++)
+        {
+        if(!sourcetreetag[i]) continue;
+
+        /* Scan fundamentals[i] for internal node labels (text after each ')').
+         * fundamentals[i] uses integer-encoded taxa but internal labels are
+         * verbatim bootstrap strings — same format as collect_biparts_newick_sz. */
+        const char *s = fundamentals[i];
+        double sum = 0.0;
+        int count = 0, j = 0;
+        while(s[j] && s[j] != ';')
+            {
+            if(s[j] == ')')
+                {
+                j++;
+                char lbl[64]; int lj = 0;
+                while(s[j] && s[j] != '(' && s[j] != ')' &&
+                      s[j] != ',' && s[j] != ':' && s[j] != ';' && lj < 63)
+                    lbl[lj++] = s[j++];
+                if(lj > 0)
+                    {
+                    lbl[lj] = '\0';
+                    float bs = (float)atof(lbl);
+                    if(bs > 0.0f)
+                        {
+                        if(bs > 1.0f) bs /= 100.0f;  /* percentage → proportion */
+                        sum += bs;
+                        count++;
+                        }
+                    }
+                }
+            else
+                j++;
+            }
+
+        float w = (count > 0) ? (float)(sum / count) : 1.0f;
+        if(count == 0) n_no_bs++;
+        tree_weights[i] = w;
+        if(w < wmin) wmin = w;
+        if(w > wmax) wmax = w;
+        n_tagged++;
+        }
+
+    if(n_no_bs > 0)
+        printf2("  Note: %d trees had no bootstrap labels — assigned weight 1.0\n", n_no_bs);
+    printf2("  Bootstrap weights assigned to %d trees (mean per-bipartition BS support)\n", n_tagged);
+    if(n_tagged > 0)
+        printf2("  Weight range: %.4f – %.4f\n", wmin, wmax);
+    }
+
 void execute_command(char *commandline, int do_all)
     {
     int i = 0, j=0, k=0, printfundscores = FALSE, error = FALSE, do_autoprunemono = FALSE;
-    int do_clan_weights = 0;  /* 0=off, 1=clan-compatibility, 2=split-violation */
+    int do_clan_weights = 0;  /* 0=off, 1=clan-compatibility, 2=split-violation, 3=bootstrap */
     char c = '\0', temp[NAME_LENGTH], filename[10000], *newbietree, string_num[1000];
     char clanfile_name[10000];
     int newbietree_alloc = 0;  /* tracks allocated size of newbietree for overflow detection */
@@ -2696,8 +2753,10 @@ void execute_command(char *commandline, int do_all)
                 do_clan_weights = 1;
             else if(strcmp(parsed_command[i+1], "splitviol") == 0)
                 do_clan_weights = 2;
+            else if(strcmp(parsed_command[i+1], "bootstrap") == 0)
+                do_clan_weights = 3;
             else
-                printf2("Warning: autoweight value '%s' not recognised (use 'clan' or 'splitviol')\n", parsed_command[i+1]);
+                printf2("Warning: autoweight value '%s' not recognised (use 'clan', 'splitviol', or 'bootstrap')\n", parsed_command[i+1]);
             }
         if(strcmp(parsed_command[i], "clanfile") == 0)
             {
@@ -3118,10 +3177,12 @@ void execute_command(char *commandline, int do_all)
 			autoprunemono_apply();
 			}
 
-        /* Apply clan-based autoweights if requested */
+        /* Apply autoweights if requested */
         if(do_clan_weights > 0 && Total_fund_trees > 0)
             {
-            if(clanfile_name[0] == '\0')
+            if(do_clan_weights == 3)
+                compute_autoweights_bootstrap();
+            else if(clanfile_name[0] == '\0')
                 printf2("autoweight=clan/splitviol: please specify clanfile=<filename>\n");
             else
                 compute_autoweights_clan(clanfile_name, do_clan_weights - 1);
