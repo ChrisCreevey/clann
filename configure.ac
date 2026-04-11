@@ -5,6 +5,7 @@ AC_PREREQ(2.59)
 AC_INIT([clann], [5.0.0], [chris.creevey@gmail.com], [clann], [https://github.com/ChrisCreevey/clann])
 
 AM_INIT_AUTOMAKE([1.5 foreign])
+AM_MAINTAINER_MODE([disable])
 AC_CONFIG_HEADERS([config.h])
 
 dnl -----------------------------------------------------------------------
