@@ -66,8 +66,12 @@ When a new tag (e.g. `V5.1`) is pushed to GitHub:
 2. Update `sha256` with the checksum of the new tarball:
 
    ```bash
+   # Linux:
    curl -sL https://github.com/ChrisCreevey/clann/archive/refs/tags/V5.1.tar.gz \
      | sha256sum
+   # macOS:
+   curl -sL https://github.com/ChrisCreevey/clann/archive/refs/tags/V5.1.tar.gz \
+     | shasum -a 256
    ```
 
 3. Reset `build: number` to `0`.
@@ -139,8 +143,12 @@ community Homebrew tap for bioinformatics tools, analogous to Bioconda.
 2. Update `sha256`:
 
    ```bash
+   # Linux:
    curl -sL https://github.com/ChrisCreevey/clann/archive/refs/tags/V5.1.tar.gz \
      | sha256sum
+   # macOS:
+   curl -sL https://github.com/ChrisCreevey/clann/archive/refs/tags/V5.1.tar.gz \
+     | shasum -a 256
    ```
 
 3. Update `version`.

@@ -14,5 +14,5 @@ fi
     --prefix="${PREFIX}" \
     --disable-silent-rules
 
-make -j"${CPU_COUNT}"
+make -j"${CPU_COUNT:-1}"
 make install
