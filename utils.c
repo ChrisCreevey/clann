@@ -149,12 +149,35 @@ char *xgets(char *s)
  * A drop-in replacement for printf that also writes to the log file when
  * logging is active (print_log == TRUE).  logfile and print_log are
  * defined in treecompare2.c and declared extern in utils.h.
+ *
+ * In library mode (CLANN_LIBRARY_MODE) all output is instead forwarded to
+ * the registered output callback (clann_output_fn / clann_output_data) so
+ * that callers can capture it without touching file descriptors.
  * ----------------------------------------------------------------------- */
+
+#ifdef CLANN_LIBRARY_MODE
+/* Definitions of the library-mode output callback globals. */
+clann_output_fn_t clann_output_fn   = NULL;
+void             *clann_output_data = NULL;
+#endif
 
 void printf2(char *format, ...)
     {
     va_list ap;
     va_list ap2;
+
+#ifdef CLANN_LIBRARY_MODE
+    if(clann_output_fn != NULL)
+        {
+        /* Format into a local buffer and forward to the callback. */
+        char _lib_buf[65536];
+        va_start(ap, format);
+        vsnprintf(_lib_buf, sizeof(_lib_buf), format, ap);
+        va_end(ap);
+        clann_output_fn(_lib_buf, clann_output_data);
+        return;
+        }
+#endif
 
     if(print_log == TRUE)
         {

@@ -1,0 +1,25 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "pyclann"
+version = "0.1.0"
+description = "Python interface to the Clann phylogenomics tool"
+readme = "README.md"
+license = { text = "GPL-2.0-or-later" }
+requires-python = ">=3.9"
+keywords = ["phylogenomics", "supertree", "bioinformatics", "clann"]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: GNU General Public License v2 or later (GPLv2+)",
+    "Topic :: Scientific/Engineering :: Bio-Informatics",
+    "Intended Audience :: Science/Research",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=7"]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["pyclann*"]
