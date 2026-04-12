@@ -5554,7 +5554,8 @@ int branchswap(int number_of_swaps, float score, int numspectries, int numgenetr
         int  i=0, j=0, last = 0;
 
 
-        while(i < number_of_swaps && !user_break)
+        while(i < number_of_swaps && !user_break
+              && (hs_maxskips == 0 || skip_streak < hs_maxskips))
             {
             last_number = number;
             i+= find_swaps(&number, tree_top, number_of_swaps, numspectries, numgenetries);
@@ -5626,7 +5627,8 @@ int find_swaps(float * number, struct taxon * position, int number_of_swaps, int
         
         position = start1;
 	/* Search for pointer siblings and if found, call the function recursively for that pointer sibling */
-	while(count < i && swaps < number_of_swaps && !better_score && !user_break )
+	while(count < i && swaps < number_of_swaps && !better_score && !user_break
+	         && (hs_maxskips == 0 || skip_streak < hs_maxskips))
 		{
                 /* choose the pointer sibling to travel down */
                 j =(int)fmod(rand_r(&thread_seed), i);  /* the jth pointer sibling is the chosen one */
@@ -5802,6 +5804,7 @@ int swapper(struct taxon * position,struct taxon * prev_pos, int stepstaken, str
   	float  distance = *number;
 	int better_score = FALSE, i=0, j=0, different = TRUE;
 	struct taxon *start2 = NULL, *start1 = NULL;
+        uint64_t topo_h_nni = 0;
         char *best_tree = NULL, *temptree = NULL;
         
         temptree = malloc(TREE_LENGTH*sizeof(char));
@@ -5845,9 +5848,11 @@ int swapper(struct taxon * position,struct taxon * prev_pos, int stepstaken, str
 	
                 /* now first_swap is at the first sibling at this level, and second_swap is at the first sibling at the other level */
                 /* The next step is to swap every sibling at this level with every sibling at the level above */
-		while(first_swap != NULL && *swaps < number_of_swaps && !better_score && !user_break && !rep_abandon)
+		while(first_swap != NULL && *swaps < number_of_swaps && !better_score && !user_break && !rep_abandon
+		          && (hs_maxskips == 0 || skip_streak < hs_maxskips))
 			{
-			while(second_swap != NULL && *swaps < number_of_swaps && !better_score && !user_break && !rep_abandon)
+			while(second_swap != NULL && *swaps < number_of_swaps && !better_score && !user_break && !rep_abandon
+			          && (hs_maxskips == 0 || skip_streak < hs_maxskips))
 				{
 				if(second_swap->daughter != prev_pos && !is_ancestor_of(second_swap, first_swap) && !is_ancestor_of(first_swap, second_swap))   /* Do not swap if either node is an ancestor of the other (would create a cycle) */
 					{
@@ -5855,6 +5860,19 @@ int swapper(struct taxon * position,struct taxon * prev_pos, int stepstaken, str
 
                                         if(check_taxa(tree_top) == number_of_taxa)
                                             {
+                                            topo_h_nni = tree_topo_hash(tree_top);
+                                            if(visited_set != NULL && vs_contains(visited_set, topo_h_nni))
+                                                {
+                                                /* Already-visited NNI topology: count skip, record landscape, revert swap. */
+                                                skip_streak++;
+                                                if(g_landscape_file[0])
+                                                    lm_record(landscape_map ? landscape_map : g_landscape_map,
+                                                              topo_h_nni, 0.0f, NULL);
+                                                do_swap(first_swap, second_swap);
+                                                }
+                                            else
+                                                {
+                                                if(visited_set != NULL) { vs_insert(visited_set, topo_h_nni); skip_streak = 0; }
 											(*swaps)++;
                                            /* *swaps = *swaps + 1; */ /* count the number of swaps done */
 											NUMSWAPS++;
@@ -5891,7 +5909,6 @@ int swapper(struct taxon * position,struct taxon * prev_pos, int stepstaken, str
                                             /* Landscape recording: NNI-scored topology */
                                             if(g_landscape_file[0])
                                                 {
-                                                uint64_t topo_h_nni = tree_topo_hash(tree_top);
                                                 lm_record(landscape_map ? landscape_map : g_landscape_map,
                                                           topo_h_nni, ml_display_score(distance), best_tree);
                                                 }
@@ -6003,6 +6020,7 @@ int swapper(struct taxon * position,struct taxon * prev_pos, int stepstaken, str
                                                     if(!better_score) do_swap(first_swap, second_swap);
                                                     }
                                                 }
+                                                }  /* end else (new topology) */
                                             }
                                         else
                                             {
