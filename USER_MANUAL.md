@@ -1051,12 +1051,44 @@ The cluster TSV has a header row followed by one row per cluster, sorted by `mem
 | `rep_newick` | Newick string of the cluster representative |
 | `member_count` | Number of distinct topologies in this cluster |
 | `total_visits` | Sum of `visit_count` across all members — a proxy for basin size |
-| `best_score` | Score of the best-scoring topology in the cluster |
+| `best_score` | Score of the best-scoring topology in the cluster (highest for ML criterion 7; lowest for all others) |
+| `worst_score` | Score of the worst-scoring topology in the cluster (opposite direction to `best_score`) |
+| `score_mean` | Arithmetic mean of all member scores within the cluster |
+| `score_sd` | Sample standard deviation of member scores (0 for singleton clusters) |
 | `rep_score` | Score of the representative topology |
 
 For a full description of the clustering algorithm, output interpretation, and
 guidance on threshold selection, see
 [NOTES_treespace_clustering.md](NOTES_treespace_clustering.md).
+
+#### Statistical comparison of clusters
+
+The `member_count` (N), `score_mean`, and `score_sd` columns give you
+everything needed for the most common parametric tests to compare two or more
+clusters:
+
+| Test | Columns needed | What it answers |
+|------|---------------|-----------------|
+| **Welch's t-test** | `score_mean`, `score_sd`, `member_count` for two clusters | Are the mean scores of two specific clusters significantly different? |
+| **One-way ANOVA** | `score_mean`, `score_sd`, `member_count` for all clusters | Is there any significant score difference across all clusters? |
+| **Cohen's d** | `score_mean`, `score_sd`, `member_count` for two clusters | Effect size — practical (not just statistical) significance of the difference |
+
+`best_score` and `worst_score` together show the full score range within each
+cluster, which is useful for a quick visual sanity-check before running formal
+tests.
+
+The statistics are computed with **Welford's online algorithm** during the
+single greedy clustering pass — no extra memory or second pass over the data is
+required. `score_sd` is the **sample** standard deviation (denominator N − 1);
+for singleton clusters it is reported as 0.
+
+> **Caveat:** The landscape scores within a cluster are not fully independent
+> samples (nearby topologies are correlated), so p-values from parametric tests
+> should be treated as indicative rather than exact. For large clusters the
+> central limit theorem makes the normal approximation reasonable in practice.
+> If you need non-parametric comparisons (Mann–Whitney U, Kolmogorov–Smirnov),
+> those require the full per-member score distribution, which is not currently
+> written by default.
 
 **CLI usage:**
 ```bash
