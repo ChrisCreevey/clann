@@ -32,6 +32,7 @@
 #include "prune.h"
 #include "main.h"
 #include "spr_tree.h"
+#include "treecluster.h"
 
 BipartSet *fund_bipart_sets = NULL;  /* [Total_fund_trees], precomputed once per analysis */
 
@@ -261,6 +262,11 @@ LandscapeMap *landscape_map = NULL; /* threadprivate: per-thread visited-topolog
 /* Shared landscape globals (not threadprivate) */
 static char         g_landscape_file[4096] = ""; /* filename; empty = feature disabled */
 static LandscapeMap *g_landscape_map = NULL;      /* global accumulator across all threads */
+/* Landscape clustering options (set by hs option parsing) */
+static int  g_cluster_enabled   = 0;                  /* 0=off, 1=on (requires visitedtrees=) */
+static char g_cluster_output[4096] = "treeclusters.tsv"; /* output TSV filename */
+static int  g_cluster_threshold = 4;                  /* max RF distance to join a cluster */
+static int  g_cluster_orderby   = 0;                  /* 0=score ascending, 1=visits descending */
 time_t  rep_start_time    = 0;    /* threadprivate: wall-clock time when current do_search() began */
 int     hs_do_print       = 0;    /* threadprivate: mirrors the 'print' param of do_search() */
 float   last_status_score = -1.0f;/* threadprivate: sprscore at last periodic status line (for improvement marker) */
@@ -3590,6 +3596,10 @@ void heuristic_search(int user, int print, int sample, int nreps)
     /* Reset landscape recording state for this hs call */
     g_landscape_file[0] = '\0';
     if(g_landscape_map) { lm_free(g_landscape_map); g_landscape_map = NULL; }
+    g_cluster_enabled   = 0;
+    strcpy(g_cluster_output, "treeclusters.tsv");
+    g_cluster_threshold = 4;
+    g_cluster_orderby   = 0;
 
     best_tree = malloc(TREE_LENGTH*sizeof(char));
     if(!best_tree) memory_error(75);
@@ -4054,6 +4064,35 @@ void heuristic_search(int user, int print, int sample, int nreps)
 			{
 			strncpy(g_landscape_file, parsed_command[i+1], sizeof(g_landscape_file) - 1);
 			g_landscape_file[sizeof(g_landscape_file) - 1] = '\0';
+			}
+		if(strcmp(parsed_command[i], "clusterlandscape") == 0)
+			{
+			if(strcmp(parsed_command[i+1], "yes") == 0)
+				g_cluster_enabled = 1;
+			else if(strcmp(parsed_command[i+1], "no") == 0)
+				g_cluster_enabled = 0;
+			else
+				{ printf2("Error: clusterlandscape must be yes or no\n"); error = TRUE; }
+			}
+		if(strcmp(parsed_command[i], "clusteroutput") == 0)
+			{
+			strncpy(g_cluster_output, parsed_command[i+1], sizeof(g_cluster_output) - 1);
+			g_cluster_output[sizeof(g_cluster_output) - 1] = '\0';
+			}
+		if(strcmp(parsed_command[i], "clusterthreshold") == 0)
+			{
+			g_cluster_threshold = toint(parsed_command[i+1]);
+			if(g_cluster_threshold < 0)
+				{ printf2("Error: clusterthreshold must be >= 0\n"); error = TRUE; }
+			}
+		if(strcmp(parsed_command[i], "clusterorderby") == 0)
+			{
+			if(strcmp(parsed_command[i+1], "score") == 0)
+				g_cluster_orderby = 0;
+			else if(strcmp(parsed_command[i+1], "visits") == 0)
+				g_cluster_orderby = 1;
+			else
+				{ printf2("Error: clusterorderby must be score or visits\n"); error = TRUE; }
 			}
 
 
@@ -5300,9 +5339,14 @@ void heuristic_search(int user, int print, int sample, int nreps)
                     lm_write(g_landscape_map, g_landscape_file);
                     printf2("Visited topology landscape written to: %s\n", g_landscape_file);
                     printf2("  Unique topologies recorded: %zu\n", g_landscape_map->count);
+                    if(g_cluster_enabled)
+                        lm_cluster(g_landscape_map, g_cluster_output,
+                                   g_cluster_threshold, g_cluster_orderby);
                     lm_free(g_landscape_map);
                     g_landscape_map = NULL;
                     }
+                else if(g_cluster_enabled)
+                    printf2("Warning: clusterlandscape=yes ignored (visitedtrees= not set)\n");
 
                 /**** Print out the best trees found *******/
 

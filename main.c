@@ -67,6 +67,8 @@ static const char *opts_hs[] = {
     "nsteps=", "criterion=", "missing=", "mlbeta=", "mleta=", "mlscale=",
     "strategy=", "sample=", "progress=", "seed=", "nthreads=", "bsweight=",
     "scan", "scanmin=", "scanmax=", "escan", "eta=", "etamax=", "fixbeta=",
+    "visitedtrees=", "clusterlandscape=", "clusteroutput=",
+    "clusterthreshold=", "clusterorderby=",
     NULL
 };
 static const char *opts_boot[] = {
@@ -125,6 +127,7 @@ static const char *vals_yesno[]     = { "yes", "no", NULL };
 static const char *vals_output[]    = { "matrix", "vector", NULL };
 static const char *vals_size[]      = { "equalto", "lessthan", "greaterthan", NULL };
 static const char *vals_status[]    = { "on", "off", NULL };
+static const char *vals_orderby[]   = { "score", "visits", NULL };
 
 /* Map option name → value list (for completing after "option=") */
 typedef struct { const char *opt; const char **vals; } opt_vals_t;
@@ -146,6 +149,8 @@ static const opt_vals_t opt_val_map[] = {
     { "output",       vals_output       },
     { "size",         vals_size         },
     { "status",       vals_status       },
+    { "clusterlandscape", vals_yesno    },
+    { "clusterorderby",   vals_orderby  },
     { NULL, NULL }
 };
 
@@ -1656,6 +1661,11 @@ void print_commands(int num)
 #endif
             printf2("\n\tautoprunemono\t(set via exe) prune monophyletic same-species clades from multicopy trees at load time");
             printf2("\n\tvisitedtrees\t<filename>\t\t\t(disabled) Record all visited topologies (TSV: newick, score, visit_count)");
+            printf2("\n\t  Landscape clustering options (require visitedtrees=):");
+            printf2("\n\tclusterlandscape yes | no\t\t\t*no (cluster landscape after search)");
+            printf2("\n\tclusteroutput\t<filename>\t\t\t*treeclusters.tsv");
+            printf2("\n\tclusterthreshold <integer>\t\t\t*4 (max RF distance to join cluster)");
+            printf2("\n\tclusterorderby\tscore | visits\t\t\t*score (sort order before greedy sweep)");
             if(criterion == 0)
                 {
                 printf2("\n\tweight\t\tequal | comparisons\t\t");
