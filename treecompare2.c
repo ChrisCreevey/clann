@@ -276,8 +276,8 @@ float  par_last_print_score= -1.0f; /* par_progress_best at last status line (th
 time_t par_search_start    = 0;     /* wall-clock time when the parallel region began */
 int    skip_streak         = 0;     /* threadprivate: consecutive already-visited skips since last new topology */
 int    nni_swaps           = 0;     /* threadprivate: NNI refinement swaps performed after SPR/TBR in last do_search() rep */
-int    hs_maxskips         = -1;    /* shared: stop replicate when skip_streak reaches this (0=disabled, -1=auto: N*N) */
-int    hs_maxskips_is_auto = 1;    /* 1=auto-scale to N*N at search start; 0=user has set an explicit value */
+int    hs_maxskips         = -1;    /* shared: stop replicate when skip_streak reaches this (0=disabled, -1=auto: N³) */
+int    hs_maxskips_is_auto = 1;    /* 1=auto-scale to N³ at search start; 0=user has set an explicit value */
 int    hs_strategy         = 0;    /* 0=first-improvement (depth-first); 1=best-improvement (breadth-first) */
 int    hs_progress_interval= 5;    /* shared: parallel progress print interval in seconds (0=every improvement) */
 time_t par_last_progress_time = 0; /* shared: wall-clock time of last parallel progress line printed */
@@ -4126,11 +4126,11 @@ void heuristic_search(int user, int print, int sample, int nreps)
 		if(sample > sup) sample=sup;
 		if(nreps > sup) nreps=sup;
 
-        /* Auto-scale maxskips to 2*N² when no explicit value was given.
+        /* Auto-scale maxskips to N³ when no explicit value was given.
          * This makes the stopping criterion proportional to tree size:
-         * N=10 → 200, N=20 → 800, N=30 → 1800, N=50 → 5000. */
+         * N=10 → 1000, N=20 → 8000, N=30 → 27000, N=50 → 125000. */
         if(hs_maxskips_is_auto)
-            hs_maxskips = 2 * number_of_taxa * number_of_taxa;
+            hs_maxskips = number_of_taxa * number_of_taxa * number_of_taxa;
 
         /* Initialise global landscape map if visitedtrees= was specified */
         if(g_landscape_file[0])
@@ -4186,7 +4186,7 @@ void heuristic_search(int user, int print, int sample, int nreps)
                 if(hs_maxskips > 0)
                     {
                     if(hs_maxskips_is_auto)
-                        printf2("\tMax consecutive visited skips (maxskips) = %d (auto: 2×N²=2×%d²)\n", hs_maxskips, number_of_taxa);
+                        printf2("\tMax consecutive visited skips (maxskips) = %d (auto: N³=%d³)\n", hs_maxskips, number_of_taxa);
                     else
                         printf2("\tMax consecutive visited skips (maxskips) = %d\n", hs_maxskips);
                     }

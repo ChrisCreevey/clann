@@ -1675,7 +1675,7 @@ void print_commands(int num)
 #ifdef _OPENMP
             printf2("\n\tnthreads\t<integer number>\t\t*%-3d (OpenMP threads; default=all CPUs)", omp_get_num_procs());
 #endif
-            printf2("\n\tmaxskips\t<integer number>\t\t*auto=2N² (stop replicate after this many consecutive already-visited moves; 0=disabled)");
+            printf2("\n\tmaxskips\t<integer number>\t\t*auto=N³ (stop replicate after this many consecutive already-visited moves; 0=disabled)");
 #ifdef _OPENMP
             if(hs_progress_interval == 0)
                 printf2("\n\tprogress\t<integer seconds | 0>\t\t0 (report every improvement)");
