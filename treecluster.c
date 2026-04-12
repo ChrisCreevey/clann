@@ -21,7 +21,6 @@
 
 #include "treecluster.h"
 #include "utils.h"
-#include <limits.h>
 
 /* -----------------------------------------------------------------------
  * Internal helpers
@@ -100,20 +99,30 @@ static int collect_biparts_named(const char *nwk, uint64_t total_hash,
     }
 
 /*
- * rf_distance — symmetric RF distance between two sorted bipartition arrays.
- * rf = |a| + |b| - 2 * |a ∩ b|   (sorted-merge intersection).
+ * rf_distance_norm — symmetric RF distance between two sorted bipartition
+ * arrays, normalized to [0, 1] by dividing by 2*(n-3) where n is the taxon
+ * count inferred from max(na, nb)+3 (the maximum bipartition count for an
+ * unrooted bifurcating tree with n leaves is n-3).
+ *
+ * This matches the normalization used by compare_trees_rf() in scoring.c.
+ * Returns 0.0 when both arrays are empty (identical trivial trees).
  */
-static int rf_distance(const uint64_t *a, int na,
-                       const uint64_t *b, int nb)
+static float rf_distance_norm(const uint64_t *a, int na,
+                              const uint64_t *b, int nb)
     {
     int i = 0, j = 0, shared = 0;
+    int raw, max_rf;
     while(i < na && j < nb)
         {
         if(a[i] == b[j])       { shared++; i++; j++; }
         else if(a[i] < b[j])   i++;
         else                   j++;
         }
-    return na + nb - 2 * shared;
+    raw    = na + nb - 2 * shared;
+    /* max_rf = 2*(n-3); infer n from the larger bipartition count: n = nb_max + 3 */
+    max_rf = 2 * ((na > nb ? na : nb));   /* na = n-3, so 2*na = 2*(n-3) */
+    if(max_rf <= 0) return 0.0f;
+    return (float)raw / (float)max_rf;
     }
 
 /* -----------------------------------------------------------------------
@@ -162,7 +171,7 @@ static int cmp_cluster_size(const void *a, const void *b)
 
 void lm_cluster(LandscapeMap *lm,
                 const char   *out_file,
-                int           threshold,
+                float         threshold,
                 int           orderby)
     {
     size_t    i;
@@ -247,20 +256,20 @@ void lm_cluster(LandscapeMap *lm,
         {
         const LandscapeEntry *e = entries[i].e;
         int  nb = collect_biparts_named(e->newick, total_hash, tmp_biparts);
-        int  best_rf = INT_MAX;
+        float best_rf = 2.0f;  /* > 1.0, so always replaced on first comparison */
         int  best_c  = -1;
         size_t c;
 
         /* Compare against existing cluster representatives */
         for(c = 0; c < n_clusters; c++)
             {
-            int rf = rf_distance(tmp_biparts, nb,
-                                 clusters[c].biparts, clusters[c].nb);
+            float rf = rf_distance_norm(tmp_biparts, nb,
+                                        clusters[c].biparts, clusters[c].nb);
             if(rf < best_rf)
                 {
                 best_rf = rf;
                 best_c  = (int)c;
-                if(rf == 0) break; /* exact match — no need to keep looking */
+                if(rf == 0.0f) break; /* exact match — no need to keep looking */
                 }
             }
 
@@ -333,8 +342,8 @@ void lm_cluster(LandscapeMap *lm,
             }
         fclose(fp);
         printf2("  Landscape clusters written to:   %s\n", out_file);
-        printf2("  Clusters found: %zu  (threshold RF=%d, orderby=%s)\n",
-                n_clusters, threshold,
+        printf2("  Clusters found: %zu  (threshold RF=%.4f, orderby=%s)\n",
+                n_clusters, (double)threshold,
                 orderby == 1 ? "visits" : "score");
         }
 

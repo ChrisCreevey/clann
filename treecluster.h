@@ -31,7 +31,10 @@
  *
  *   lm         : fully-populated LandscapeMap (must be non-NULL)
  *   out_file   : output TSV filename
- *   threshold  : max RF distance to join a cluster (>= 0)
+ *   threshold  : max normalized RF distance to join a cluster (0.0–1.0).
+ *                Mirrors compare_trees_rf(): normalized by 2*(n-3) where
+ *                n is the number of taxa in the tree.
+ *                e.g. 0.1 = within 10% of the maximum possible RF distance.
  *   orderby    : 0 = sort by score ascending (best first),
  *                1 = sort by visit_count descending (most-visited first)
  *
@@ -45,7 +48,7 @@
  */
 void lm_cluster(LandscapeMap *lm,
                 const char   *out_file,
-                int           threshold,
+                float         threshold,
                 int           orderby);
 
 #endif /* CLANN_TREECLUSTER_H */

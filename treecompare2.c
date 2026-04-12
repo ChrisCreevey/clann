@@ -263,10 +263,10 @@ LandscapeMap *landscape_map = NULL; /* threadprivate: per-thread visited-topolog
 static char         g_landscape_file[4096] = ""; /* filename; empty = feature disabled */
 static LandscapeMap *g_landscape_map = NULL;      /* global accumulator across all threads */
 /* Landscape clustering options (set by hs option parsing) */
-static int  g_cluster_enabled   = 0;                  /* 0=off, 1=on (requires visitedtrees=) */
-static char g_cluster_output[4096] = "treeclusters.tsv"; /* output TSV filename */
-static int  g_cluster_threshold = 4;                  /* max RF distance to join a cluster */
-static int  g_cluster_orderby   = 0;                  /* 0=score ascending, 1=visits descending */
+static int   g_cluster_enabled   = 0;                   /* 0=off, 1=on (requires visitedtrees=) */
+static char  g_cluster_output[4096] = "treeclusters.tsv"; /* output TSV filename */
+static float g_cluster_threshold = 0.1f;                /* max normalized RF distance [0,1] */
+static int   g_cluster_orderby   = 0;                   /* 0=score ascending, 1=visits descending */
 time_t  rep_start_time    = 0;    /* threadprivate: wall-clock time when current do_search() began */
 int     hs_do_print       = 0;    /* threadprivate: mirrors the 'print' param of do_search() */
 float   last_status_score = -1.0f;/* threadprivate: sprscore at last periodic status line (for improvement marker) */
@@ -3598,7 +3598,7 @@ void heuristic_search(int user, int print, int sample, int nreps)
     if(g_landscape_map) { lm_free(g_landscape_map); g_landscape_map = NULL; }
     g_cluster_enabled   = 0;
     strcpy(g_cluster_output, "treeclusters.tsv");
-    g_cluster_threshold = 4;
+    g_cluster_threshold = 0.1f;
     g_cluster_orderby   = 0;
 
     best_tree = malloc(TREE_LENGTH*sizeof(char));
@@ -4081,9 +4081,9 @@ void heuristic_search(int user, int print, int sample, int nreps)
 			}
 		if(strcmp(parsed_command[i], "clusterthreshold") == 0)
 			{
-			g_cluster_threshold = toint(parsed_command[i+1]);
-			if(g_cluster_threshold < 0)
-				{ printf2("Error: clusterthreshold must be >= 0\n"); error = TRUE; }
+			g_cluster_threshold = tofloat(parsed_command[i+1]);
+			if(g_cluster_threshold < 0.0f || g_cluster_threshold > 1.0f)
+				{ printf2("Error: clusterthreshold must be between 0.0 and 1.0 (normalized RF distance)\n"); error = TRUE; }
 			}
 		if(strcmp(parsed_command[i], "clusterorderby") == 0)
 			{
