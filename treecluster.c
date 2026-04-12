@@ -134,19 +134,23 @@ typedef struct {
     int       nb;         /* number of bipartitions in representative */
     char     *rep_newick; /* newick of representative */
     float     rep_score;  /* score of representative */
-    float     best_score; /* best (lowest) score in cluster */
+    float     best_score; /* best score in cluster: highest for ML (criterion 7), lowest for all others */
     int       member_count;
     int       total_visits;
 } Cluster;
 
-/* Comparator for sorting entries by score ascending */
+/* Comparator for sorting entries by score (direction depends on criterion) */
 typedef struct { const LandscapeEntry *e; } EntryPtr;
 
 static int cmp_entry_score(const void *a, const void *b)
     {
     float sa = ((const EntryPtr *)a)->e->score;
     float sb = ((const EntryPtr *)b)->e->score;
-    return (sa > sb) - (sa < sb);
+    /* ML criterion (7): larger -lnL = better → sort descending (best first).
+     * All other criteria: smaller score = better → sort ascending (best first). */
+    if(criterion == 7)
+        return (sb > sa) - (sb < sa);   /* descending */
+    return (sa > sb) - (sa < sb);       /* ascending  */
     }
 
 /* Comparator for sorting entries by visit_count descending */
@@ -285,8 +289,11 @@ void lm_cluster(LandscapeMap *lm,
             /* Assign to existing cluster */
             clusters[best_c].member_count++;
             clusters[best_c].total_visits += e->visit_count;
-            if(e->score < clusters[best_c].best_score)
-                clusters[best_c].best_score = e->score;
+            /* ML (criterion 7): larger -lnL is better; all others: smaller is better */
+            if(criterion == 7)
+                { if(e->score > clusters[best_c].best_score) clusters[best_c].best_score = e->score; }
+            else
+                { if(e->score < clusters[best_c].best_score) clusters[best_c].best_score = e->score; }
             }
         else
             {

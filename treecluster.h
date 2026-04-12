@@ -35,7 +35,7 @@
  *                Mirrors compare_trees_rf(): normalized by 2*(n-3) where
  *                n is the number of taxa in the tree.
  *                e.g. 0.1 = within 10% of the maximum possible RF distance.
- *   orderby    : 0 = sort by score ascending (best first),
+ *   orderby    : 0 = sort by score (best first — descending for ML, ascending for all others),
  *                1 = sort by visit_count descending (most-visited first)
  *
  * Trees are sorted by the chosen criterion, then swept greedily: each tree
