@@ -5336,7 +5336,7 @@ void heuristic_search(int user, int print, int sample, int nreps)
                 /**** Write visited-topology landscape file if requested ******/
                 if(g_landscape_file[0] && g_landscape_map)
                     {
-                    lm_write(g_landscape_map, g_landscape_file);
+                    lm_write(g_landscape_map, g_landscape_file, criterion);
                     printf2("Visited topology landscape written to: %s\n", g_landscape_file);
                     printf2("  Unique topologies recorded: %zu\n", g_landscape_map->count);
                     if(g_cluster_enabled)
@@ -11488,7 +11488,7 @@ void tips(int num)
  *
  * Syntax (REPL):
  *   recluster <landscapefile> [clusterthreshold=<f>] [clusteroutput=<file>]
- *              [clusterorderby=score|visits]
+ *              [clusterorderby=score|visits] [criterion=ml|dfit|sfit|...]
  *
  * CLI:
  *   clann recluster landscape.tsv clusterthreshold=0.1 clusteroutput=out.tsv
@@ -11500,6 +11500,9 @@ void execute_recluster(void)
     char  cluster_output[4096] = "treeclusters.tsv";
     float cluster_threshold    = 0.2f;
     int   cluster_orderby      = 0;
+    int   user_criterion       = -1;   /* -1 = not set by user on this command */
+    int   file_criterion       = -1;   /* -1 = not present in landscape file   */
+    int   save_criterion       = criterion; /* restore after recluster completes */
     LandscapeMap *lm;
 
     /* parsed_command[0] == "recluster"
@@ -11512,7 +11515,8 @@ void execute_recluster(void)
        strchr(parsed_command[1], '=') == NULL &&
        strcmp(parsed_command[1], "clusterthreshold") != 0 &&
        strcmp(parsed_command[1], "clusteroutput")    != 0 &&
-       strcmp(parsed_command[1], "clusterorderby")   != 0)
+       strcmp(parsed_command[1], "clusterorderby")   != 0 &&
+       strcmp(parsed_command[1], "criterion")        != 0)
         {
         strncpy(landscape_file, parsed_command[1], sizeof(landscape_file) - 1);
         landscape_file[sizeof(landscape_file) - 1] = '\0';
@@ -11541,6 +11545,20 @@ void execute_recluster(void)
             else
                 { printf2("Error: clusterorderby must be score or visits\n"); error = TRUE; }
             }
+        else if(strcmp(parsed_command[i], "criterion") == 0)
+            {
+            const char *cv = parsed_command[i+1];
+            if     (strcmp(cv, "dfit")  == 0) user_criterion = 0;
+            else if(strcmp(cv, "mrp")   == 0) user_criterion = 1;
+            else if(strcmp(cv, "sfit")  == 0) user_criterion = 2;
+            else if(strcmp(cv, "qfit")  == 0) user_criterion = 3;
+            else if(strcmp(cv, "avcon") == 0) user_criterion = 4;
+            else if(strcmp(cv, "recon") == 0) user_criterion = 5;
+            else if(strcmp(cv, "rf")    == 0) user_criterion = 6;
+            else if(strcmp(cv, "ml")    == 0) user_criterion = 7;
+            else
+                { printf2("Error: unknown criterion '%s'\n", cv); error = TRUE; }
+            }
         }
 
     if(error) return;
@@ -11554,11 +11572,40 @@ void execute_recluster(void)
         }
 
     printf2("Reading landscape file: %s\n", landscape_file);
-    lm = lm_read(landscape_file);
+    lm = lm_read(landscape_file, &file_criterion);
     if(!lm)
         { printf2("Error: failed to read landscape file '%s'\n", landscape_file); return; }
 
     printf2("  Unique topologies loaded: %zu\n", lm->count);
+
+    /* Determine which criterion to use for clustering.
+     * Priority: 1) explicit criterion= on this command, 2) criterion stored
+     * in the landscape file, 3) current global criterion (fallback).        */
+    if(user_criterion != -1)
+        {
+        criterion = user_criterion;
+        printf2("  Clustering criterion: %s (set by user)\n",
+                criterion == 7 ? "ml" : criterion == 6 ? "rf"    :
+                criterion == 3 ? "qfit" : criterion == 2 ? "sfit" :
+                criterion == 1 ? "mrp"  : criterion == 5 ? "recon": "dfit");
+        }
+    else if(file_criterion != -1)
+        {
+        criterion = file_criterion;
+        printf2("  Clustering criterion: %s (from landscape file)\n",
+                criterion == 7 ? "ml" : criterion == 6 ? "rf"    :
+                criterion == 3 ? "qfit" : criterion == 2 ? "sfit" :
+                criterion == 1 ? "mrp"  : criterion == 5 ? "recon": "dfit");
+        }
+    else
+        {
+        printf2("  Warning: landscape file has no criterion metadata; "
+                "using current criterion (%s).\n"
+                "  Use 'criterion=ml' (or the appropriate criterion) if scores look wrong.\n",
+                criterion == 7 ? "ml" : criterion == 6 ? "rf"    :
+                criterion == 3 ? "qfit" : criterion == 2 ? "sfit" :
+                criterion == 1 ? "mrp"  : criterion == 5 ? "recon": "dfit");
+        }
 
     /* ---- Setup taxa if no gene trees are loaded ----
      * lm_cluster uses the global taxa_names[] / taxon_hash_vals[] to parse
@@ -11664,6 +11711,9 @@ void execute_recluster(void)
     }
 
     lm_free(lm);
+
+    /* Restore the global criterion that was active before recluster */
+    criterion = save_criterion;
     }
 
 

@@ -245,10 +245,13 @@ void lm_merge(LandscapeMap *dst, LandscapeMap *src)
 
 /*  lm_read: read a landscape TSV written by lm_write() back into a new
  *  LandscapeMap.  Expected header line: newick<TAB>score<TAB>visit_count.
- *  Non-header lines that begin with '#' are silently skipped.
+ *  Non-header lines that begin with '#' are silently skipped EXCEPT for
+ *  the '# criterion=N' metadata line written by lm_write(), which is parsed
+ *  and stored in *criterion_out (if non-NULL).  *criterion_out is initialised
+ *  to -1 (meaning "not present in file") before any parsing begins.
  *  Returns a freshly-allocated map on success, or NULL on error.
  */
-LandscapeMap *lm_read(const char *filename)
+LandscapeMap *lm_read(const char *filename, int *criterion_out)
     {
     FILE *fp;
     char *line = NULL;
@@ -256,6 +259,8 @@ LandscapeMap *lm_read(const char *filename)
     ssize_t nread;
     int lineno = 0;
     LandscapeMap *lm;
+
+    if(criterion_out) *criterion_out = -1;
 
     if(!filename || !filename[0]) return NULL;
     fp = fopen(filename, "r");
@@ -275,8 +280,15 @@ LandscapeMap *lm_read(const char *filename)
             { line[--nread] = '\0'; }
 
         lineno++;
-        if(lineno == 1) continue;  /* skip header */
-        if(line[0] == '#' || line[0] == '\0') continue;
+        if(lineno == 1) continue;  /* skip column header */
+        if(line[0] == '#')
+            {
+            /* Parse criterion metadata comment written by lm_write() */
+            if(criterion_out && strncmp(line, "# criterion=", 12) == 0)
+                *criterion_out = atoi(line + 12);
+            continue;
+            }
+        if(line[0] == '\0') continue;
 
         /* Format: newick<TAB>score<TAB>visit_count */
         tab1 = strchr(line, '\t');
@@ -322,8 +334,10 @@ LandscapeMap *lm_read(const char *filename)
     }
 
 
-/*  lm_write: write TSV to filename.  Columns: newick, score, visit_count.  */
-void lm_write(LandscapeMap *lm, const char *filename)
+/*  lm_write: write TSV to filename.  Columns: newick, score, visit_count.
+ *  A '# criterion=N' metadata comment is written after the column header so
+ *  that 'recluster' can restore the correct score direction automatically.   */
+void lm_write(LandscapeMap *lm, const char *filename, int crit)
     {
     size_t i;
     FILE *fp;
@@ -331,6 +345,7 @@ void lm_write(LandscapeMap *lm, const char *filename)
     fp = fopen(filename, "w");
     if(!fp) { printf2("Error: could not open landscape file '%s' for writing\n", filename); return; }
     fprintf(fp, "newick\tscore\tvisit_count\n");
+    fprintf(fp, "# criterion=%d\n", crit);
     for(i = 0; i < lm->capacity; i++)
         {
         if(lm->slots[i].hash == 0) continue;
