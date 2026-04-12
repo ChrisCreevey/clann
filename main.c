@@ -25,6 +25,10 @@
 #include "viz.h"
 #include "main.h"
 
+#ifdef CLANN_LIBRARY_MODE
+#include "clann_api.h"   /* for clann_jmp_exit / clann_exit_code declarations */
+#endif
+
 /* ===== Readline enhancements ==========================================
  * Tab completion, named app (enables ~/.inputrc $if clann blocks),
  * and a coloured prompt.  All guarded by HAVE_READLINE.
@@ -486,6 +490,13 @@ static int cli_dispatch(int argc, char *argv[], int start,
 
 /* ===== end CLI helpers =============================================== */
 
+/* -----------------------------------------------------------------------
+ * main() — excluded in library builds (-DCLANN_LIBRARY_MODE).
+ *
+ * In library mode, clann_init() / clann_load_trees() / clann_run_command()
+ * in clann_api.c provide the equivalent entry points.
+ * ----------------------------------------------------------------------- */
+#ifndef CLANN_LIBRARY_MODE
 
 int main(int argc, char *argv[])
     {
@@ -1451,6 +1462,8 @@ int main(int argc, char *argv[])
 	clean_exit(0);
     return(0);
     }
+
+#endif /* CLANN_LIBRARY_MODE */
 
 
 int seperate_commands(char *command)
@@ -3265,6 +3278,9 @@ void clean_exit(int error)
 		}
 	weighted_scores = NULL;
 	if(yaptp_results != NULL) free(yaptp_results);
+#ifdef CLANN_LIBRARY_MODE
+	yaptp_results = NULL;
+#endif
     if(stored_commands[i] != NULL)
 		{
 		for(i=0; i<100; i++) free(stored_commands[i]);
@@ -3302,7 +3318,12 @@ void clean_exit(int error)
 		fulltaxanames = NULL;
 		}
 	if(numtaxaintrees != NULL)
-		free(numtaxaintrees);		
+		{
+		free(numtaxaintrees);
+#ifdef CLANN_LIBRARY_MODE
+		numtaxaintrees = NULL;
+#endif
+		}
 
     if(fundamentals != NULL)  /* if we have assigned the fundamental array earlier */ 
         {
@@ -3344,6 +3365,9 @@ void clean_exit(int error)
         free(taxa_names);
         free(taxa_incidence);
         taxa_names = NULL;
+#ifdef CLANN_LIBRARY_MODE
+        taxa_incidence = NULL;
+#endif
         }
     if(Cooccurrance != NULL) /* if we have assigned taxa names earlier */
         {
@@ -3379,22 +3403,65 @@ void clean_exit(int error)
         free(total_coding);
         total_coding = NULL;
         }
-    if(partition_number != NULL) free(partition_number);
-    if(from_tree != NULL) free(from_tree);
+    if(partition_number != NULL)
+        {
+        free(partition_number);
+#ifdef CLANN_LIBRARY_MODE
+        partition_number = NULL;
+#endif
+        }
+    if(from_tree != NULL)
+        {
+        free(from_tree);
+#ifdef CLANN_LIBRARY_MODE
+        from_tree = NULL;
+#endif
+        }
 
-    if(sourcetree_scores != NULL) free(sourcetree_scores);
-	if(presenceof_SPRtaxa) free(presenceof_SPRtaxa);
+    if(sourcetree_scores != NULL)
+        {
+        free(sourcetree_scores);
+#ifdef CLANN_LIBRARY_MODE
+        sourcetree_scores = NULL;
+#endif
+        }
+	if(presenceof_SPRtaxa)
+        {
+        free(presenceof_SPRtaxa);
+#ifdef CLANN_LIBRARY_MODE
+        presenceof_SPRtaxa = NULL;
+#endif
+        }
 	
-	if(sourcetreetag != NULL) free(sourcetreetag);
-    /* Flush all stdio buffers before _exit so no output is lost.
-     * We use _exit() rather than exit() to bypass libgomp's atexit cleanup
+	if(sourcetreetag != NULL)
+        {
+        free(sourcetreetag);
+#ifdef CLANN_LIBRARY_MODE
+        sourcetreetag = NULL;
+#endif
+        }
+    /* Flush all stdio buffers before exiting so no output is lost. */
+    fflush(NULL);
+
+#ifdef CLANN_LIBRARY_MODE
+    /* In library mode we must not terminate the host process.
+     * longjmp() back to the setjmp frame established by the API caller
+     * (clann_run_command, clann_load_trees, or clann_reset). */
+    {
+    extern jmp_buf clann_jmp_exit;
+    extern int     clann_exit_code;
+    clann_exit_code = error ? 1 : 0;
+    longjmp(clann_jmp_exit, 1);
+    }
+#else
+    /* We use _exit() rather than exit() to bypass libgomp's atexit cleanup
      * handler, which calls pthread_join on idle worker threads parked in
      * Mach semaphore_wait() (an uninterruptible kernel wait on macOS).
      * If the wake signal races past the thread, the join blocks indefinitely,
      * leaving the process in the UE (uninterruptible+exiting) state.
      * _exit() lets the OS tear down all threads atomically on process exit. */
-    fflush(NULL);
     _exit(error ? 1 : 0);
+#endif
 
 	if(logfile!= NULL)
 		fclose(logfile);

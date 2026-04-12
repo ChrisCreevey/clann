@@ -123,3 +123,13 @@ alltrees.ph
 all_topo.ph
 Doxyfile
 my_reconstructions.nhx
+
+# -----------------------------------------------------------------------------
+# pyclann build artefacts (Python bytecode, egg-info, shared library)
+# -----------------------------------------------------------------------------
+libclann.so
+libclann_objs/
+pyclann/__pycache__/
+pyclann/**/__pycache__/
+pyclann/*.egg-info/
+pyclann/**/*.pyc

@@ -28,6 +28,23 @@
 extern FILE *logfile;
 extern int   print_log;
 
+/* -----------------------------------------------------------------------
+ * Library-mode output callback.
+ *
+ * When CLANN_LIBRARY_MODE is defined at compile time, printf2() forwards
+ * every formatted message to this callback instead of writing to stdout or
+ * logfile.  Set via clann_set_output_fn() (declared in clann_api.h).
+ *
+ * clann_output_fn_t : pointer to   void fn(const char *msg, void *userdata)
+ * clann_output_fn   : current callback (NULL = use normal stdout/log path)
+ * clann_output_data : opaque pointer forwarded to every callback invocation
+ * ----------------------------------------------------------------------- */
+#ifdef CLANN_LIBRARY_MODE
+typedef void (*clann_output_fn_t)(const char *msg, void *userdata);
+extern clann_output_fn_t clann_output_fn;
+extern void             *clann_output_data;
+#endif
+
 /* Character/numeric conversion */
 int   texttoint(char c);
 char  inttotext(int c);
