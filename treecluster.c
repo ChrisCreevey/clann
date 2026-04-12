@@ -251,7 +251,14 @@ void lm_cluster(LandscapeMap *lm,
         return;
         }
 
-    /* Greedy sweep */
+    /* Greedy sweep — print a refreshing progress line every ~1% of entries. */
+    {
+    size_t prog_interval = n_entries / 100;
+    if(prog_interval < 1) prog_interval = 1;
+
+    printf2("  Clustering:   0 / %zu  (  0%%)", n_entries);
+    fflush(stdout);
+
     for(i = 0; i < n_entries; i++)
         {
         const LandscapeEntry *e = entries[i].e;
@@ -291,7 +298,7 @@ void lm_cluster(LandscapeMap *lm,
                                            new_alloc * sizeof(Cluster));
                 if(!tmp_cl)
                     {
-                    printf2("  Landscape clustering: out of memory (grow clusters).\n");
+                    printf2("\n  Landscape clustering: out of memory (grow clusters).\n");
                     break;
                     }
                 clusters = tmp_cl;
@@ -311,7 +318,18 @@ void lm_cluster(LandscapeMap *lm,
             cl->total_visits = e->visit_count;
             }
             }
+
+        /* Refresh progress line at each interval and on the final entry */
+        if((i + 1) % prog_interval == 0 || i + 1 == n_entries)
+            {
+            int pct = (int)(((i + 1) * 100) / n_entries);
+            printf2("\r  Clustering: %3zu / %zu  (%3d%%)", i + 1, n_entries, pct);
+            fflush(stdout);
+            }
         }
+
+    printf2("\n");   /* move off the progress line before summary output */
+    }
 
     free(entries);
     free(tmp_biparts);
