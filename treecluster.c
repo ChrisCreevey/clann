@@ -59,7 +59,8 @@ static uint64_t name_to_hash(const char *name)
 static int collect_biparts_named(const char *nwk, uint64_t total_hash,
                                   uint64_t *out)
     {
-    /* stack depth bounded by tree depth ≤ number_of_taxa */
+    /* stack depth bounded by tree depth ≤ number_of_taxa; 2*NAME_LENGTH+4 is
+     * the same generous bound used in collect_biparts_newick() in scoring.c */
     uint64_t stack[2 * NAME_LENGTH + 4];
     int depth = 0, cnt = 0, i = 0;
     stack[0] = 0;
@@ -187,7 +188,9 @@ void lm_cluster(LandscapeMap *lm,
         for(ti = 0; ti < number_of_taxa; ti++)
             total_hash ^= taxon_hash_vals[ti];
 
-    /* Allocate temp bipartition array (one tree at a time) */
+    /* Allocate temp bipartition array (one tree at a time).
+     * A fully-bifurcating tree with N taxa has N-3 internal bipartitions;
+     * +2 gives a safe margin for degenerate topologies. */
     tmp_biparts = malloc((size_t)(number_of_taxa + 2) * sizeof(uint64_t));
     if(!tmp_biparts)
         { printf2("  Landscape clustering: out of memory (tmp_biparts).\n"); return; }
