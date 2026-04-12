@@ -135,6 +135,9 @@ typedef struct {
     char     *rep_newick; /* newick of representative */
     float     rep_score;  /* score of representative */
     float     best_score; /* best score in cluster: highest for ML (criterion 7), lowest for all others */
+    float     worst_score;/* worst score in cluster: opposite direction to best_score */
+    double    score_mean; /* Welford running mean */
+    double    score_M2;   /* Welford running sum of squared deviations */
     int       member_count;
     int       total_visits;
 } Cluster;
@@ -291,9 +294,22 @@ void lm_cluster(LandscapeMap *lm,
             clusters[best_c].total_visits += e->visit_count;
             /* ML (criterion 7): larger -lnL is better; all others: smaller is better */
             if(criterion == 7)
-                { if(e->score > clusters[best_c].best_score) clusters[best_c].best_score = e->score; }
+                {
+                if(e->score > clusters[best_c].best_score)  clusters[best_c].best_score  = e->score;
+                if(e->score < clusters[best_c].worst_score) clusters[best_c].worst_score = e->score;
+                }
             else
-                { if(e->score < clusters[best_c].best_score) clusters[best_c].best_score = e->score; }
+                {
+                if(e->score < clusters[best_c].best_score)  clusters[best_c].best_score  = e->score;
+                if(e->score > clusters[best_c].worst_score) clusters[best_c].worst_score = e->score;
+                }
+            /* Welford online mean/variance update */
+            {
+            double delta  = (double)e->score - clusters[best_c].score_mean;
+            clusters[best_c].score_mean += delta / clusters[best_c].member_count;
+            double delta2 = (double)e->score - clusters[best_c].score_mean;
+            clusters[best_c].score_M2   += delta * delta2;
+            }
             }
         else
             {
@@ -321,6 +337,9 @@ void lm_cluster(LandscapeMap *lm,
             cl->rep_newick   = e->newick; /* points into lm — valid until lm_free */
             cl->rep_score    = e->score;
             cl->best_score   = e->score;
+            cl->worst_score  = e->score;
+            cl->score_mean   = (double)e->score;
+            cl->score_M2     = 0.0;
             cl->member_count = 1;
             cl->total_visits = e->visit_count;
             }
@@ -354,15 +373,21 @@ void lm_cluster(LandscapeMap *lm,
     else
         {
         fprintf(fp, "cluster_id\trep_newick\tmember_count\ttotal_visits"
-                    "\tbest_score\trep_score\n");
+                    "\tbest_score\tworst_score\tscore_mean\tscore_sd\trep_score\n");
         for(i = 0; i < n_clusters; i++)
             {
-            fprintf(fp, "%zu\t%s\t%d\t%d\t%.6f\t%.6f\n",
+            double sd = (clusters[i].member_count > 1)
+                        ? sqrt(clusters[i].score_M2 / (clusters[i].member_count - 1))
+                        : 0.0;
+            fprintf(fp, "%zu\t%s\t%d\t%d\t%.6f\t%.6f\t%.6f\t%.6f\t%.6f\n",
                     i + 1,
                     clusters[i].rep_newick ? clusters[i].rep_newick : "",
                     clusters[i].member_count,
                     clusters[i].total_visits,
                     (double)clusters[i].best_score,
+                    (double)clusters[i].worst_score,
+                    clusters[i].score_mean,
+                    sd,
                     (double)clusters[i].rep_score);
             }
         fclose(fp);
