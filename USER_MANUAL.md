@@ -48,6 +48,7 @@ See COPYING.txt for full licence terms.
 6. [Worked Examples](#6-worked-examples)
 7. [Output Files Reference](#7-output-files-reference)
 8. [Tips and Troubleshooting](#8-tips-and-troubleshooting)
+9. [Python API (pyclann)](#9-python-api-pyclann)
 
 ---
 
@@ -1339,3 +1340,95 @@ See the primary Clann publications (Creevey & McInerney 2005; Creevey et al. 200
 ---
 
 *For further information, consult the [Clann publication](https://academic.oup.com/bioinformatics/article/21/3/390/238167) or contact chris.creevey@gmail.com.*
+
+---
+
+## 9. Python API (pyclann)
+
+Clann can be driven from Python scripts, Jupyter notebooks, Snakemake workflows,
+and any other Python environment via the `pyclann` package included in the
+`pyclann/` subdirectory of this repository.
+
+### How it works
+
+`pyclann` uses a **subprocess approach**: each call spawns the `clann` binary
+in an isolated temporary directory, captures its output, parses the result
+files, and returns a structured `ClannResult` object.  This design requires no
+changes to the Clann C source — only a normal `make` build is needed before
+installing the Python package.
+
+For high-frequency in-process use (e.g. scoring millions of topologies without
+subprocess overhead), a shared-library build (`make libclann.so`) is also
+supported.  See [pyclann/README.md](pyclann/README.md) for the full comparison.
+
+### Installation
+
+```bash
+# 1. Build the clann binary (if not already done)
+./configure && make
+
+# 2. Install the Python package
+pip install ./pyclann
+
+# 3. Optionally, tell pyclann where the binary is (if not on PATH)
+# pyclann.set_clann_path("/path/to/clann")
+```
+
+Python ≥ 3.9 is required.  No external Python dependencies are needed.
+
+### Quick start
+
+```python
+import pyclann
+
+# Heuristic supertree search
+result = pyclann.hs("trees.ph", criterion="dfit", nreps=10)
+print(result.best_tree)   # Newick string
+print(result.score)       # float
+
+# Neighbour-joining supertree
+result = pyclann.nj("trees.ph")
+print(result.best_tree)
+
+# Majority-rule consensus
+result = pyclann.consensus("trees.ph")
+print(result.best_tree)
+
+# Score user-supplied topologies
+result = pyclann.usertrees("trees.ph", "candidates.ph", criterion="ml")
+for tree, score in zip(result.trees, result.scores):
+    print(f"score={score:.4f}  {tree}")
+
+# Bootstrap analysis
+result = pyclann.bootstrap("trees.ph", nreps=100, nthreads=4)
+print(result.best_tree)   # majority-rule consensus Newick
+```
+
+Every function returns a `ClannResult` dataclass with attributes `best_tree`,
+`trees`, `score`, `scores`, `stdout`, `stderr`, `returncode`, and `command`.
+
+### Available functions
+
+| Function | Clann command | Description |
+|----------|---------------|-------------|
+| `pyclann.hs()` | `hs` | Heuristic supertree search (SPR/TBR) |
+| `pyclann.nj()` | `nj` | Neighbour-joining supertree |
+| `pyclann.consensus()` | `consensus` | Majority-rule (or strict) consensus |
+| `pyclann.alltrees()` | `alltrees` | Exhaustive topology search (≤ 8 taxa) |
+| `pyclann.usertrees()` | `usertrees` | Score / test user-supplied topologies |
+| `pyclann.bootstrap()` | `boot` | Bootstrap analysis + consensus |
+| `pyclann.run()` | *(any)* | Low-level: run any Clann command string |
+
+### Further reading
+
+- **[pyclann/README.md](pyclann/README.md)** — full API reference, error
+  handling, workflow manager integration (Snakemake, Nextflow), and build mode
+  comparison (standard binary vs `libclann.so`).
+- **[examples/pyclann_demo.py](examples/pyclann_demo.py)** — a complete,
+  runnable demonstration of every API function using the tutorial data files in
+  `examples/`.  Run it with:
+
+  ```bash
+  python3 examples/pyclann_demo.py
+  ```
+
