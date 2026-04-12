@@ -1664,7 +1664,7 @@ void print_commands(int num)
             printf2("\n\t  Landscape clustering options (require visitedtrees=):");
             printf2("\n\tclusterlandscape yes | no\t\t\t*no (cluster landscape after search)");
             printf2("\n\tclusteroutput\t<filename>\t\t\t*treeclusters.tsv");
-            printf2("\n\tclusterthreshold <float 0-1>\t\t\t*0.8 (max normalized RF distance to join cluster)");
+            printf2("\n\tclusterthreshold <float 0-1>\t\t\t*0.2 (max normalized RF distance to join cluster)");
             printf2("\n\tclusterorderby\tscore | visits\t\t\t*score (sort order before greedy sweep)");
             if(criterion == 0)
                 {

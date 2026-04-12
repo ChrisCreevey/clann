@@ -265,7 +265,7 @@ static LandscapeMap *g_landscape_map = NULL;      /* global accumulator across a
 /* Landscape clustering options (set by hs option parsing) */
 static int   g_cluster_enabled   = 0;                   /* 0=off, 1=on (requires visitedtrees=) */
 static char  g_cluster_output[4096] = "treeclusters.tsv"; /* output TSV filename */
-static float g_cluster_threshold = 0.8f;                /* max normalized RF distance [0,1] */
+static float g_cluster_threshold = 0.2f;                /* max normalized RF distance [0,1] */
 static int   g_cluster_orderby   = 0;                   /* 0=score ascending, 1=visits descending */
 time_t  rep_start_time    = 0;    /* threadprivate: wall-clock time when current do_search() began */
 int     hs_do_print       = 0;    /* threadprivate: mirrors the 'print' param of do_search() */
@@ -3598,7 +3598,7 @@ void heuristic_search(int user, int print, int sample, int nreps)
     if(g_landscape_map) { lm_free(g_landscape_map); g_landscape_map = NULL; }
     g_cluster_enabled   = 0;
     strcpy(g_cluster_output, "treeclusters.tsv");
-    g_cluster_threshold = 0.8f;
+    g_cluster_threshold = 0.2f;
     g_cluster_orderby   = 0;
 
     best_tree = malloc(TREE_LENGTH*sizeof(char));
