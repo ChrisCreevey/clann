@@ -1056,6 +1056,7 @@ The cluster TSV has a header row followed by one row per cluster, sorted by `mem
 | `score_mean` | Arithmetic mean of all member scores within the cluster |
 | `score_sd` | Sample standard deviation of member scores (0 for singleton clusters) |
 | `rep_score` | Score of the representative topology |
+| `member_indices` | Comma-separated list of the `index` values from the landscape TSV for every topology belonging to this cluster. Use these to retrieve the actual Newick strings and scores for all cluster members from the landscape file. |
 
 For a full description of the clustering algorithm, output interpretation, and
 guidance on threshold selection, see
@@ -1117,10 +1118,11 @@ recluster landscape.tsv clusterorderby=visits clusteroutput=visit_clusters.tsv
 
 The `visitedtrees=<filename>` option on `hs` writes a tab-separated file
 recording every unique topology encountered during the search (across all
-replicates and threads), with three columns:
+replicates and threads), with four columns:
 
 | Column | Description |
 |--------|-------------|
+| `index` | Unique 1-based integer assigned to each row in the order it was written; used as a cross-reference in the `member_indices` column of the cluster TSV |
 | `newick` | Named-taxon unrooted Newick string |
 | `score` | Criterion score on first visit (lower = better for dfit/RF; more negative = better for ML) |
 | `visit_count` | Total times this topology was proposed across all replicates and threads |

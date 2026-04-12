@@ -43,8 +43,11 @@
  * within threshold wins; no match opens a new cluster.
  *
  * Output columns (tab-separated, one header row):
- *   cluster_id  rep_newick  member_count  total_visits  best_score  rep_score
+ *   cluster_id  rep_newick  member_count  total_visits  best_score  worst_score
+ *   score_mean  score_sd  rep_score  member_indices
  * Rows are sorted by member_count descending.
+ * member_indices is a comma-separated list of the 1-based row indices from
+ * the landscape TSV (index column) for every topology in this cluster.
  */
 void lm_cluster(LandscapeMap *lm,
                 const char   *out_file,

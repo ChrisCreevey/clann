@@ -140,6 +140,9 @@ typedef struct {
     double    score_M2;   /* Welford running sum of squared deviations */
     int       member_count;
     int       total_visits;
+    int      *member_indices; /* 1-based landscape TSV indices of all members */
+    int       indices_count;  /* number of entries in member_indices */
+    int       indices_alloc;  /* allocated capacity of member_indices */
 } Cluster;
 
 /* Comparator for sorting entries by score (direction depends on criterion) */
@@ -310,6 +313,21 @@ void lm_cluster(LandscapeMap *lm,
             double delta2 = (double)e->score - clusters[best_c].score_mean;
             clusters[best_c].score_M2   += delta * delta2;
             }
+            /* Append landscape index to member list, growing if necessary */
+            if(clusters[best_c].indices_count == clusters[best_c].indices_alloc)
+                {
+                int new_alloc = clusters[best_c].indices_alloc * 2;
+                int *tmp_idx  = realloc(clusters[best_c].member_indices,
+                                        (size_t)new_alloc * sizeof(int));
+                if(tmp_idx)
+                    {
+                    clusters[best_c].member_indices = tmp_idx;
+                    clusters[best_c].indices_alloc  = new_alloc;
+                    }
+                /* if realloc fails, silently skip appending this index */
+                }
+            if(clusters[best_c].indices_count < clusters[best_c].indices_alloc)
+                clusters[best_c].member_indices[clusters[best_c].indices_count++] = e->index;
             }
         else
             {
@@ -342,6 +360,12 @@ void lm_cluster(LandscapeMap *lm,
             cl->score_M2     = 0.0;
             cl->member_count = 1;
             cl->total_visits = e->visit_count;
+            /* Initialise member index list with the representative's index */
+            cl->indices_alloc = 16;
+            cl->indices_count = 0;
+            cl->member_indices = malloc((size_t)cl->indices_alloc * sizeof(int));
+            if(cl->member_indices)
+                cl->member_indices[cl->indices_count++] = e->index;
             }
             }
 
@@ -373,13 +397,13 @@ void lm_cluster(LandscapeMap *lm,
     else
         {
         fprintf(fp, "cluster_id\trep_newick\tmember_count\ttotal_visits"
-                    "\tbest_score\tworst_score\tscore_mean\tscore_sd\trep_score\n");
+                    "\tbest_score\tworst_score\tscore_mean\tscore_sd\trep_score\tmember_indices\n");
         for(i = 0; i < n_clusters; i++)
             {
             double sd = (clusters[i].member_count > 1)
                         ? sqrt(clusters[i].score_M2 / (clusters[i].member_count - 1))
                         : 0.0;
-            fprintf(fp, "%zu\t%s\t%d\t%d\t%.6f\t%.6f\t%.6f\t%.6f\t%.6f\n",
+            fprintf(fp, "%zu\t%s\t%d\t%d\t%.6f\t%.6f\t%.6f\t%.6f\t%.6f\t",
                     i + 1,
                     clusters[i].rep_newick ? clusters[i].rep_newick : "",
                     clusters[i].member_count,
@@ -389,6 +413,17 @@ void lm_cluster(LandscapeMap *lm,
                     clusters[i].score_mean,
                     sd,
                     (double)clusters[i].rep_score);
+            /* Write comma-separated list of member landscape indices */
+            if(clusters[i].member_indices && clusters[i].indices_count > 0)
+                {
+                int j;
+                for(j = 0; j < clusters[i].indices_count; j++)
+                    {
+                    if(j > 0) fputc(',', fp);
+                    fprintf(fp, "%d", clusters[i].member_indices[j]);
+                    }
+                }
+            fputc('\n', fp);
             }
         fclose(fp);
         printf2("  Landscape clusters written to:   %s\n", out_file);
@@ -397,8 +432,11 @@ void lm_cluster(LandscapeMap *lm,
                 orderby == 1 ? "visits" : "score");
         }
 
-    /* Free cluster bipart arrays */
+    /* Free cluster bipart arrays and member index lists */
     for(i = 0; i < n_clusters; i++)
+        {
         free(clusters[i].biparts);
+        free(clusters[i].member_indices);
+        }
     free(clusters);
     }

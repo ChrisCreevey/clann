@@ -99,6 +99,7 @@ typedef struct {
     uint64_t  hash;        /* topology hash (key; 0 = empty slot)  */
     float     score;       /* score on first visit                  */
     int       visit_count; /* total visits across all reps          */
+    int       index;       /* 1-based row index in the landscape TSV (0 = not assigned) */
     char     *newick;      /* heap-allocated named-taxon Newick     */
 } LandscapeEntry;
 

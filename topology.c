@@ -244,11 +244,15 @@ void lm_merge(LandscapeMap *dst, LandscapeMap *src)
     }
 
 /*  lm_read: read a landscape TSV written by lm_write() back into a new
- *  LandscapeMap.  Expected header line: newick<TAB>score<TAB>visit_count.
+ *  LandscapeMap.  Supports two header formats:
+ *    new: index<TAB>newick<TAB>score<TAB>visit_count
+ *    old: newick<TAB>score<TAB>visit_count
  *  Non-header lines that begin with '#' are silently skipped EXCEPT for
  *  the '# criterion=N' metadata line written by lm_write(), which is parsed
  *  and stored in *criterion_out (if non-NULL).  *criterion_out is initialised
  *  to -1 (meaning "not present in file") before any parsing begins.
+ *  For old-format files without an index column, sequential 1-based indices
+ *  are assigned as rows are read.
  *  Returns a freshly-allocated map on success, or NULL on error.
  */
 LandscapeMap *lm_read(const char *filename, int *criterion_out)
@@ -258,6 +262,8 @@ LandscapeMap *lm_read(const char *filename, int *criterion_out)
     size_t line_alloc = 0;
     ssize_t nread;
     int lineno = 0;
+    int has_index_col = 0;   /* 1 if header starts with "index\t" */
+    int seq_index = 0;       /* counter used when file has no index column */
     LandscapeMap *lm;
 
     if(criterion_out) *criterion_out = -1;
@@ -272,15 +278,22 @@ LandscapeMap *lm_read(const char *filename, int *criterion_out)
 
     while((nread = getline(&line, &line_alloc, fp)) != -1)
         {
-        char *p, *tab1, *tab2;
+        char *p, *tab1, *tab2, *tab3;
         float score;
         int visit_count;
+        int tree_index;
+        const char *newick_ptr;
         /* Strip trailing newline / carriage return */
         while(nread > 0 && (line[nread-1] == '\n' || line[nread-1] == '\r'))
             { line[--nread] = '\0'; }
 
         lineno++;
-        if(lineno == 1) continue;  /* skip column header */
+        if(lineno == 1)
+            {
+            /* Detect format: new header starts with "index\t" */
+            has_index_col = (strncmp(line, "index\t", 6) == 0);
+            continue;  /* skip column header */
+            }
         if(line[0] == '#')
             {
             /* Parse criterion metadata comment written by lm_write() */
@@ -290,38 +303,68 @@ LandscapeMap *lm_read(const char *filename, int *criterion_out)
             }
         if(line[0] == '\0') continue;
 
-        /* Format: newick<TAB>score<TAB>visit_count */
-        tab1 = strchr(line, '\t');
-        if(!tab1) continue;
-        *tab1 = '\0';
-        p = tab1 + 1;
+        if(has_index_col)
+            {
+            /* Format: index<TAB>newick<TAB>score<TAB>visit_count */
+            tab1 = strchr(line, '\t');
+            if(!tab1) continue;
+            tree_index = atoi(line);
+            *tab1 = '\0';
+            newick_ptr = tab1 + 1;      /* newick starts here */
 
-        tab2 = strchr(p, '\t');
-        if(!tab2) continue;
-        *tab2 = '\0';
+            tab2 = strchr(newick_ptr, '\t');
+            if(!tab2) continue;
+            *tab2 = '\0';
 
-        score       = (float)atof(p);
-        visit_count = atoi(tab2 + 1);
+            tab3 = strchr(tab2 + 1, '\t');
+            if(!tab3) continue;
+            *tab3 = '\0';
+
+            score       = (float)atof(tab2 + 1);
+            visit_count = atoi(tab3 + 1);
+            }
+        else
+            {
+            /* Format: newick<TAB>score<TAB>visit_count */
+            tab1 = strchr(line, '\t');
+            if(!tab1) continue;
+            *tab1 = '\0';
+            p = tab1 + 1;
+
+            tab2 = strchr(p, '\t');
+            if(!tab2) continue;
+            *tab2 = '\0';
+
+            score       = (float)atof(p);
+            visit_count = atoi(tab2 + 1);
+            tree_index  = ++seq_index;  /* assign sequential index */
+            newick_ptr  = line;
+            }
 
         /* Intern the newick, compute a simple hash from the string content,
          * then insert.  We use a djb2-style hash so that lm_read entries
-         * are self-consistent (visit_count is preserved via direct slot write
-         * after lm_record sets it to 1). */
+         * are self-consistent (visit_count and index are preserved via direct
+         * slot write after lm_record sets them to 1 and 0 respectively). */
         {
         uint64_t h = 5381;
-        const char *s = line;
+        const char *s = newick_ptr;
         while(*s) { h = h * 33 ^ (unsigned char)*s++; }
         if(h == 0) h = 1;
 
-        lm_record(lm, h, score, line);
+        lm_record(lm, h, score, newick_ptr);
 
-        /* lm_record initialises visit_count to 1; overwrite with stored value */
+        /* lm_record initialises visit_count to 1 and index to 0;
+         * overwrite with stored values */
         {
         size_t idx = (size_t)(h & (lm->capacity - 1));
         while(lm->slots[idx].hash != 0)
             {
             if(lm->slots[idx].hash == h)
-                { lm->slots[idx].visit_count = visit_count; break; }
+                {
+                lm->slots[idx].visit_count = visit_count;
+                lm->slots[idx].index       = tree_index;
+                break;
+                }
             idx = (idx + 1) & (lm->capacity - 1);
             }
         }
@@ -334,22 +377,28 @@ LandscapeMap *lm_read(const char *filename, int *criterion_out)
     }
 
 
-/*  lm_write: write TSV to filename.  Columns: newick, score, visit_count.
+/*  lm_write: write TSV to filename.  Columns: index, newick, score, visit_count.
  *  A '# criterion=N' metadata comment is written after the column header so
- *  that 'recluster' can restore the correct score direction automatically.   */
+ *  that 'recluster' can restore the correct score direction automatically.
+ *  Each entry is assigned a 1-based sequential index (stored back into the
+ *  LandscapeEntry.index field) so that lm_cluster can reference entries by
+ *  row number in the member_indices column of the cluster TSV.            */
 void lm_write(LandscapeMap *lm, const char *filename, int crit)
     {
     size_t i;
+    int idx_counter = 0;
     FILE *fp;
     if(!lm || !filename || !filename[0]) return;
     fp = fopen(filename, "w");
     if(!fp) { printf2("Error: could not open landscape file '%s' for writing\n", filename); return; }
-    fprintf(fp, "newick\tscore\tvisit_count\n");
+    fprintf(fp, "index\tnewick\tscore\tvisit_count\n");
     fprintf(fp, "# criterion=%d\n", crit);
     for(i = 0; i < lm->capacity; i++)
         {
         if(lm->slots[i].hash == 0) continue;
-        fprintf(fp, "%s\t%.6f\t%d\n",
+        lm->slots[i].index = ++idx_counter;
+        fprintf(fp, "%d\t%s\t%.6f\t%d\n",
+                lm->slots[i].index,
                 lm->slots[i].newick ? lm->slots[i].newick : "",
                 (double)lm->slots[i].score,
                 lm->slots[i].visit_count);
