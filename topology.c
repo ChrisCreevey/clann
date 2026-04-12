@@ -192,6 +192,25 @@ void lm_record(LandscapeMap *lm, uint64_t hash, float score, const char *newick)
     lm->count++;
     }
 
+/*  lm_update_score: overwrite the stored score for an existing entry.
+ *  Used after post-search rescoring to correct stale-cache scores recorded
+ *  during the search.  No-op if the hash is not present in the map.
+ */
+void lm_update_score(LandscapeMap *lm, uint64_t hash, float new_score)
+    {
+    size_t idx;
+    if(!lm) return;
+    if(hash == 0) hash = 1; /* remap sentinel, mirrors lm_record */
+    idx = (size_t)(hash & (lm->capacity - 1));
+    while(lm->slots[idx].hash != 0)
+        {
+        if(lm->slots[idx].hash == hash)
+            { lm->slots[idx].score = new_score; return; }
+        idx = (idx + 1) & (lm->capacity - 1);
+        }
+    /* Not found — nothing to update */
+    }
+
 /*  lm_merge: merge src into dst.  visit_counts are summed; dst score is kept
  *  (same topology → same score, so first-seen is correct).
  */

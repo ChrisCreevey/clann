@@ -5231,7 +5231,9 @@ void heuristic_search(int user, int print, int sample, int nreps)
                 /* presenceof_SPRtaxa[] is never set to TRUE/FALSE, so compare_trees(TRUE)
                  * always uses cached scores; scores_retained_supers[] may therefore reflect
                  * a stale score from a different tree's context. Re-evaluate each retained
-                 * tree fresh (spr=FALSE) to get the correct score before displaying. */
+                 * tree fresh (spr=FALSE) to get the correct score before displaying.
+                 * The landscape map entries for these trees are also updated so the visitedtrees
+                 * file reports the same score as the HS output. */
                 for(i = 0; i < number_retained_supers && scores_retained_supers[i] != -1; i++)
                     {
                     if(criterion == 0 || criterion == 2 || criterion == 3 || criterion == 6 || criterion == 7)
@@ -5247,6 +5249,14 @@ void heuristic_search(int user, int print, int sample, int nreps)
                         else if(criterion == 3)  scores_retained_supers[i] = compare_trees_qfit(FALSE);
                         else if(criterion == 6)  scores_retained_supers[i] = compare_trees_rf(FALSE);
                         else                     scores_retained_supers[i] = compare_trees_ml(FALSE);
+                        /* Update the landscape entry so the visitedtrees file score matches the
+                         * final reported score rather than the stale-cache value from during search. */
+                        if(g_landscape_file[0] && g_landscape_map && tree_top != NULL)
+                            {
+                            uint64_t rs_hash = tree_topo_hash(tree_top);
+                            lm_update_score(g_landscape_map, rs_hash,
+                                            ml_display_score(scores_retained_supers[i]));
+                            }
                         }
                     }
 
