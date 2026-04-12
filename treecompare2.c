@@ -5861,6 +5861,7 @@ int swapper(struct taxon * position,struct taxon * prev_pos, int stepstaken, str
                                             strcpy(best_tree, "");
                                             print_named_tree(tree_top, best_tree);
                                             strcat(best_tree, ";");
+                                            while(unroottree(best_tree));
                                             /*  printf2("!:assigned tree: %s\n", best_tree);  */
                                             
                                             
@@ -5887,6 +5888,13 @@ int swapper(struct taxon * position,struct taxon * prev_pos, int stepstaken, str
 												distance = compare_trees_ml(FALSE);
 												}
 
+                                            /* Landscape recording: NNI-scored topology */
+                                            if(g_landscape_file[0])
+                                                {
+                                                uint64_t topo_h_nni = tree_topo_hash(tree_top);
+                                                lm_record(landscape_map ? landscape_map : g_landscape_map,
+                                                          topo_h_nni, ml_display_score(distance), best_tree);
+                                                }
 
                                             if(scores_retained_supers[0] == -1 || *number == -1)
                                                 {
