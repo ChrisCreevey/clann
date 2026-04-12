@@ -222,3 +222,136 @@ A future `libclann.so`-based in-process layer (without disk overhead) is
 described in `clann_api.h` and `clann_api.c` in the Clann source tree.  When
 built, it will be used automatically as a drop-in backend for these same
 functions.
+
+---
+
+## Building Clann for Python use
+
+There are two distinct build modes, depending on how you want to use Clann
+from Python.
+
+---
+
+### Mode 1 — Standard binary (required for pyclann subprocess approach)
+
+This is the normal build and is all you need for `pyclann` as described above.
+The `pyclann` package calls the `clann` command-line binary via `subprocess`.
+
+```bash
+# Prerequisites (Debian/Ubuntu)
+sudo apt install build-essential libgomp1
+
+# Optional but recommended: readline support for the interactive REPL
+sudo apt install libreadline-dev
+
+# Build
+./configure
+make
+
+# The binary is now at ./clann
+# Run directly or install system-wide
+sudo make install          # installs to /usr/local/bin/clann (or PREFIX/bin)
+```
+
+On **macOS** with Homebrew:
+
+```bash
+brew install gcc libomp readline
+./configure CC=gcc-14      # use Homebrew GCC for OpenMP
+make
+```
+
+After building, tell pyclann where the binary is:
+
+```python
+import pyclann
+pyclann.set_clann_path("/path/to/clann")   # or let it find clann on PATH
+```
+
+The standard binary supports OpenMP parallelism, GNU readline, and all
+interactive commands.  It is the recommended backend for `pyclann`.
+
+---
+
+### Mode 2 — Shared library (`libclann.so`) for in-process use
+
+An alternative build produces a shared library that can be loaded directly
+into Python (or any other host process) via `ctypes` / `cffi`, **without
+spawning a subprocess for each call**.  This eliminates the process-creation
+and disk-I/O overhead that the subprocess approach incurs, which matters when
+you need to score thousands of topologies in a tight loop.
+
+**Key differences from the standard build:**
+
+| Aspect | Standard binary | `libclann.so` |
+|--------|----------------|---------------|
+| Compilation flag | *(none)* | `-DCLANN_LIBRARY_MODE` |
+| Entry point | `main()` (excluded by flag) | `clann_init()` / `clann_run_command()` |
+| Fatal errors | `_exit()` terminates process | `longjmp()` returns error code to caller |
+| Output | written to stdout / log file | forwarded to a registered C callback |
+| Signal handlers | registered for SIGINT etc. | skipped (host process owns signals) |
+| OpenMP | works normally | works, but GIL must be released around parallel sections |
+
+**Build the shared library:**
+
+```bash
+# After running ./configure (needed to generate config.h)
+./configure
+make libclann.so
+```
+
+This compiles all sources with `-DCLANN_LIBRARY_MODE -fPIC` into a separate
+set of object files under `libclann_objs/` and links them into `libclann.so`.
+The normal `clann` binary is left untouched.
+
+**Minimal ctypes example:**
+
+```python
+import ctypes, os
+
+lib = ctypes.CDLL("./libclann.so")
+
+# Declare function signatures
+lib.clann_init.restype = ctypes.c_int
+lib.clann_load_trees.argtypes = [ctypes.c_char_p, ctypes.c_char_p]
+lib.clann_load_trees.restype  = ctypes.c_int
+lib.clann_run_command.argtypes = [ctypes.c_char_p]
+lib.clann_run_command.restype  = ctypes.c_int
+lib.clann_reset.restype = None
+
+# Register an output callback so output goes to Python instead of stdout
+OUTPUT_CB = ctypes.CFUNCTYPE(None, ctypes.c_char_p, ctypes.c_void_p)
+
+output_lines = []
+
+@OUTPUT_CB
+def capture(msg, _userdata):
+    output_lines.append(msg.decode())
+
+lib.clann_set_output_fn(capture, None)
+
+# Initialise, load trees, run a command
+assert lib.clann_init() == 0
+assert lib.clann_load_trees(b"examples/tutorial_single.ph", b"") == 0
+rc = lib.clann_run_command(b"hs nreps=10 criterion=dfit nthreads=1")
+print("return code:", rc)
+print("captured lines:", len(output_lines))
+
+# Reset state before the next analysis
+lib.clann_reset()
+```
+
+The public C API (`clann_init`, `clann_set_output_fn`, `clann_load_trees`,
+`clann_run_command`, `clann_reset`) is fully documented in `clann_api.h`.
+
+**When to use each mode:**
+
+* **Use the standard binary + pyclann subprocess** for all normal scripting
+  needs.  It is the simplest, most robust approach and works out of the box
+  after a normal `make`.
+
+* **Use `libclann.so`** only when you need in-process performance (e.g.
+  scoring millions of topologies from Python without subprocess overhead, or
+  embedding Clann in a larger C/C++ application).  It requires more careful
+  lifecycle management (init / reset / error handling via return codes).
+
