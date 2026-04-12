@@ -50,7 +50,7 @@ static const char *clann_commands[] = {
     "randomisetrees", "rfdists", "sprdists", "consensus", "reconstruct",
     "mlscores", "generatetrees", "alltrees", "yaptp", "prunemonophylies",
     "mapunknowns", "randomprune", "ideal", "tips", "hgtanalysis",
-    "exhaustivespr", "log", "savetrees", "help", "quit", NULL
+    "exhaustivespr", "log", "savetrees", "recluster", "help", "quit", NULL
 };
 
 static const char *opts_exe[] = {
@@ -67,6 +67,8 @@ static const char *opts_hs[] = {
     "nsteps=", "criterion=", "missing=", "mlbeta=", "mleta=", "mlscale=",
     "strategy=", "sample=", "progress=", "seed=", "nthreads=", "bsweight=",
     "scan", "scanmin=", "scanmax=", "escan", "eta=", "etamax=", "fixbeta=",
+    "visitedtrees=", "clusterlandscape=", "clusteroutput=",
+    "clusterthreshold=", "clusterorderby=",
     NULL
 };
 static const char *opts_boot[] = {
@@ -111,6 +113,9 @@ static const char *opts_mlscores[]   = {
 static const char *opts_generatetrees[] = { "ntrees=", "savetrees=", NULL };
 static const char *opts_log[]           = { "status=", "filename=", NULL };
 static const char *opts_savetrees[]     = { "filename=", NULL };
+static const char *opts_recluster[]     = {
+    "clusterthreshold=", "clusteroutput=", "clusterorderby=", "criterion=", NULL
+};
 
 /* Value tables for options that take a fixed set of values */
 static const char *vals_criterion[] = {
@@ -125,6 +130,7 @@ static const char *vals_yesno[]     = { "yes", "no", NULL };
 static const char *vals_output[]    = { "matrix", "vector", NULL };
 static const char *vals_size[]      = { "equalto", "lessthan", "greaterthan", NULL };
 static const char *vals_status[]    = { "on", "off", NULL };
+static const char *vals_orderby[]   = { "score", "visits", NULL };
 
 /* Map option name → value list (for completing after "option=") */
 typedef struct { const char *opt; const char **vals; } opt_vals_t;
@@ -146,6 +152,8 @@ static const opt_vals_t opt_val_map[] = {
     { "output",       vals_output       },
     { "size",         vals_size         },
     { "status",       vals_status       },
+    { "clusterlandscape", vals_yesno    },
+    { "clusterorderby",   vals_orderby  },
     { NULL, NULL }
 };
 
@@ -170,6 +178,7 @@ static const cmd_opts_t cmd_opts_table[] = {
     { "generatetrees",opts_generatetrees},
     { "log",          opts_log          },
     { "savetrees",    opts_savetrees    },
+    { "recluster",    opts_recluster    },
     { NULL, NULL }
 };
 
@@ -302,7 +311,7 @@ static char **clann_completion(const char *text, int start, int end)
  * ===================================================================== */
 
 static const char *cli_known_commands[] = {
-    "hs", "hsearch", "alltrees", "usertrees", "consensus", "nj", "boot", "bootstrap", NULL
+    "hs", "hsearch", "alltrees", "usertrees", "consensus", "nj", "boot", "bootstrap", "recluster", NULL
 };
 
 static int is_cli_command(const char *s)
@@ -327,7 +336,8 @@ static void cli_usage(const char *cmd)
         printf("  alltrees       Exhaustive supertree search (small datasets)\n");
         printf("  usertrees      Score / test user-supplied topologies (requires two files)\n");
         printf("  consensus      Consensus tree from source trees\n");
-        printf("  nj             Neighbour-joining supertree\n\n");
+        printf("  nj             Neighbour-joining supertree\n");
+        printf("  recluster      Cluster a landscape TSV file at a given RF threshold\n\n");
         printf("File options (all commands):\n");
         printf("  --source=<f> / --trees=<f>        Source gene-tree file (positional arg also accepted)\n");
         printf("  --topologies=<f> / --candidates=<f>  Candidate-topology file (usertrees only)\n\n");
@@ -339,7 +349,8 @@ static void cli_usage(const char *cmd)
         printf("  seed=<n>        random seed\n\n");
         printf("Examples:\n");
         printf("  clann hs gene_trees.ph criterion=ml nthreads=4\n");
-        printf("  clann usertrees --source=gene_trees.ph --topologies=candidates.ph criterion=ml tests=yes\n\n");
+        printf("  clann usertrees --source=gene_trees.ph --topologies=candidates.ph criterion=ml tests=yes\n");
+        printf("  clann recluster landscape.tsv clusterthreshold=0.1 clusteroutput=tight.tsv\n\n");
         printf("Run 'clann <command> --help' for command-specific options.\n");
         printf("Run 'clann' with no arguments to start the interactive session.\n\n");
         }
@@ -370,9 +381,10 @@ static int cli_dispatch(int argc, char *argv[], int start,
 
     const char *cmdname = argv[start];
     char main_cmd[10000];
-    int file_count = 0, k, g, is_usertrees;
+    int file_count = 0, k, g, is_usertrees, is_recluster;
 
-    is_usertrees = (strcmp(cmdname, "usertrees") == 0);
+    is_usertrees  = (strcmp(cmdname, "usertrees")  == 0);
+    is_recluster  = (strcmp(cmdname, "recluster")  == 0);
 
     /* Scan for --help / -h */
     for(k = start; k < argc; k++)
@@ -421,7 +433,14 @@ static int cli_dispatch(int argc, char *argv[], int start,
         /* No '=' → file argument */
         if(val[0] == '\0')
             {
-            if(file_count == 0)
+            if(is_recluster)
+                {
+                /* For recluster the first positional arg is the landscape file,
+                 * passed directly as part of the command (no gene-tree loading). */
+                if(file_count == 0)
+                    snprintf(main_cmd, sizeof(main_cmd), "%s %s", cmdname, key);
+                }
+            else if(file_count == 0)
                 strncpy(out_treefiles[0], key, 999);
             else if(file_count == 1 && is_usertrees)
                 {
@@ -1264,7 +1283,17 @@ int main(int argc, char *argv[])
 	                                                                                                                        	            mlscores();
 	                                                                                                                        	        }
 	                                                                                                                        	    else
-	                                                                                                                        			printf2("Error: command not known.\n\tType help at the prompt to get a list of available commands.\n");
+	                                                                                                                        	        {
+	                                                                                                                        	        if(strcmp(parsed_command[0], "recluster") == 0)
+	                                                                                                                        	            {
+	                                                                                                                        	            if(num_commands == 2 && parsed_command[1][0] == '?')
+	                                                                                                                        	                print_commands(32);
+	                                                                                                                        	            else
+	                                                                                                                        	                execute_recluster();
+	                                                                                                                        	            }
+	                                                                                                                        	        else
+	                                                                                                                        			    printf2("Error: command not known.\n\tType help at the prompt to get a list of available commands.\n");
+	                                                                                                                        	        }
 	                                                                                                                        	    }
 	                                                                                                                        		}
 	                                                                                                                        	}
@@ -1497,6 +1526,9 @@ void print_commands(int num)
         printf2("\tusertrees\t- Assess user-defined supertrees (from seperate file), to find the best scoring\n");
         printf2("\tconsensus\t- Calculate a consensus tree of all trees containing all taxa\n");
 
+        printf2("\nLandscape analysis:\n");
+        printf2("\trecluster\t- Cluster a landscape TSV file (from hs visitedtrees=) at a given RF threshold\n");
+
         printf2("\nSource tree selection and modification:\n");
         printf2("\tsavetrees\t- Save source trees to file in phylip format (subsets of trees can be chosen based on a number of criteria)\n");
         printf2("\tshowtrees\t- Visualise selected source trees in ASCII format (also can save selected trees to file)\n");
@@ -1643,7 +1675,7 @@ void print_commands(int num)
 #ifdef _OPENMP
             printf2("\n\tnthreads\t<integer number>\t\t*%-3d (OpenMP threads; default=all CPUs)", omp_get_num_procs());
 #endif
-            printf2("\n\tmaxskips\t<integer number>\t\t*auto=2N² (stop replicate after this many consecutive already-visited moves; 0=disabled)");
+            printf2("\n\tmaxskips\t<integer number>\t\t*auto=N³ (stop replicate after this many consecutive already-visited moves; 0=disabled)");
 #ifdef _OPENMP
             if(hs_progress_interval == 0)
                 printf2("\n\tprogress\t<integer seconds | 0>\t\t0 (report every improvement)");
@@ -1656,6 +1688,11 @@ void print_commands(int num)
 #endif
             printf2("\n\tautoprunemono\t(set via exe) prune monophyletic same-species clades from multicopy trees at load time");
             printf2("\n\tvisitedtrees\t<filename>\t\t\t(disabled) Record all visited topologies (TSV: newick, score, visit_count)");
+            printf2("\n\t  Landscape clustering options (require visitedtrees=):");
+            printf2("\n\tclusterlandscape yes | no\t\t\t*no (cluster landscape after search)");
+            printf2("\n\tclusteroutput\t<filename>\t\t\t*treeclusters.tsv");
+            printf2("\n\tclusterthreshold <float 0-1>\t\t\t*0.2 (max normalized RF distance to join cluster)");
+            printf2("\n\tclusterorderby\tscore | visits\t\t\t*score (sort order before greedy sweep)");
             if(criterion == 0)
                 {
                 printf2("\n\tweight\t\tequal | comparisons\t\t");
@@ -2041,6 +2078,29 @@ void print_commands(int num)
         printf2("\t===========================================================\n");
 		
 		printf2("\n\trange\t\t<integer value> - <integer value> \t*all\n\tsize\t\tequalto <integer value>\n\t\t\tlessthan <integer value>\n\t\t\tgreaterthan <integer value>\t\t*none\n\tnamecontians\t<character string>\t\t\t*none\n\tcontainstaxa\t<character string>\t\t\t*none\n\tscore\t\t<min score> - <max score>\t\t*none\n\tfilename\t<output file name>\t\t\t*savedtrees.txt\n");
+		}
+
+	if(num == 32)
+		{
+		printf2("\nrecluster <landscapefile> [options]\n\n");
+		printf2("  Read a landscape TSV file (written by 'hs visitedtrees=<file>')\n");
+		printf2("  and cluster its topologies at a user-defined RF threshold.\n");
+		printf2("  No source trees need to be loaded first.\n");
+		printf2("  CLI usage: clann recluster landscape.tsv [options]\n\n");
+		printf2("\tOptions\t\t\tSettings\t\t\tCurrent\n");
+		printf2("\t===========================================================\n");
+		printf2("\n\tclusterthreshold\t<float 0-1>\t\t\t*0.2");
+		printf2("\n\t  Maximum normalized RF distance for two topologies to join the same cluster.");
+		printf2("\n\tclusteroutput\t\t<filename>\t\t\t*treeclusters.tsv");
+		printf2("\n\t  Output TSV file for cluster results.");
+		printf2("\n\tclusterorderby\t\tscore | visits\t\t\t*score");
+		printf2("\n\t  Sort topologies by score (best first) or visit count (most-visited first).");
+		printf2("\n\tcriterion\t\tdfit | sfit | qfit | mrp | rf | ml\t(auto from file)");
+		printf2("\n\t  Scoring criterion used to generate the landscape. Normally detected");
+		printf2("\n\t  automatically from the landscape file. Override only if the file");
+		printf2("\n\t  predates criterion metadata or was generated by an older version.\n");
+		printf2("\n\tOutput columns: cluster_id, rep_newick, member_count, total_visits,");
+		printf2("\n\t                best_score, rep_score\n");
 		}
 	
 	

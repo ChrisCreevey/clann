@@ -57,6 +57,7 @@ int   number_tree2(struct taxon *position, int num);
 int   shrink_tree(struct taxon *position);
 int   print_pruned_tree(struct taxon *position, int count, char *pruned_tree, int fullname, int treenum);
 int   identify_species_specific_clades(struct taxon *position, int numt, int *taxa_fate, int clannID);
+void  execute_recluster(void);
 
 /* -----------------------------------------------------------------------
  * main.c public function declarations

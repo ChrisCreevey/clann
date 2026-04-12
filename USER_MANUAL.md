@@ -43,6 +43,7 @@ See COPYING.txt for full licence terms.
    - [sprdists](#sprdists)
    - [log](#log)
    - [tips](#tips)
+   - [recluster](#recluster)
    - 5b. [Tree-space landscape analysis](#5b-tree-space-landscape-analysis)
 6. [Worked Examples](#6-worked-examples)
 7. [Output Files Reference](#7-output-files-reference)
@@ -87,6 +88,7 @@ clann --help                                      # general help
 | `usertrees` | Score / test user-supplied topologies |
 | `consensus` | Consensus tree from source trees |
 | `nj` | Neighbour-joining supertree |
+| `recluster` | Cluster a landscape TSV at a given RF threshold (no source trees needed) |
 
 **Global options** (applied before the command):
 
@@ -332,10 +334,14 @@ hs [options]
 | `maxswaps` | `<integer>` | 1,000,000 | Maximum number of branch swaps per replicate. |
 | `savetrees` | `<filename>` | `Heuristic_result.txt` | Output file for the best supertree(s) found. |
 | `nthreads` | `<integer>` | all CPUs | Number of OpenMP threads. Each thread runs an independent search replicate in parallel. Not available for `criterion=recon`. |
-| `maxskips` | `<integer>` | auto (2N²) | Stop a replicate after this many consecutive already-visited SPR moves. Set to `0` to disable. Default auto-scales to 2×(number of taxa)². Prevents long runs that have converged. |
+| `maxskips` | `<integer>` | auto (N³) | Stop a replicate after this many consecutive already-visited SPR moves. Set to `0` to disable. Default auto-scales to (number of taxa)³. Prevents long runs that have converged. |
 | `progress` | `<integer>` | 5 | *(OpenMP only)* How often (in seconds) to print a best-so-far status line when running multiple threads. Set to `0` to print every time a new global best is found. Has no effect when running single-threaded. |
 | `droprep` | `<float>` | 0 (disabled) | *(OpenMP only)* Abandon a replicate early if its current best score is more than this fraction above the current global best across all threads (e.g. `0.1` = 10%). The per-rep completion line will show `droprep` as the stop reason. The freed thread immediately starts the next queued replicate. Set to `0` to disable. Has no effect when running single-threaded. |
-| `visitedtrees` | `<filename>` | *(disabled)* | Record every unique topology visited during the search to a tab-separated file (columns: `newick`, `score`, `visit_count`). Accumulated across all replicates and threads. See [Tree-space landscape analysis](#tree-space-landscape-analysis) for post-processing. |
+| `visitedtrees` | `<filename>` | *(disabled)* | Record every unique topology visited during the search to a tab-separated file (columns: `newick`, `score`, `visit_count`). Accumulated across all replicates and threads. See [Tree-space landscape analysis](#5b-tree-space-landscape-analysis) for post-processing. |
+| `clusterlandscape` | `yes`, `no` | `no` | Cluster the visited-topology landscape immediately after the search finishes. Requires `visitedtrees=` to be set. See [recluster](#recluster) and [Tree-space landscape analysis](#5b-tree-space-landscape-analysis). |
+| `clusterthreshold` | `<float>` | `0.2` | Maximum normalised RF distance for two topologies to be placed in the same cluster. Range 0–1: 0 = exact match only; 1 = all in one cluster. Only used when `clusterlandscape=yes`. |
+| `clusteroutput` | `<filename>` | `treeclusters.tsv` | Output file for the cluster TSV. Only used when `clusterlandscape=yes`. |
+| `clusterorderby` | `score`, `visits` | `score` | Sort order for the greedy sweep: `score` places the best-scoring topology first (it becomes the cluster representative); `visits` places the most-visited topology first. Only used when `clusterlandscape=yes`. |
 | `autoprunemono` | — | — | Set via the `exe` command (`exe myfile.ph autoprunemono=yes`), not `hs` directly. Prunes monophyletic same-species clades from multicopy trees at load time so more source trees contribute to the search. See [Autoprunemono](#autoprunemono). |
 
 **Weight options (criterion-specific):**
@@ -1016,14 +1022,107 @@ Without options, shows a random tip. Specify `number=N` to display a specific ti
 
 ---
 
+### recluster
+
+Read a previously-written landscape TSV file (produced by `hs visitedtrees=<file>`) and cluster its topologies at a given normalised RF distance threshold. No source trees need to be loaded; `recluster` derives the taxon set automatically from the Newick strings in the file.
+
+This is the standalone version of the `clusterlandscape=yes` option on `hs`. Its main purpose is to let you experiment with different thresholds and orderings without re-running the (potentially slow) heuristic search.
+
+```
+recluster <landscapefile> [options]
+```
+
+#### Options
+
+| Option | Values | Default | Description |
+|--------|--------|---------|-------------|
+| `<landscapefile>` | filename | *(required)* | Path to the landscape TSV file written by `hs visitedtrees=<file>`. First positional argument. |
+| `clusterthreshold` | `<float>` | `0.2` | Maximum normalised RF distance for two topologies to be placed in the same cluster. Range 0–1. See [NOTES_treespace_clustering.md](NOTES_treespace_clustering.md) for guidance on choosing a value. |
+| `clusteroutput` | `<filename>` | `treeclusters.tsv` | Output file for the cluster TSV. |
+| `clusterorderby` | `score`, `visits` | `score` | Sort order for the greedy sweep before clustering. `score` places the best-scoring topology first (becomes the cluster representative); `visits` places the most-visited topology first. |
+
+#### Output
+
+The cluster TSV has a header row followed by one row per cluster, sorted by `member_count` descending:
+
+| Column | Description |
+|--------|-------------|
+| `cluster_id` | Sequential integer (1-based); cluster 1 is the largest |
+| `rep_newick` | Newick string of the cluster representative |
+| `member_count` | Number of distinct topologies in this cluster |
+| `total_visits` | Sum of `visit_count` across all members — a proxy for basin size |
+| `best_score` | Score of the best-scoring topology in the cluster (highest for ML criterion 7; lowest for all others) |
+| `worst_score` | Score of the worst-scoring topology in the cluster (opposite direction to `best_score`) |
+| `score_mean` | Arithmetic mean of all member scores within the cluster |
+| `score_sd` | Sample standard deviation of member scores (0 for singleton clusters) |
+| `rep_score` | Score of the representative topology |
+| `member_indices` | Comma-separated list of the `index` values from the landscape TSV for every topology belonging to this cluster. Use these to retrieve the actual Newick strings and scores for all cluster members from the landscape file. |
+
+For a full description of the clustering algorithm, output interpretation, and
+guidance on threshold selection, see
+[NOTES_treespace_clustering.md](NOTES_treespace_clustering.md).
+
+#### Statistical comparison of clusters
+
+The `member_count` (N), `score_mean`, and `score_sd` columns give you
+everything needed for the most common parametric tests to compare two or more
+clusters:
+
+| Test | Columns needed | What it answers |
+|------|---------------|-----------------|
+| **Welch's t-test** | `score_mean`, `score_sd`, `member_count` for two clusters | Are the mean scores of two specific clusters significantly different? |
+| **One-way ANOVA** | `score_mean`, `score_sd`, `member_count` for all clusters | Is there any significant score difference across all clusters? |
+| **Cohen's d** | `score_mean`, `score_sd`, `member_count` for two clusters | Effect size — practical (not just statistical) significance of the difference |
+
+`best_score` and `worst_score` together show the full score range within each
+cluster, which is useful for a quick visual sanity-check before running formal
+tests.
+
+The statistics are computed with **Welford's online algorithm** during the
+single greedy clustering pass — no extra memory or second pass over the data is
+required. `score_sd` is the **sample** standard deviation (denominator N − 1);
+for singleton clusters it is reported as 0.
+
+> **Caveat:** The landscape scores within a cluster are not fully independent
+> samples (nearby topologies are correlated), so p-values from parametric tests
+> should be treated as indicative rather than exact. For large clusters the
+> central limit theorem makes the normal approximation reasonable in practice.
+> If you need non-parametric comparisons (Mann–Whitney U, Kolmogorov–Smirnov),
+> those require the full per-member score distribution, which is not currently
+> written by default.
+
+**CLI usage:**
+```bash
+clann recluster landscape.tsv
+clann recluster landscape.tsv clusterthreshold=0.1 clusteroutput=tight_clusters.tsv
+clann recluster landscape.tsv clusterthreshold=0.3 clusterorderby=visits
+```
+
+**REPL usage:**
+```
+recluster landscape.tsv
+recluster landscape.tsv clusterthreshold=0.1 clusteroutput=tight_clusters.tsv
+recluster landscape.tsv ?                    # print this help
+```
+
+**Examples:**
+```
+recluster landscape.tsv
+recluster landscape.tsv clusterthreshold=0.05
+recluster landscape.tsv clusterorderby=visits clusteroutput=visit_clusters.tsv
+```
+
+---
+
 ## 5b. Tree-space landscape analysis
 
 The `visitedtrees=<filename>` option on `hs` writes a tab-separated file
 recording every unique topology encountered during the search (across all
-replicates and threads), with three columns:
+replicates and threads), with four columns:
 
 | Column | Description |
 |--------|-------------|
+| `index` | Unique 1-based integer assigned to each row in the order it was written; used as a cross-reference in the `member_indices` column of the cluster TSV |
 | `newick` | Named-taxon unrooted Newick string |
 | `score` | Criterion score on first visit (lower = better for dfit/RF; more negative = better for ML) |
 | `visit_count` | Total times this topology was proposed across all replicates and threads |
@@ -1032,10 +1131,37 @@ The intended use is post-hoc exploration of the score landscape in tree space:
 compute pairwise SPR distances between the visited topologies, embed with MDS,
 and visualise to identify local and global optima and understand convergence.
 
-For the full workflow — SPR distance computation, Python visualisation scripts
-(MDS scatter plot, score histogram, neighbour graph, 3D surface), identifying
-local optima, and troubleshooting — see
-[NOTES_treespace_landscape.md](NOTES_treespace_landscape.md).
+### Clustering the landscape
+
+After generating the landscape file you can group the recorded topologies into
+clusters of similar trees using the `clusterlandscape=yes` option on `hs`
+(runs automatically at the end of the search) or the standalone `recluster`
+command (re-runs clustering from the saved TSV at any threshold):
+
+```
+# Inline — cluster immediately after the search
+hs nreps=20 nthreads=8 visitedtrees=landscape.tsv \
+   clusterlandscape=yes clusterthreshold=0.2 clusteroutput=clusters.tsv
+
+# Standalone — try different thresholds without re-running the search
+recluster landscape.tsv clusterthreshold=0.1 clusteroutput=tight_clusters.tsv
+recluster landscape.tsv clusterthreshold=0.5 clusteroutput=loose_clusters.tsv
+```
+
+The algorithm is a greedy single-pass method: topologies are sorted by score
+(or visit count), and each is assigned to the nearest existing cluster whose
+representative is within the threshold distance; otherwise a new cluster is
+opened. Cluster 1 in the output is always the most populated cluster — the
+main attractor of the search. A dominant cluster 1 with far fewer topologies
+in all other clusters indicates good search convergence.
+
+See [NOTES_treespace_clustering.md](NOTES_treespace_clustering.md) for the
+full algorithm description, parameter guidance, output format details, and
+guidance on interpreting the results.
+
+For the full visualisation workflow — SPR distance computation, Python scripts
+(MDS scatter plot, score histogram, neighbour graph, 3D surface), and
+troubleshooting — see [NOTES_treespace_landscape.md](NOTES_treespace_landscape.md).
 
 ---
 
@@ -1100,12 +1226,23 @@ Run:
 clann -n -c commands.txt trees.ph
 ```
 
-### Example 7: Tree-space landscape recording
+### Example 7: Tree-space landscape recording and clustering
 
 ```
 exe my_gene_trees.ph
 set criterion=dfit
-hs nreps=20 nthreads=8 visitedtrees=landscape.tsv
+hs nreps=20 nthreads=8 visitedtrees=landscape.tsv \
+   clusterlandscape=yes clusterthreshold=0.2 clusteroutput=clusters.tsv
+```
+
+Cluster at a tighter threshold without re-running the search (CLI):
+```bash
+clann recluster landscape.tsv clusterthreshold=0.1 clusteroutput=tight_clusters.tsv
+```
+
+Or in the REPL, after or without loading source trees:
+```
+recluster landscape.tsv clusterthreshold=0.05
 ```
 
 Post-process with Python (see [Tree-space landscape analysis](#5b-tree-space-landscape-analysis)):
@@ -1137,6 +1274,7 @@ hs nreps=10
 | `Usertrees_result.txt` | `usertrees` | Scores for each user-provided topology |
 | `mltest_results.txt` | `usertrees tests=yes` | Per-gene-tree δ table for ML topology tests (criterion=ml only) |
 | `<filename>` | `hs visitedtrees=<filename>` | Tab-separated landscape file: all unique topologies visited during the search with their scores and visit counts (see [Tree-space landscape analysis](#5b-tree-space-landscape-analysis)) |
+| `treeclusters.tsv` (or custom name) | `hs clusterlandscape=yes`, `recluster` | Tab-separated cluster file: one row per cluster, columns `cluster_id`, `rep_newick`, `member_count`, `total_visits`, `best_score`, `rep_score`. Sorted by `member_count` descending. See [recluster](#recluster) and [NOTES_treespace_clustering.md](NOTES_treespace_clustering.md). |
 | `robinson_foulds.txt` | `rfdists` | Pairwise RF distances between source trees |
 | `SPRdistances.txt` | `sprdists` | SPR distance analysis results |
 | `prunedtrees.txt` | `prunemonophylies` | Pruned source trees |

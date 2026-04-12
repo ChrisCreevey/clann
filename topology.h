@@ -51,8 +51,10 @@ void        vs_merge(VisitedSet *dst, VisitedSet *src);
 LandscapeMap *lm_create(size_t cap);
 void          lm_free(LandscapeMap *lm);
 void          lm_record(LandscapeMap *lm, uint64_t hash, float score, const char *newick);
+void          lm_update_score(LandscapeMap *lm, uint64_t hash, float new_score);
 void          lm_merge(LandscapeMap *dst, LandscapeMap *src);
-void          lm_write(LandscapeMap *lm, const char *filename);
+void          lm_write(LandscapeMap *lm, const char *filename, int crit);
+LandscapeMap *lm_read(const char *filename, int *criterion_out);
 
 /* -----------------------------------------------------------------------
  * Topology hash

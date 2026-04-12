@@ -32,6 +32,7 @@
 #include "prune.h"
 #include "main.h"
 #include "spr_tree.h"
+#include "treecluster.h"
 
 BipartSet *fund_bipart_sets = NULL;  /* [Total_fund_trees], precomputed once per analysis */
 
@@ -261,6 +262,11 @@ LandscapeMap *landscape_map = NULL; /* threadprivate: per-thread visited-topolog
 /* Shared landscape globals (not threadprivate) */
 static char         g_landscape_file[4096] = ""; /* filename; empty = feature disabled */
 static LandscapeMap *g_landscape_map = NULL;      /* global accumulator across all threads */
+/* Landscape clustering options (set by hs option parsing) */
+static int   g_cluster_enabled   = 0;                   /* 0=off, 1=on (requires visitedtrees=) */
+static char  g_cluster_output[4096] = "treeclusters.tsv"; /* output TSV filename */
+static float g_cluster_threshold = 0.2f;                /* max normalized RF distance [0,1] */
+static int   g_cluster_orderby   = 0;                   /* 0=score ascending, 1=visits descending */
 time_t  rep_start_time    = 0;    /* threadprivate: wall-clock time when current do_search() began */
 int     hs_do_print       = 0;    /* threadprivate: mirrors the 'print' param of do_search() */
 float   last_status_score = -1.0f;/* threadprivate: sprscore at last periodic status line (for improvement marker) */
@@ -270,8 +276,8 @@ float  par_last_print_score= -1.0f; /* par_progress_best at last status line (th
 time_t par_search_start    = 0;     /* wall-clock time when the parallel region began */
 int    skip_streak         = 0;     /* threadprivate: consecutive already-visited skips since last new topology */
 int    nni_swaps           = 0;     /* threadprivate: NNI refinement swaps performed after SPR/TBR in last do_search() rep */
-int    hs_maxskips         = -1;    /* shared: stop replicate when skip_streak reaches this (0=disabled, -1=auto: N*N) */
-int    hs_maxskips_is_auto = 1;    /* 1=auto-scale to N*N at search start; 0=user has set an explicit value */
+int    hs_maxskips         = -1;    /* shared: stop replicate when skip_streak reaches this (0=disabled, -1=auto: N³) */
+int    hs_maxskips_is_auto = 1;    /* 1=auto-scale to N³ at search start; 0=user has set an explicit value */
 int    hs_strategy         = 0;    /* 0=first-improvement (depth-first); 1=best-improvement (breadth-first) */
 int    hs_progress_interval= 5;    /* shared: parallel progress print interval in seconds (0=every improvement) */
 time_t par_last_progress_time = 0; /* shared: wall-clock time of last parallel progress line printed */
@@ -3590,6 +3596,10 @@ void heuristic_search(int user, int print, int sample, int nreps)
     /* Reset landscape recording state for this hs call */
     g_landscape_file[0] = '\0';
     if(g_landscape_map) { lm_free(g_landscape_map); g_landscape_map = NULL; }
+    g_cluster_enabled   = 0;
+    strcpy(g_cluster_output, "treeclusters.tsv");
+    g_cluster_threshold = 0.2f;
+    g_cluster_orderby   = 0;
 
     best_tree = malloc(TREE_LENGTH*sizeof(char));
     if(!best_tree) memory_error(75);
@@ -4055,6 +4065,35 @@ void heuristic_search(int user, int print, int sample, int nreps)
 			strncpy(g_landscape_file, parsed_command[i+1], sizeof(g_landscape_file) - 1);
 			g_landscape_file[sizeof(g_landscape_file) - 1] = '\0';
 			}
+		if(strcmp(parsed_command[i], "clusterlandscape") == 0)
+			{
+			if(strcmp(parsed_command[i+1], "yes") == 0)
+				g_cluster_enabled = 1;
+			else if(strcmp(parsed_command[i+1], "no") == 0)
+				g_cluster_enabled = 0;
+			else
+				{ printf2("Error: clusterlandscape must be yes or no\n"); error = TRUE; }
+			}
+		if(strcmp(parsed_command[i], "clusteroutput") == 0)
+			{
+			strncpy(g_cluster_output, parsed_command[i+1], sizeof(g_cluster_output) - 1);
+			g_cluster_output[sizeof(g_cluster_output) - 1] = '\0';
+			}
+		if(strcmp(parsed_command[i], "clusterthreshold") == 0)
+			{
+			g_cluster_threshold = tofloat(parsed_command[i+1]);
+			if(g_cluster_threshold < 0.0f || g_cluster_threshold > 1.0f)
+				{ printf2("Error: clusterthreshold must be between 0.0 and 1.0 (normalized RF distance)\n"); error = TRUE; }
+			}
+		if(strcmp(parsed_command[i], "clusterorderby") == 0)
+			{
+			if(strcmp(parsed_command[i+1], "score") == 0)
+				g_cluster_orderby = 0;
+			else if(strcmp(parsed_command[i+1], "visits") == 0)
+				g_cluster_orderby = 1;
+			else
+				{ printf2("Error: clusterorderby must be score or visits\n"); error = TRUE; }
+			}
 
 
         }
@@ -4087,11 +4126,11 @@ void heuristic_search(int user, int print, int sample, int nreps)
 		if(sample > sup) sample=sup;
 		if(nreps > sup) nreps=sup;
 
-        /* Auto-scale maxskips to 2*N² when no explicit value was given.
+        /* Auto-scale maxskips to N³ when no explicit value was given.
          * This makes the stopping criterion proportional to tree size:
-         * N=10 → 200, N=20 → 800, N=30 → 1800, N=50 → 5000. */
+         * N=10 → 1000, N=20 → 8000, N=30 → 27000, N=50 → 125000. */
         if(hs_maxskips_is_auto)
-            hs_maxskips = 2 * number_of_taxa * number_of_taxa;
+            hs_maxskips = number_of_taxa * number_of_taxa * number_of_taxa;
 
         /* Initialise global landscape map if visitedtrees= was specified */
         if(g_landscape_file[0])
@@ -4147,7 +4186,7 @@ void heuristic_search(int user, int print, int sample, int nreps)
                 if(hs_maxskips > 0)
                     {
                     if(hs_maxskips_is_auto)
-                        printf2("\tMax consecutive visited skips (maxskips) = %d (auto: 2×N²=2×%d²)\n", hs_maxskips, number_of_taxa);
+                        printf2("\tMax consecutive visited skips (maxskips) = %d (auto: N³=%d³)\n", hs_maxskips, number_of_taxa);
                     else
                         printf2("\tMax consecutive visited skips (maxskips) = %d\n", hs_maxskips);
                     }
@@ -5231,7 +5270,9 @@ void heuristic_search(int user, int print, int sample, int nreps)
                 /* presenceof_SPRtaxa[] is never set to TRUE/FALSE, so compare_trees(TRUE)
                  * always uses cached scores; scores_retained_supers[] may therefore reflect
                  * a stale score from a different tree's context. Re-evaluate each retained
-                 * tree fresh (spr=FALSE) to get the correct score before displaying. */
+                 * tree fresh (spr=FALSE) to get the correct score before displaying.
+                 * The landscape map entries for these trees are also updated so the visitedtrees
+                 * file reports the same score as the HS output. */
                 for(i = 0; i < number_retained_supers && scores_retained_supers[i] != -1; i++)
                     {
                     if(criterion == 0 || criterion == 2 || criterion == 3 || criterion == 6 || criterion == 7)
@@ -5247,6 +5288,14 @@ void heuristic_search(int user, int print, int sample, int nreps)
                         else if(criterion == 3)  scores_retained_supers[i] = compare_trees_qfit(FALSE);
                         else if(criterion == 6)  scores_retained_supers[i] = compare_trees_rf(FALSE);
                         else                     scores_retained_supers[i] = compare_trees_ml(FALSE);
+                        /* Update the landscape entry so the visitedtrees file score matches the
+                         * final reported score rather than the stale-cache value from during search. */
+                        if(g_landscape_file[0] && g_landscape_map && tree_top != NULL)
+                            {
+                            uint64_t rs_hash = tree_topo_hash(tree_top);
+                            lm_update_score(g_landscape_map, rs_hash,
+                                            ml_display_score(scores_retained_supers[i]));
+                            }
                         }
                     }
 
@@ -5287,12 +5336,17 @@ void heuristic_search(int user, int print, int sample, int nreps)
                 /**** Write visited-topology landscape file if requested ******/
                 if(g_landscape_file[0] && g_landscape_map)
                     {
-                    lm_write(g_landscape_map, g_landscape_file);
+                    lm_write(g_landscape_map, g_landscape_file, criterion);
                     printf2("Visited topology landscape written to: %s\n", g_landscape_file);
                     printf2("  Unique topologies recorded: %zu\n", g_landscape_map->count);
+                    if(g_cluster_enabled)
+                        lm_cluster(g_landscape_map, g_cluster_output,
+                                   g_cluster_threshold, g_cluster_orderby);
                     lm_free(g_landscape_map);
                     g_landscape_map = NULL;
                     }
+                else if(g_cluster_enabled)
+                    printf2("Warning: clusterlandscape=yes ignored (visitedtrees= not set)\n");
 
                 /**** Print out the best trees found *******/
 
@@ -5554,7 +5608,8 @@ int branchswap(int number_of_swaps, float score, int numspectries, int numgenetr
         int  i=0, j=0, last = 0;
 
 
-        while(i < number_of_swaps && !user_break)
+        while(i < number_of_swaps && !user_break
+              && (hs_maxskips == 0 || skip_streak < hs_maxskips))
             {
             last_number = number;
             i+= find_swaps(&number, tree_top, number_of_swaps, numspectries, numgenetries);
@@ -5626,7 +5681,8 @@ int find_swaps(float * number, struct taxon * position, int number_of_swaps, int
         
         position = start1;
 	/* Search for pointer siblings and if found, call the function recursively for that pointer sibling */
-	while(count < i && swaps < number_of_swaps && !better_score && !user_break )
+	while(count < i && swaps < number_of_swaps && !better_score && !user_break
+	         && (hs_maxskips == 0 || skip_streak < hs_maxskips))
 		{
                 /* choose the pointer sibling to travel down */
                 j =(int)fmod(rand_r(&thread_seed), i);  /* the jth pointer sibling is the chosen one */
@@ -5802,6 +5858,7 @@ int swapper(struct taxon * position,struct taxon * prev_pos, int stepstaken, str
   	float  distance = *number;
 	int better_score = FALSE, i=0, j=0, different = TRUE;
 	struct taxon *start2 = NULL, *start1 = NULL;
+        uint64_t topo_h_nni = 0;
         char *best_tree = NULL, *temptree = NULL;
         
         temptree = malloc(TREE_LENGTH*sizeof(char));
@@ -5845,9 +5902,11 @@ int swapper(struct taxon * position,struct taxon * prev_pos, int stepstaken, str
 	
                 /* now first_swap is at the first sibling at this level, and second_swap is at the first sibling at the other level */
                 /* The next step is to swap every sibling at this level with every sibling at the level above */
-		while(first_swap != NULL && *swaps < number_of_swaps && !better_score && !user_break && !rep_abandon)
+		while(first_swap != NULL && *swaps < number_of_swaps && !better_score && !user_break && !rep_abandon
+		          && (hs_maxskips == 0 || skip_streak < hs_maxskips))
 			{
-			while(second_swap != NULL && *swaps < number_of_swaps && !better_score && !user_break && !rep_abandon)
+			while(second_swap != NULL && *swaps < number_of_swaps && !better_score && !user_break && !rep_abandon
+			          && (hs_maxskips == 0 || skip_streak < hs_maxskips))
 				{
 				if(second_swap->daughter != prev_pos && !is_ancestor_of(second_swap, first_swap) && !is_ancestor_of(first_swap, second_swap))   /* Do not swap if either node is an ancestor of the other (would create a cycle) */
 					{
@@ -5855,12 +5914,26 @@ int swapper(struct taxon * position,struct taxon * prev_pos, int stepstaken, str
 
                                         if(check_taxa(tree_top) == number_of_taxa)
                                             {
+                                            topo_h_nni = tree_topo_hash(tree_top);
+                                            if(visited_set != NULL && vs_contains(visited_set, topo_h_nni))
+                                                {
+                                                /* Already-visited NNI topology: count skip, record landscape, revert swap. */
+                                                skip_streak++;
+                                                if(g_landscape_file[0])
+                                                    lm_record(landscape_map ? landscape_map : g_landscape_map,
+                                                              topo_h_nni, 0.0f, NULL);
+                                                do_swap(first_swap, second_swap);
+                                                }
+                                            else
+                                                {
+                                                if(visited_set != NULL) { vs_insert(visited_set, topo_h_nni); skip_streak = 0; }
 											(*swaps)++;
                                            /* *swaps = *swaps + 1; */ /* count the number of swaps done */
 											NUMSWAPS++;
                                             strcpy(best_tree, "");
                                             print_named_tree(tree_top, best_tree);
                                             strcat(best_tree, ";");
+                                            while(unroottree(best_tree));
                                             /*  printf2("!:assigned tree: %s\n", best_tree);  */
                                             
                                             
@@ -5887,6 +5960,12 @@ int swapper(struct taxon * position,struct taxon * prev_pos, int stepstaken, str
 												distance = compare_trees_ml(FALSE);
 												}
 
+                                            /* Landscape recording: NNI-scored topology */
+                                            if(g_landscape_file[0])
+                                                {
+                                                lm_record(landscape_map ? landscape_map : g_landscape_map,
+                                                          topo_h_nni, ml_display_score(distance), best_tree);
+                                                }
 
                                             if(scores_retained_supers[0] == -1 || *number == -1)
                                                 {
@@ -5995,6 +6074,7 @@ int swapper(struct taxon * position,struct taxon * prev_pos, int stepstaken, str
                                                     if(!better_score) do_swap(first_swap, second_swap);
                                                     }
                                                 }
+                                                }  /* end else (new topology) */
                                             }
                                         else
                                             {
@@ -11398,6 +11478,243 @@ void tips(int num)
 
 /* This function controls the redirection of output from CLann to a log file (off by default), allow the use of the overwritten "printf" function (below) */
 
+
+/* -----------------------------------------------------------------------
+ * execute_recluster
+ *
+ * Standalone command: read a landscape TSV previously written by
+ * 'hs visitedtrees=<file>' and cluster its topologies at a user-supplied
+ * RF threshold.  No gene trees need to be loaded.
+ *
+ * Syntax (REPL):
+ *   recluster <landscapefile> [clusterthreshold=<f>] [clusteroutput=<file>]
+ *              [clusterorderby=score|visits] [criterion=ml|dfit|sfit|...]
+ *
+ * CLI:
+ *   clann recluster landscape.tsv clusterthreshold=0.1 clusteroutput=out.tsv
+ * ----------------------------------------------------------------------- */
+void execute_recluster(void)
+    {
+    int   i, error = FALSE;
+    char  landscape_file[4096] = "";
+    char  cluster_output[4096] = "treeclusters.tsv";
+    float cluster_threshold    = 0.2f;
+    int   cluster_orderby      = 0;
+    int   user_criterion       = -1;   /* -1 = not set by user on this command */
+    int   file_criterion       = -1;   /* -1 = not present in landscape file   */
+    int   save_criterion       = criterion; /* restore after recluster completes */
+    LandscapeMap *lm;
+
+    /* parsed_command[0] == "recluster"
+     * parsed_command[1] is the landscape file (positional) unless it looks
+     * like an option key.  Option keys never contain '/' or '.' as first
+     * char, but filenames can — so we treat parsed_command[1] as the file
+     * if it contains no '=' AND is non-empty.                              */
+
+    if(num_commands >= 2 && parsed_command[1][0] != '\0' &&
+       strchr(parsed_command[1], '=') == NULL &&
+       strcmp(parsed_command[1], "clusterthreshold") != 0 &&
+       strcmp(parsed_command[1], "clusteroutput")    != 0 &&
+       strcmp(parsed_command[1], "clusterorderby")   != 0 &&
+       strcmp(parsed_command[1], "criterion")        != 0)
+        {
+        strncpy(landscape_file, parsed_command[1], sizeof(landscape_file) - 1);
+        landscape_file[sizeof(landscape_file) - 1] = '\0';
+        }
+
+    /* Parse key=value options from parsed_command[1..] */
+    for(i = 1; i < num_commands; i++)
+        {
+        if(strcmp(parsed_command[i], "clusterthreshold") == 0)
+            {
+            cluster_threshold = tofloat(parsed_command[i+1]);
+            if(cluster_threshold < 0.0f || cluster_threshold > 1.0f)
+                { printf2("Error: clusterthreshold must be between 0.0 and 1.0\n"); error = TRUE; }
+            }
+        else if(strcmp(parsed_command[i], "clusteroutput") == 0)
+            {
+            strncpy(cluster_output, parsed_command[i+1], sizeof(cluster_output) - 1);
+            cluster_output[sizeof(cluster_output) - 1] = '\0';
+            }
+        else if(strcmp(parsed_command[i], "clusterorderby") == 0)
+            {
+            if(strcmp(parsed_command[i+1], "score") == 0)
+                cluster_orderby = 0;
+            else if(strcmp(parsed_command[i+1], "visits") == 0)
+                cluster_orderby = 1;
+            else
+                { printf2("Error: clusterorderby must be score or visits\n"); error = TRUE; }
+            }
+        else if(strcmp(parsed_command[i], "criterion") == 0)
+            {
+            const char *cv = parsed_command[i+1];
+            if     (strcmp(cv, "dfit")  == 0) user_criterion = 0;
+            else if(strcmp(cv, "mrp")   == 0) user_criterion = 1;
+            else if(strcmp(cv, "sfit")  == 0) user_criterion = 2;
+            else if(strcmp(cv, "qfit")  == 0) user_criterion = 3;
+            else if(strcmp(cv, "avcon") == 0) user_criterion = 4;
+            else if(strcmp(cv, "recon") == 0) user_criterion = 5;
+            else if(strcmp(cv, "rf")    == 0) user_criterion = 6;
+            else if(strcmp(cv, "ml")    == 0) user_criterion = 7;
+            else
+                { printf2("Error: unknown criterion '%s'\n", cv); error = TRUE; }
+            }
+        }
+
+    if(error) return;
+
+    if(landscape_file[0] == '\0')
+        {
+        printf2("Error: recluster requires a landscape file as its first argument.\n");
+        printf2("  Usage: recluster <landscapefile> [clusterthreshold=<f>]\n");
+        printf2("                   [clusteroutput=<file>] [clusterorderby=score|visits]\n");
+        return;
+        }
+
+    printf2("Reading landscape file: %s\n", landscape_file);
+    lm = lm_read(landscape_file, &file_criterion);
+    if(!lm)
+        { printf2("Error: failed to read landscape file '%s'\n", landscape_file); return; }
+
+    printf2("  Unique topologies loaded: %zu\n", lm->count);
+
+    /* Determine which criterion to use for clustering.
+     * Priority: 1) explicit criterion= on this command, 2) criterion stored
+     * in the landscape file, 3) current global criterion (fallback).        */
+    if(user_criterion != -1)
+        {
+        criterion = user_criterion;
+        printf2("  Clustering criterion: %s (set by user)\n",
+                criterion == 7 ? "ml" : criterion == 6 ? "rf"    :
+                criterion == 3 ? "qfit" : criterion == 2 ? "sfit" :
+                criterion == 1 ? "mrp"  : criterion == 5 ? "recon": "dfit");
+        }
+    else if(file_criterion != -1)
+        {
+        criterion = file_criterion;
+        printf2("  Clustering criterion: %s (from landscape file)\n",
+                criterion == 7 ? "ml" : criterion == 6 ? "rf"    :
+                criterion == 3 ? "qfit" : criterion == 2 ? "sfit" :
+                criterion == 1 ? "mrp"  : criterion == 5 ? "recon": "dfit");
+        }
+    else
+        {
+        printf2("  Warning: landscape file has no criterion metadata; "
+                "using current criterion (%s).\n"
+                "  Use 'criterion=ml' (or the appropriate criterion) if scores look wrong.\n",
+                criterion == 7 ? "ml" : criterion == 6 ? "rf"    :
+                criterion == 3 ? "qfit" : criterion == 2 ? "sfit" :
+                criterion == 1 ? "mrp"  : criterion == 5 ? "recon": "dfit");
+        }
+
+    /* ---- Setup taxa if no gene trees are loaded ----
+     * lm_cluster uses the global taxa_names[] / taxon_hash_vals[] to parse
+     * Newick bipartitions.  If no gene trees have been loaded yet, derive
+     * the taxon list from the Newick strings in the landscape map so that
+     * RF distances can be computed correctly.
+     */
+    {
+    int   save_ntaxa   = number_of_taxa;
+    char **save_names  = taxa_names;
+    uint64_t *save_hv  = taxon_hash_vals;
+    int   rc_ntaxa     = 0;
+    char **rc_taxa     = NULL;
+    uint64_t *rc_hv    = NULL;
+
+    if(number_of_taxa == 0)
+        {
+        /* Collect unique leaf names from all Newick strings in the map */
+        size_t  j;
+        int     cap = 256;
+        rc_taxa = malloc((size_t)cap * sizeof(char *));
+        if(rc_taxa)
+            {
+            for(j = 0; j < lm->capacity; j++)
+                {
+                const char *nwk = lm->slots[j].newick;
+                int k;
+                if(lm->slots[j].hash == 0 || !nwk) continue;
+                /* Walk the Newick string, collecting leaf tokens */
+                k = 0;
+                while(nwk[k] && nwk[k] != ';')
+                    {
+                    if(nwk[k] == '(' || nwk[k] == ')' || nwk[k] == ',')
+                        { k++; continue; }
+                    if(nwk[k] == ':')
+                        { while(nwk[k] && nwk[k] != ',' && nwk[k] != ')' && nwk[k] != ';') k++; continue; }
+                    /* Read a name token */
+                    {
+                    char name[NAME_LENGTH + 1];
+                    int  nlen = 0, found, t;
+                    while(nwk[k] && nwk[k] != '(' && nwk[k] != ')' &&
+                          nwk[k] != ',' && nwk[k] != ':' && nwk[k] != ';')
+                        { if(nlen < NAME_LENGTH) name[nlen++] = nwk[k]; k++; }
+                    name[nlen] = '\0';
+                    if(nlen == 0) continue;
+                    /* Skip if this is an internal-node label (after a ')') */
+                    /* Already checked: we only get here from a non-'(' non-')' char */
+                    found = 0;
+                    for(t = 0; t < rc_ntaxa; t++)
+                        if(rc_taxa[t] && strcmp(rc_taxa[t], name) == 0) { found = 1; break; }
+                    if(!found)
+                        {
+                        if(rc_ntaxa == cap)
+                            {
+                            int newcap = cap * 2;
+                            char **tmp = realloc(rc_taxa, (size_t)newcap * sizeof(char *));
+                            if(!tmp) break;
+                            rc_taxa = tmp; cap = newcap;
+                            }
+                        rc_taxa[rc_ntaxa++] = strdup(name);
+                        }
+                    }
+                    }
+                }
+
+            if(rc_ntaxa > 0)
+                {
+                /* Assign splitmix64 weights (same formula as execute_command) */
+                int t;
+                rc_hv = malloc((size_t)rc_ntaxa * sizeof(uint64_t));
+                if(rc_hv)
+                    {
+                    for(t = 0; t < rc_ntaxa; t++)
+                        {
+                        uint64_t x = (uint64_t)(t + 1);
+                        x += 0x9e3779b97f4a7c15ULL;
+                        x  = (x ^ (x >> 30)) * 0xbf58476d1ce4e5b9ULL;
+                        x  = (x ^ (x >> 27)) * 0x94d049bb133111ebULL;
+                        rc_hv[t] = x ^ (x >> 31);
+                        }
+                    number_of_taxa  = rc_ntaxa;
+                    taxa_names      = rc_taxa;
+                    taxon_hash_vals = rc_hv;
+                    printf2("  Derived %d taxa from landscape Newick strings\n", rc_ntaxa);
+                    }
+                }
+            }
+        }
+
+    lm_cluster(lm, cluster_output, cluster_threshold, cluster_orderby);
+
+    /* Restore global taxa state if we replaced it */
+    if(save_ntaxa == 0 && rc_ntaxa > 0)
+        {
+        int t;
+        number_of_taxa  = save_ntaxa;
+        taxa_names      = save_names;
+        taxon_hash_vals = save_hv;
+        free(rc_hv);
+        for(t = 0; t < rc_ntaxa; t++) free(rc_taxa[t]);
+        free(rc_taxa);
+        }
+    }
+
+    lm_free(lm);
+
+    /* Restore the global criterion that was active before recluster */
+    criterion = save_criterion;
+    }
 
 
 /* printf2: moved to utils.c */
