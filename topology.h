@@ -54,6 +54,7 @@ void          lm_record(LandscapeMap *lm, uint64_t hash, float score, const char
 void          lm_update_score(LandscapeMap *lm, uint64_t hash, float new_score);
 void          lm_merge(LandscapeMap *dst, LandscapeMap *src);
 void          lm_write(LandscapeMap *lm, const char *filename);
+LandscapeMap *lm_read(const char *filename);
 
 /* -----------------------------------------------------------------------
  * Topology hash

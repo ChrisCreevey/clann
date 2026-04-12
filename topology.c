@@ -243,6 +243,85 @@ void lm_merge(LandscapeMap *dst, LandscapeMap *src)
         }
     }
 
+/*  lm_read: read a landscape TSV written by lm_write() back into a new
+ *  LandscapeMap.  Expected header line: newick<TAB>score<TAB>visit_count.
+ *  Non-header lines that begin with '#' are silently skipped.
+ *  Returns a freshly-allocated map on success, or NULL on error.
+ */
+LandscapeMap *lm_read(const char *filename)
+    {
+    FILE *fp;
+    char *line = NULL;
+    size_t line_alloc = 0;
+    ssize_t nread;
+    int lineno = 0;
+    LandscapeMap *lm;
+
+    if(!filename || !filename[0]) return NULL;
+    fp = fopen(filename, "r");
+    if(!fp)
+        { printf2("Error: could not open landscape file '%s' for reading\n", filename); return NULL; }
+
+    lm = lm_create(8192);
+    if(!lm) { fclose(fp); return NULL; }
+
+    while((nread = getline(&line, &line_alloc, fp)) != -1)
+        {
+        char *p, *tab1, *tab2;
+        float score;
+        int visit_count;
+        /* Strip trailing newline / carriage return */
+        while(nread > 0 && (line[nread-1] == '\n' || line[nread-1] == '\r'))
+            { line[--nread] = '\0'; }
+
+        lineno++;
+        if(lineno == 1) continue;  /* skip header */
+        if(line[0] == '#' || line[0] == '\0') continue;
+
+        /* Format: newick<TAB>score<TAB>visit_count */
+        tab1 = strchr(line, '\t');
+        if(!tab1) continue;
+        *tab1 = '\0';
+        p = tab1 + 1;
+
+        tab2 = strchr(p, '\t');
+        if(!tab2) continue;
+        *tab2 = '\0';
+
+        score       = (float)atof(p);
+        visit_count = atoi(tab2 + 1);
+
+        /* Intern the newick, compute a simple hash from the string content,
+         * then insert.  We use a djb2-style hash so that lm_read entries
+         * are self-consistent (visit_count is preserved via direct slot write
+         * after lm_record sets it to 1). */
+        {
+        uint64_t h = 5381;
+        const char *s = line;
+        while(*s) { h = h * 33 ^ (unsigned char)*s++; }
+        if(h == 0) h = 1;
+
+        lm_record(lm, h, score, line);
+
+        /* lm_record initialises visit_count to 1; overwrite with stored value */
+        {
+        size_t idx = (size_t)(h & (lm->capacity - 1));
+        while(lm->slots[idx].hash != 0)
+            {
+            if(lm->slots[idx].hash == h)
+                { lm->slots[idx].visit_count = visit_count; break; }
+            idx = (idx + 1) & (lm->capacity - 1);
+            }
+        }
+        }
+        }
+
+    free(line);
+    fclose(fp);
+    return lm;
+    }
+
+
 /*  lm_write: write TSV to filename.  Columns: newick, score, visit_count.  */
 void lm_write(LandscapeMap *lm, const char *filename)
     {

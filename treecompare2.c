@@ -11479,5 +11479,192 @@ void tips(int num)
 /* This function controls the redirection of output from CLann to a log file (off by default), allow the use of the overwritten "printf" function (below) */
 
 
+/* -----------------------------------------------------------------------
+ * execute_recluster
+ *
+ * Standalone command: read a landscape TSV previously written by
+ * 'hs visitedtrees=<file>' and cluster its topologies at a user-supplied
+ * RF threshold.  No gene trees need to be loaded.
+ *
+ * Syntax (REPL):
+ *   recluster <landscapefile> [clusterthreshold=<f>] [clusteroutput=<file>]
+ *              [clusterorderby=score|visits]
+ *
+ * CLI:
+ *   clann recluster landscape.tsv clusterthreshold=0.1 clusteroutput=out.tsv
+ * ----------------------------------------------------------------------- */
+void execute_recluster(void)
+    {
+    int   i, error = FALSE;
+    char  landscape_file[4096] = "";
+    char  cluster_output[4096] = "treeclusters.tsv";
+    float cluster_threshold    = 0.2f;
+    int   cluster_orderby      = 0;
+    LandscapeMap *lm;
+
+    /* parsed_command[0] == "recluster"
+     * parsed_command[1] is the landscape file (positional) unless it looks
+     * like an option key.  Option keys never contain '/' or '.' as first
+     * char, but filenames can — so we treat parsed_command[1] as the file
+     * if it contains no '=' AND is non-empty.                              */
+
+    if(num_commands >= 2 && parsed_command[1][0] != '\0' &&
+       strchr(parsed_command[1], '=') == NULL &&
+       strcmp(parsed_command[1], "clusterthreshold") != 0 &&
+       strcmp(parsed_command[1], "clusteroutput")    != 0 &&
+       strcmp(parsed_command[1], "clusterorderby")   != 0)
+        {
+        strncpy(landscape_file, parsed_command[1], sizeof(landscape_file) - 1);
+        landscape_file[sizeof(landscape_file) - 1] = '\0';
+        }
+
+    /* Parse key=value options from parsed_command[1..] */
+    for(i = 1; i < num_commands; i++)
+        {
+        if(strcmp(parsed_command[i], "clusterthreshold") == 0)
+            {
+            cluster_threshold = tofloat(parsed_command[i+1]);
+            if(cluster_threshold < 0.0f || cluster_threshold > 1.0f)
+                { printf2("Error: clusterthreshold must be between 0.0 and 1.0\n"); error = TRUE; }
+            }
+        else if(strcmp(parsed_command[i], "clusteroutput") == 0)
+            {
+            strncpy(cluster_output, parsed_command[i+1], sizeof(cluster_output) - 1);
+            cluster_output[sizeof(cluster_output) - 1] = '\0';
+            }
+        else if(strcmp(parsed_command[i], "clusterorderby") == 0)
+            {
+            if(strcmp(parsed_command[i+1], "score") == 0)
+                cluster_orderby = 0;
+            else if(strcmp(parsed_command[i+1], "visits") == 0)
+                cluster_orderby = 1;
+            else
+                { printf2("Error: clusterorderby must be score or visits\n"); error = TRUE; }
+            }
+        }
+
+    if(error) return;
+
+    if(landscape_file[0] == '\0')
+        {
+        printf2("Error: recluster requires a landscape file as its first argument.\n");
+        printf2("  Usage: recluster <landscapefile> [clusterthreshold=<f>]\n");
+        printf2("                   [clusteroutput=<file>] [clusterorderby=score|visits]\n");
+        return;
+        }
+
+    printf2("Reading landscape file: %s\n", landscape_file);
+    lm = lm_read(landscape_file);
+    if(!lm)
+        { printf2("Error: failed to read landscape file '%s'\n", landscape_file); return; }
+
+    printf2("  Unique topologies loaded: %zu\n", lm->count);
+
+    /* ---- Setup taxa if no gene trees are loaded ----
+     * lm_cluster uses the global taxa_names[] / taxon_hash_vals[] to parse
+     * Newick bipartitions.  If no gene trees have been loaded yet, derive
+     * the taxon list from the Newick strings in the landscape map so that
+     * RF distances can be computed correctly.
+     */
+    {
+    int   save_ntaxa   = number_of_taxa;
+    char **save_names  = taxa_names;
+    uint64_t *save_hv  = taxon_hash_vals;
+    int   rc_ntaxa     = 0;
+    char **rc_taxa     = NULL;
+    uint64_t *rc_hv    = NULL;
+
+    if(number_of_taxa == 0)
+        {
+        /* Collect unique leaf names from all Newick strings in the map */
+        size_t  j;
+        int     cap = 256;
+        rc_taxa = malloc((size_t)cap * sizeof(char *));
+        if(rc_taxa)
+            {
+            for(j = 0; j < lm->capacity; j++)
+                {
+                const char *nwk = lm->slots[j].newick;
+                int k;
+                if(lm->slots[j].hash == 0 || !nwk) continue;
+                /* Walk the Newick string, collecting leaf tokens */
+                k = 0;
+                while(nwk[k] && nwk[k] != ';')
+                    {
+                    if(nwk[k] == '(' || nwk[k] == ')' || nwk[k] == ',')
+                        { k++; continue; }
+                    if(nwk[k] == ':')
+                        { while(nwk[k] && nwk[k] != ',' && nwk[k] != ')' && nwk[k] != ';') k++; continue; }
+                    /* Read a name token */
+                    {
+                    char name[NAME_LENGTH + 1];
+                    int  nlen = 0, found, t;
+                    while(nwk[k] && nwk[k] != '(' && nwk[k] != ')' &&
+                          nwk[k] != ',' && nwk[k] != ':' && nwk[k] != ';')
+                        { if(nlen < NAME_LENGTH) name[nlen++] = nwk[k]; k++; }
+                    name[nlen] = '\0';
+                    if(nlen == 0) continue;
+                    /* Skip if this is an internal-node label (after a ')') */
+                    /* Already checked: we only get here from a non-'(' non-')' char */
+                    found = 0;
+                    for(t = 0; t < rc_ntaxa; t++)
+                        if(rc_taxa[t] && strcmp(rc_taxa[t], name) == 0) { found = 1; break; }
+                    if(!found)
+                        {
+                        if(rc_ntaxa == cap)
+                            {
+                            int newcap = cap * 2;
+                            char **tmp = realloc(rc_taxa, (size_t)newcap * sizeof(char *));
+                            if(!tmp) break;
+                            rc_taxa = tmp; cap = newcap;
+                            }
+                        rc_taxa[rc_ntaxa++] = strdup(name);
+                        }
+                    }
+                    }
+                }
+
+            if(rc_ntaxa > 0)
+                {
+                /* Assign splitmix64 weights (same formula as execute_command) */
+                int t;
+                rc_hv = malloc((size_t)rc_ntaxa * sizeof(uint64_t));
+                if(rc_hv)
+                    {
+                    for(t = 0; t < rc_ntaxa; t++)
+                        {
+                        uint64_t x = (uint64_t)(t + 1);
+                        x += 0x9e3779b97f4a7c15ULL;
+                        x  = (x ^ (x >> 30)) * 0xbf58476d1ce4e5b9ULL;
+                        x  = (x ^ (x >> 27)) * 0x94d049bb133111ebULL;
+                        rc_hv[t] = x ^ (x >> 31);
+                        }
+                    number_of_taxa  = rc_ntaxa;
+                    taxa_names      = rc_taxa;
+                    taxon_hash_vals = rc_hv;
+                    printf2("  Derived %d taxa from landscape Newick strings\n", rc_ntaxa);
+                    }
+                }
+            }
+        }
+
+    lm_cluster(lm, cluster_output, cluster_threshold, cluster_orderby);
+
+    /* Restore global taxa state if we replaced it */
+    if(save_ntaxa == 0 && rc_ntaxa > 0)
+        {
+        int t;
+        number_of_taxa  = save_ntaxa;
+        taxa_names      = save_names;
+        taxon_hash_vals = save_hv;
+        free(rc_hv);
+        for(t = 0; t < rc_ntaxa; t++) free(rc_taxa[t]);
+        free(rc_taxa);
+        }
+    }
+
+    lm_free(lm);
+    }
+
 
 /* printf2: moved to utils.c */
