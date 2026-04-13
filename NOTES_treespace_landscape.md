@@ -277,6 +277,6 @@ clann rfdists best10.ph
 
 ## 7. References
 
-- Whidden & Matsen (2014) *IEEE/ACM TCBB* 12(1):9–20 — `rspr` SPR distance tool
-- Estabrook *et al.* (1985) *Math Biosci* 77:207–216 — quartet distance (tqdist)
-- Maddison (1997) *Syst Biol* 46(3):523–536 — gene-tree / species-tree reconciliation
+- Whidden, C. and Matsen, F.A., 2018. Calculating the unrooted subtree prune-and-regraft distance. IEEE/ACM transactions on computational biology and bioinformatics, 16(3), pp.898-911. — `rspr` SPR distance tool
+- Estabrook, G.F., McMorris, F.R. and Meacham, C.A., 1985. Comparison of undirected phylogenetic trees based on subtrees of four evolutionary units. Systematic Zoology, 34(2), pp.193-200. — quartet distance (tqdist)
+- Maddison, W.P., 1997. Gene trees in species trees. Systematic biology, 46(3), pp.523-536. — gene-tree / species-tree reconciliation
