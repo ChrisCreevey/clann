@@ -16,7 +16,12 @@
 
 # Aim
 
-To construct supertrees and explore the underlying phylogenomic information from gene trees. Clann implements several supertree optimality criteria — including DFIT (most-similar supertree), Robinson-Foulds (RF), and a maximum likelihood criterion based on Steel & Rodrigo (2008) — with bootstrapping support for all criteria. It can calculate consensus trees and provides tools to manage sets of gene trees: pruning taxa, filtering by a variety of criteria, automatically pruning lineage-specific duplicates, and more. A gene-tree reconciliation approach is also implemented to utilise information from multicopy gene families for species tree estimation. Clann can calculate RF and SPR distances between sets of trees, create randomised versions of trees, and perform a PTP test for informativeness (the YAPTP test). Clann has been continually developed since 2003 and suggestions for new features and tools are welcome.
+To construct supertrees and explore the underlying phylogenomic information from gene trees. Clann implements several supertree optimality criteria — including DFIT (most-similar supertree), Robinson-Foulds (RF), and a maximum likelihood criterion based on Steel & Rodrigo (2008) — with bootstrapping support for all criteria. 
+It can calculate consensus trees and provides tools to manage sets of gene trees: pruning taxa, filtering by a variety of criteria, automatically pruning lineage-specific duplicates, and more. 
+A gene-tree reconciliation approach is also implemented to utilise information from multicopy gene families for species tree estimation. 
+Clann can calculate RF and SPR distances between sets of trees, create randomised versions of trees, and perform a PTP test for informativeness (the YAPTP test). 
+Clann can also be used from **Python** via the included `pyclann` package.
+Clann has been continually developed since 2003 and suggestions for new features and tools are welcome.
 
 
 # Referencing Clann
@@ -43,6 +48,7 @@ For a list of papers that have cited Clann in their work see the [Clann google s
 - **Improved heuristic search** — best-improvement SPR strategy, convergence detection via skip-streak, bipartition-hash visited-set to avoid redundant scoring, and `start=memory` to resume from a previous result.
 - **Source tree weighting** — `autoweight=bootstrap` weights source trees by bipartition support; `autoweight=clan` weights by compatibility with user-defined clans; per-tree weights reported in `showtrees`.
 - **Interactive CLI improvements** — tab completion for commands, options and values; coloured prompt; Ctrl+R reverse history search; persistent command history (`~/.clannhistory`).
+- **Supertree landscape analysis** - `landscape` and `clustering` options in a `hs` run record the frequency of every tree visited in treespace and allows clustering of these based n RF distances. `recluster` command facilitates reclustering the landscape file using different RF distance cutoffs.
 - **Code refactoring** — split from a monolithic source into modular files (`scoring.c`, `tree_io.c`, `topology.c`, `tree_ops.c`, `consensus.c`, `viz.c`, `utils.c`).
 
 # Documentation
