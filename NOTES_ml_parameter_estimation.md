@@ -124,7 +124,7 @@ The term −η · P is a natural penalty that grows linearly with η. It arises
 directly from the normalisation constant of the per-tree exponential: as the
 rate β/k_i^η is made smaller (larger k_i^η), the distribution spreads out and
 the probability of observing any particular d_i decreases. This penalty
-counteracts the gain from reducing WD(η), creating a genuine interior optimum
+counteracts the gain from reducing WD(η), creating an interior optimum
 for η.
 
 This is the critical difference from naive weighting schemes. If one simply
@@ -347,8 +347,8 @@ size trend.
 
 ## 8. References
 
-Bryant, D. and Steel, M., 2008. Computing the distribution of a tree metric. arXiv:0810.0868.
+Bryant, D. and Steel, M., 2009. Computing the distribution of a tree metric. IEEE/ACM transactions on computational biology and bioinformatics, 6(3), pp.420-426.
 
-Steel, M. and Rodrigo, A., 2008. Maximum likelihood supertrees. *Systematic biology*, *57*(2), pp.243-250.
+Steel, M. and Rodrigo, A., 2008. Maximum likelihood supertrees. Systematic biology, 57(2), pp.243-250.
 
-Akanni, W.A., Creevey, C.J., Wilkinson, M. and Pisani, D., 2014. LU St: a tool for approximated maximum likelihood supertree reconstruction. *BMC bioinformatics*, *15*(1), p.183.
+Akanni, W.A., Creevey, C.J., Wilkinson, M. and Pisani, D., 2014. LU St: a tool for approximated maximum likelihood supertree reconstruction. BMC bioinformatics, 15(1), p.183.
