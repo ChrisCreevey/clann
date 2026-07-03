@@ -250,9 +250,9 @@ of summarising the search landscape this is an acceptable trade-off.
 
 ## 9. References
 
-- Robinson & Foulds (1981) *Math Biosci* 53(1-2):131–147 — RF distance
-- Estabrook *et al.* (1985) *Math Biosci* 77:207–216 — quartet distance
-- Whidden & Matsen (2014) *IEEE/ACM TCBB* 12(1):9–20 — SPR distance tool (`rspr`)
+- Robinson, D.F. and Foulds, L.R., 1981. Comparison of phylogenetic trees. Mathematical biosciences, 53(1-2), pp.131-147. — RF distance
+- Estabrook, G.F., McMorris, F.R. and Meacham, C.A., 1985. Comparison of undirected phylogenetic trees based on subtrees of four evolutionary units. Systematic Zoology, 34(2), pp.193-200. — quartet distance
+- Whidden, C. and Matsen, F.A., 2018. Calculating the unrooted subtree prune-and-regraft distance. IEEE/ACM transactions on computational biology and bioinformatics, 16(3), pp.898-911. tool (`rspr`)
 - The bipartition hashing method is described in detail in
   [NOTES_rf_hash_method.md](NOTES_rf_hash_method.md)
 - The landscape recording workflow is described in
