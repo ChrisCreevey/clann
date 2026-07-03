@@ -1253,6 +1253,37 @@ void print_single_subtree(struct taxon *node, char *buf)
 		}
 	}
 
+/* Like print_single_subtree() above (serialises exactly one node's subtree,
+ * ignoring the node's own next_sibling chain) but emits real taxon names
+ * (taxa_names[]) instead of numeric ids -- used by decomposegenetrees()
+ * Stage 2 to write out fragment subtrees (NOTES_gene_tree_decomposition.md
+ * §5, §9 step 3). */
+void print_single_subtree_named(struct taxon *node, char *buf)
+	{
+	int _g = 0, _gmax = number_of_taxa * 4 + 16;
+
+	if(node == NULL) return;
+
+	if(node->daughter != NULL)
+		{
+		struct taxon *child = node->daughter;
+		int first = 1;
+		strcat(buf, "(");
+		while(child != NULL && !user_break && _g++ < _gmax)
+			{
+			if(!first) strcat(buf, ",");
+			first = 0;
+			print_single_subtree_named(child, buf);
+			child = child->next_sibling;
+			}
+		strcat(buf, ")");
+		}
+	else
+		{
+		strcat(buf, taxa_names[node->name]);
+		}
+	}
+
 void print_tree_withinternals(struct taxon * position, char *tree)
 	{
 	struct taxon *place = position;

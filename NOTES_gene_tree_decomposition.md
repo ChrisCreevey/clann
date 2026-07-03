@@ -1,489 +1,419 @@
-# Gene-tree Decomposition into Ortholog Subtrees (`decomposegenetrees`)
+# Gene-tree Decomposition into Ortholog Subtrees
 
-This note is an implementation plan for a new top-level command,
-`decomposegenetrees`, plus an `autodecompose=yes|no` auto-run flag. It was
-designed in a planning conversation (not yet implemented) and is written so
-that a fresh Claude Code session — with no memory of that conversation — can
-pick it up and build it. Every referenced function/variable has been read
-directly from the current codebase; file:line references are accurate as of
-this writing but re-check them before editing, since line numbers drift.
+`decomposegenetrees` (and its load-time counterpart, `exe ... autodecompose=yes`)
+splits multicopy gene family trees into maximal single-copy-ish **ortholog
+subtree fragments**, so that supertree criteria which assume single-copy input
+(quartet-based criteria like `qfit`, and any future coalescent criterion) can
+use signal from gene families that currently contribute nothing at all. This
+note explains why that's needed, the three-stage algorithm, the design
+decisions behind its defaults, and how the two commands fit into Clann's
+existing multicopy-handling machinery.
 
 ---
 
-## 1. Motivation
+## 1. Why decompose, instead of just filtering or pruning?
 
-Clann can already score a candidate supertree against a set of source trees
-using several criteria (`scoring.h`): `dfit`, `sfit`, `qfit`, `mrp`, `avcon`,
-`rf`, `ml`, plus the duplication/loss reconciliation criterion `recon`
-(`reconcile.c:977`, `get_recon_score`). A separate planning discussion
-concluded that `criterion=qfit` (`scoring.c:1373`) is, mathematically, already
-close to an ASTRAL-style quartet score: it sums per-source-tree quartet
-agreement between the candidate tree (pruned to each source tree's taxon set)
-and each source tree's induced quartets. Under the multispecies coalescent
-(MSC), maximizing that sum is the same objective ASTRAL is built to optimize,
-which is what makes `qfit` usable as a coalescent-consistent criterion without
-reimplementing ASTRAL's search machinery.
+Clann already has two ways of dealing with multicopy gene family trees:
 
-The problem: the MSC assumes gene tree discordance comes only from incomplete
-lineage sorting (ILS) between single-copy orthologs. Multi-copy gene family
-trees (paralogs from duplication/loss/HGT) violate that assumption outright —
-feeding them to `qfit` (or a future deep-coalescence/MDC criterion) conflates
-duplication-driven discordance with ILS-driven discordance and biases the
-result. Clann's *existing* whole-tree filter for this, `apply_singlecopy_filter`
-(`treecompare2.c:2993`), is all-or-nothing: one in-paralog anywhere in a family
-tree discards the entire tree's signal from the search.
+- **`criterion=recon`** uses *every* tree, scoring duplication/loss cost
+  directly — no filtering needed, but this is a different objective from the
+  quartet-based criteria.
+- **The single-copy filter** (active automatically for `hs`/`nj`/`alltrees`
+  when `criterion != recon`) excludes a multicopy tree from the search
+  entirely. This is all-or-nothing: one in-paralog anywhere in a 50-taxon gene
+  family tree discards the whole tree's signal.
+- **`autoprunemono`/`prunemonophylies`** do better, but only for one specific
+  case: *monophyletic* same-species clades (in-paralogs sitting together as
+  sisters). They collapse those to one representative, promoting the tree to
+  single-copy if that's all that was wrong with it. They cannot do anything
+  for a tree where the duplicate copies of a species are **not** sisters —
+  e.g. gene-tree error, or a genuine ancient duplication, has scattered them
+  to different parts of the tree.
 
-`decomposegenetrees` is meant to do better: decompose each multi-copy gene
-family tree into maximal single-copy-ish **ortholog subtrees**, salvaging
-signal instead of discarding whole trees, using machinery Clann already has
-for gene-tree/species-tree reconciliation.
+`decomposegenetrees`/`autodecompose` close that last gap. Where
+`autoprunemono` can only collapse, this also **cuts**: it maps the gene tree
+onto a guide species tree, finds well-supported duplication nodes, and splits
+the family tree apart at genuine out-paralog boundaries — so a family that
+`autoprunemono` cannot touch at all can still yield one or more usable,
+single-copy ortholog fragments.
 
-### Terminology (for whoever implements this)
+### Terminology
 
-- **Orthologs**: genes related by a speciation event.
-- **Paralogs**: genes related by a duplication event.
-  - **In-paralogs** (relative to a duplication node D): copies that arose
-    *after* D, redundant within one descendant lineage of D.
-  - **Out-paralogs** (relative to D): the two (or more) clades *on either side*
-    of D — these must never be treated as orthologous to each other.
+- **Orthologs** — genes related by a speciation event.
+- **Paralogs** — genes related by a duplication event.
+  - **In-paralogs** (relative to duplication node D) — copies that arose
+    *after* D, redundant within one descendant lineage.
+  - **Out-paralogs** (relative to D) — the two (or more) clades *on either
+    side* of D. These must never be treated as orthologous to each other.
 - Decomposition means: cut at out-paralog splits, collapse in-paralog
   redundancy, and do neither where the evidence is too weak or the resulting
   pieces would be uninformative.
 
 ---
 
-## 2. Existing building blocks to reuse (do not reimplement these)
+## 2. The three-stage algorithm
 
-| Purpose | Function | Location | Notes |
-|---|---|---|---|
-| LCA-map a gene tree onto a species tree, tagging each node with its mapped species-tree node id | `label_gene_tree` | `reconcile.c:518` | Sets `position->tag`. Uses `get_min_node` for the LCA. |
-| Detect duplication nodes from the LCA mapping | `reconstruct_map` | `reconcile.c:588` | A node is a duplication iff a child's `tag` equals the node's own `tag` (`reconcile.c:606-611`). Marks it via `position->loss = 2` (`reconcile.c:617`). **This flag is the exact hook for finding cut points.** |
-| Full duplication+loss reconciliation cost for one gene tree against one species tree (searches over gene-tree rootings) | `tree_map` | `reconcile.c:131` | Calls `label_gene_tree` + `reconstruct_map` + `add_losses`/`count_losses`. Read this to understand the calling convention, not to reuse its cost formula. |
-| Full reconciliation search over gene-tree AND species-tree rootings (used by `criterion=recon`) | `get_recon_score` | `reconcile.c:977` | Shows the pattern for rerooting an unrooted gene tree and picking the best mapping (`reconcile.c:1097-1129`, the `best_mapping`/`best_total` loop). Decomposition should reuse this "find the best rooting of the gene tree against the guide tree" logic before walking for cut points, since duplication calls are rooting-dependent. |
-| Detect species-specific (pure in-paralog) clades **without any reference species tree** | `identify_species_specific_clades` | `prune.c:356` | Recursive, checks both below (`list_taxa_in_clade`, `prune.c:496`) and above (`list_taxa_above`, `prune.c:456`) a node to catch monophyly obscured by arbitrary rooting. Tags a "clann ID" per species-specific clade. |
-| Whole-command wrapper around the above: prune every multi-copy source tree down to one representative per species-specific clade | `prune_monophylies` | `prune.c:196` | Existing command `prunemonophylies`. Writes `prunedtrees.txt` + `prunedtrees_info.txt`. Drops (excludes) any resulting tree below 4 taxa (`prune.c:331`). Representative choice: random, or longest sequence via `selection=length` (parses embedded length from `fullname`, `extract_length`, `prune.c:531`). **Stage 1 of the new command should call into this same logic** (see §5 on refactoring needed). |
-| Whole-tree multi-copy filter (current crude alternative) | `apply_singlecopy_filter` / `restore_singlecopy_filter` | `treecompare2.c:2993` / `treecompare2.c:3029` | Binary: excludes any tree with `presence_of_taxa[i][j] > 1` for any taxon `j`. Toggles `sourcetreetag[i]`. Good reference for how "exclude vs include in search" is represented, but decomposition should *replace* trees, not just toggle tags. |
-| Preserve pristine trees when `fundamentals[]` gets modified in place | `original_fundamentals[]` | declared/used in `main.c:2225-2317`, swapped in `reconcile.c:1504-1518` and swapped back at `reconcile.c:2087` | **Important invariant**: `autoprunemono` mutates `fundamentals[i]` in place and stashes the pristine version in `original_fundamentals[i]`. `reconstruct` swaps the originals back in before running, then swaps back after. `decomposegenetrees` must do the same swap-in before Stage 1 runs, so it always decomposes from the pristine tree, never from an already-mutated copy. |
-| Auto-run-at-load-time pattern to mirror for `autodecompose=` | `autoprunemono_apply` | `main.c:2215`, dispatched from `main.c:3247` via `do_autoprunemono` flag parsed at `main.c:2811` | Exact template for `autodecompose`. |
-| "Species tree source" resolution pattern to mirror for the guide tree | `reconstruct`'s `speciestree=memory\|first\|<file>` option | parsing at `reconcile.c:1467-1477`, resolution at `reconcile.c:1585-1639` | `memory` reads `retained_supers[0]` (`reconcile.c:1620`); explicit file is read raw (`reconcile.c:1626-1630`); with nothing supplied and nothing in memory, `reconstruct` **hard-errors** (`reconcile.c:1592`). `decomposegenetrees` should reuse the `speciestree=` option name/values for consistency, but change the "nothing available" behavior: instead of erroring, fall back to calling `nj()` (see §4). |
-| Auto-generate a guide tree with no criterion/search needed | `nj()` | `reconcile.c:42` | Builds an NJ tree from average-consensus distances over whatever's currently loaded, writes to `retained_supers[0]`, sets `trees_in_memory = 1` (`reconcile.c:97-110`). This is the fallback tier of guide-tree resolution. |
-| Per-source-tree weight already threaded through every criterion | `tree_weights[]` | used in `scoring.c:978,1145,1246,1349,1448` | Multiplied into every criterion's per-tree contribution. This is the hook for down-weighting fragments so one duplication-heavy family doesn't out-vote families that never duplicated. |
-| The source-tree pool itself | `fundamentals[]`, `Total_fund_trees`, `presence_of_taxa[][]`, `sourcetreetag[]`, `tree_names[]` | throughout `treecompare2.c`/`scoring.c` | Decomposed subtrees are just new entries in this pool — nothing about `hs`, `qfit`, `rf`, etc. needs to change once the pool is populated correctly. |
-| Species identity from a multi-copy taxon name | delimiter parsing | `tree_io.c:817-830` | When `delimiter` mode is on, only the substring before `delimiter_char` is used to resolve a leaf to its `taxa_names[]` index (`tree_io.c:820-825,837`). **This means `Human.alpha` and `Human.beta` already resolve to the same numeric taxon id as `Human`** — `label_gene_tree`/`reconstruct_map`'s duplication test (`tag` equality) works correctly on multi-copy input with zero extra species-lookup code. Per-copy distinctness survives only in `fullname` (used for `select_longest`). |
-| Existing example dataset with exactly the edge cases discussed | `examples/tutorial_multicopy.ph` | repo root `examples/` | See §7 for a line-by-line breakdown — this file already contains pure in-paralog cases and scattered/out-paralog cases suitable as test fixtures. |
+### Stage 1 — Monophyly collapse (no guide tree needed)
 
----
-
-## 3. Command surface
-
-### `decomposegenetrees [options]`
-
-A new manual command, dispatched the same way `prunemonophylies` is
-(`main.c:1232-1240`: `if(strcmp(parsed_command[0], "prunemonophylies") == 0) prune_monophylies();` — add an equivalent branch calling the new function; add `"decomposegenetrees"` to the command-name array near `main.c:55`; add help text near `main.c:1563` and `main.c:2013`).
-
-| Option | Values | Default | Notes |
-|---|---|---|---|
-| `speciestree` | `memory` \| `<file>` | unset → resolved per §4 | Reuse `reconstruct`'s option name/semantics for consistency. |
-| `dupsupport` | float | TBD, conservative (see §6) | Minimum confidence to trust a duplication call before cutting on it. Units/source of "confidence" need deciding during implementation — see open question in §6. |
-| `minfragtaxa` | int | 4 | Reuses the existing quartet floor already hardcoded in `scoring.c:1409` (`ntaxa_i < 4`) — expose it as a shared constant/option rather than a second hardcoded literal. |
-| `minfragspecies` | int | 2 | A fragment mapping to fewer than this many distinct species is dropped/merged, not kept as its own tree. |
-| `selection` | `length` \| `random` | `random` | Same semantics as `prune_monophylies`'s `selection=length` (`prune.c:219`) for in-paralog representative choice — reuse directly, don't reimplement. |
-| `filename` | `<name>` | `decomposedtrees.txt` | Mirrors `prune_monophylies`'s `filename=` (`prune.c:221`). Output: `<filename>` (the decomposed subtrees) and `<filename>_info.txt` (log), same pattern as `prunedtrees.txt`/`prunedtrees_info.txt`. |
-
-### `autodecompose=yes|no`
-
-Global option alongside `autoprunemono` (`main.c:65,152`), applied at load
-time the same way (`main.c:3247`), or optionally triggered automatically the
-first time a coalescent criterion (`qfit`, and later a prospective `mdc`) is
-invoked on data that still contains multi-copy trees. Exact trigger point
-(load time vs. first search) is an implementation decision — load time is
-simpler and matches `autoprunemono`'s existing precedent, so default to that
-unless it proves awkward.
-
----
-
-## 4. Guide-tree resolution order
-
-Agreed order, in priority:
-
-1. **`speciestree=<file>`** supplied explicitly → use it, but **hard-error** if
-   its taxon set does not exactly match the full registry (`taxa_names[]` /
-   `number_of_taxa`). Check both directions: every name in `taxa_names[]` must
-   appear in the guide tree, and the guide tree must contain no taxon absent
-   from `taxa_names[]`. Fail loudly and list what's missing/extra — do not
-   silently prune to the intersection. (`reconstruct`'s file-reading code at
-   `reconcile.c:1623-1631` is the base to extend with this validation; it
-   currently only checks the file opens, not that taxa match.)
-2. **`speciestree=memory`**, or nothing supplied but `trees_in_memory > 0` →
-   use `retained_supers[0]` (`reconcile.c:1620` shows the exact read).
-3. **Nothing available** → call `nj()` (`reconcile.c:42`) to generate one on
-   the fly. This is the one deliberate deviation from `reconstruct`'s existing
-   behavior, which hard-errors in this case (`reconcile.c:1592`) — for
-   `decomposegenetrees` a missing guide tree should never be fatal, since the
-   whole point is that this command can run standalone with zero setup.
-
----
-
-## 5. Algorithm
-
-### Stage 0 — restore pristine input
-
-Before anything else, if `autoprunemono_active` and `original_fundamentals[]`
-is populated, swap the pristine trees back into `fundamentals[]` (same pattern
-as `reconcile.c:1504-1518`), run the whole pipeline, then swap back at the end
-(`reconcile.c:2087` shows the swap-back). Decomposition must always start from
-the pristine gene tree, never from something already collapsed by
-`autoprunemono`/`prunemonophylies` in a previous step of the same session.
-
-### Stage 1 — monophyly collapse (no guide tree needed)
-
-For every multi-copy source tree, run the same logic as `prune_monophylies`
-(`prune.c:196`). **Refactoring note**: `prune_monophylies` today is a single
-monolithic command function that loops over `fundamentals[]` itself, builds
-each tree, calls `identify_species_specific_clades`, and writes output files
-directly. Extract the per-tree "collapse species-specific clades in this tree,
-return the collapsed tree + a log of what was removed" logic
-(`prune.c:238-343`) into a reusable function that both `prune_monophylies` and
-`decomposegenetrees` call, rather than duplicating the loop body. Trees that
-collapse fully to single-copy go straight into the candidate pool with weight
-1. Trees still multi-copy after this stage proceed to Stage 2.
-
-### Stage 2 — LCA-mapping decomposition (needs the guide tree)
-
-For each tree still multi-copy after Stage 1:
-
-1. Find the best rooting of the gene tree against the guide tree, reusing the
-   rerooting-and-remap-cost pattern from `get_recon_score`
-   (`reconcile.c:1097-1129`) — map via `label_gene_tree`, score via whatever
-   cost is cheapest to compute (duplication count alone is sufficient here,
-   losses aren't needed for the decomposition decision).
-2. Run `reconstruct_map` (`reconcile.c:588`) to get the `loss == 2`
-   duplication tags.
-3. Walk the tagged tree top-down. At each duplication node D, apply, in order:
-   - **Support gate**: if the call at D isn't well-supported (see open
-     question in §6 on what "supported" means here), treat D as *not* a
-     duplication — do not cut, continue the recursion through D as if it were
-     an ordinary node.
-   - **Pure in-paralog check**: if every leaf under D maps to a single
-     species, collapse to one representative (reuse the `selection=`
-     representative-choice logic from Stage 1/`prune_monophylies` — this case
-     should be rare here since Stage 1 already removed most of it, but keep
-     the check for defense-in-depth against cases Stage 1's topology-only test
-     can miss, e.g. gene-tree-error-scattered in-paralogs that later map back
-     together under the guide tree).
-   - **Informativeness floor**: evaluate each child clade of D independently
-     against `minfragtaxa`/`minfragspecies`. If one side fails the floor,
-     prune that side down to a representative tip and merge it back into its
-     sibling — do **not** spin off an uninformative fragment. If both sides
-     fail, collapse the whole clade under D to one representative.
-   - **Otherwise (both sides pass, well-supported, genuinely cross-species)**:
-     cut. Each child of D becomes the root of an independent subtree; recurse
-     into each separately, repeating this same decision procedure.
-4. Base case: a subtree whose root and every retained descendant node is a
-   speciation node (no further duplication tags) is a finished ortholog
-   subtree — stop recursing.
-
-### Stage 3 — weighting and pool integration
-
-For every original family tree that produced `k` surviving fragments (`k >=
-1`), set each fragment's `tree_weights[i] = 1/k` (simple equal split for a
-first implementation — do not over-engineer a size-proportional scheme yet,
-see §6). Add each surviving fragment (Stage 1 pass-throughs included, with
-weight 1) as a new entry in `fundamentals[]`/`Total_fund_trees`, with its own
-row in `presence_of_taxa[][]` computed the normal way trees are loaded
-elsewhere (look at how `tree_build`/taxon registration populates
-`presence_of_taxa` for a freshly-parsed tree — do not hand-roll this).
-
-### Output
-
-- `<filename>` — the decomposed subtrees, one Newick per line, same physical
-  format as `prunedtrees.txt`.
-- `<filename>_info.txt` — a log of every decision made: which nodes were
-  collapsed (in-paralog), which were pruned-and-merged (thin side), which were
-  cut (with the resulting fragment count and assigned weight), and which
-  duplication calls were suppressed by the support gate. This is what makes
-  the command useful standalone, not just as internal search plumbing — a
-  user should be able to read this file and understand exactly what happened
-  to their gene family trees.
-
----
-
-## 6. Lifecycle: applying the output, backing up originals, and restoring
-
-This section resolves a question that came up during planning: once Stage 3
-produces the decomposed fragment set, what actually happens to the live
-`fundamentals[]`, and how do we get back to the pre-decomposition state later?
-
-### 6.1 Two invocation modes, two destructiveness defaults
-
-Clann already has precedent for exactly this fork, in the
-`prune_monophylies`/`autoprunemono` pair, and the two halves behave
-differently on purpose:
-
-- **`prune_monophylies`** (standalone command) is **non-destructive**: it
-  reads `fundamentals[]`, computes the pruning, and only writes
-  `prunedtrees.txt`/`prunedtrees_info.txt` to disk. It never reassigns
-  `fundamentals[i]`. The user must explicitly `exe prunedtrees.txt` to adopt
-  the result.
-- **`autoprunemono=yes`** (load-time flag) **is destructive/immediate**: as
-  part of the same `exe`, it mutates `fundamentals[]` in place and stashes the
-  pristine copy in `original_fundamentals[]` (`main.c:2214` comment,
-  `main.c:2225-2317`) so `reconstruct` can still get at the originals within
-  the same session.
-
-`decomposegenetrees`/`autodecompose` should mirror this split exactly:
-
-- **`decomposegenetrees` (manual command) defaults to non-destructive.**
-  Write `<filename>` and `<filename>_info.txt` only; do not touch live
-  `fundamentals[]`; print a message telling the user to `exe <filename>` if
-  they want to adopt it. This needs none of the backup machinery in §6.3,
-  because nothing in memory changes. (Optionally add an `apply=yes` option
-  later for one-step adoption, which would then go through the same path as
-  `autodecompose` below — but don't build this in the first pass; it's not
-  needed for the core feature to work.)
-- **`autodecompose=yes` commits immediately**, in-memory, as part of the same
-  `exe` — this is the path that needs the backup/restore design below.
-
-### 6.2 Why the reload must go through the *same* registration path as loading a new file — not a hand-rolled patch
-
-`Total_fund_trees` changes after decomposition (one family tree can become
-`k` fragments). That invalidates every piece of per-tree derived state
-computed at load time for the old count: `presence_of_taxa[][]`,
-`fund_bipart_sets` (`scoring.c:994`, `rf_precompute_fund_biparts`), the `dfit`
-distance matrices (`cal_fund_scores`), `sourcetree_scores[]`, `tree_weights[]`
-sizing, taxon hash values, etc. Re-deriving all of that by hand in a second
-code path, parallel to what `execute_command` already does for a freshly
-loaded file (`main.c:2750` onward), is exactly the kind of duplicated logic
-this plan has tried to avoid elsewhere.
-
-Instead: **write the decomposed fragments to a file, then call the existing
-full load/registration path on that file** — `execute_command(filename, TRUE)`
-directly, or the public wrapper `clann_load_trees(filename, parse_opts)`
-(`clann_api.c:303`, confirmed to be a thin wrapper: it just builds `"exe
-<file>"` and calls `execute_command`). This is not a workaround, it's the
-correct way to get a fully-consistent re-registration for free, using the
-one code path Clann already trusts to do this correctly.
-
-This also directly answers "do the preprocessing steps need to be re-run" —
-yes, genuinely, twice, for an unavoidable structural reason, not just for
-convenience: Stage 2's guide-tree resolution (§4) needs the *original* trees
-already registered (to fall back to `nj()`, which itself needs
-`presence_of_taxa`/average-consensus distances already computed) before
-decomposition can even run — so the first registration pass (of the raw
-input) has to happen before decomposition, and a second pass (of the
-decomposed output) has to happen after, because the tree count changed.
-
-### 6.3 The backup problem, and why a new mechanism is needed (not `original_fundamentals[]`)
-
-`execute_command` unconditionally tears down and frees `fundamentals[]` *and*
-`original_fundamentals[]` at the start of every load (`main.c:2883-2907`,
-including `autoprunemono_active = 0` at `main.c:2907`). That means if
-`autodecompose` reloads through the standard path per §6.2, the pre-decompose
-pristine trees are gone from memory the instant the reload happens — unless
-something snapshots them first.
-
-`original_fundamentals[]` can't be reused for this snapshot: it's sized and
-indexed 1:1 against the *old* tree count, and it's about to be freed by the
-very reload it would need to survive.
-
-**Required new state** (names indicative, pick better ones during
-implementation):
-
-- `pre_decompose_fundamentals[]` / `pre_decompose_tree_names[]` /
-  `pre_decompose_total_trees` — a snapshot of the complete pristine gene-tree
-  set as it stood immediately before decomposition (i.e. after Stage 0's
-  swap-back, before Stage 1 runs), taken *before* calling into the reload
-  path. Independent of `original_fundamentals[]`, own lifetime.
-- `decompose_active` — a session flag mirroring `autoprunemono_active`
-  (`reconcile.c:1506`, `main.c:2907`).
-- `reconstruct` and `criterion=recon` (`get_recon_score`) must check
-  `decompose_active` the same way they already check `autoprunemono_active`
-  (`reconcile.c:1504-1520`, swap-back at `reconcile.c:2087-2095`) and use the
-  pristine multi-copy trees instead of the decomposed fragments — reconciling
-  duplication/loss against already-decomposed single-copy fragments would
-  silently report near-zero duplications everywhere, which is wrong, not just
-  imprecise. **Difference from the existing mechanism**: `autoprunemono`'s
-  swap is element-by-element (same tree count, same indices, just two strings
-  swapped per index). This can't work here because the tree count differs.
-  Treat it instead as swapping two *whole dataset snapshots*: stash the
-  current (decomposed) `fundamentals`/`Total_fund_trees`/`presence_of_taxa`/etc.
-  aside, install the `pre_decompose_*` snapshot in their place, run
-  `reconstruct`/`recon`, then swap back. Print an equivalent message to the
-  existing `"(Using original unpruned trees for reconstruct)"` one so the
-  behavior is visible, not silent.
-- Internal callers should treat `decompose_active` as an idempotency guard
-  too: if it's already set for the current in-memory dataset, a second
-  request to decompose (e.g. from a future criterion's own auto-trigger) is a
-  no-op, not a re-run.
-
-### 6.4 Restoring the true original — no new "restore" command needed
-
-Decomposition never modifies the file the user originally loaded from
-(`inputfilename`, set at `main.c:2858`) — it only reads it and writes *new*
-output files. So the full, session-independent way back to the
-pre-decomposition (and pre-`autoprunemono`) state is simply:
+Every source tree first goes through the same collapse logic as
+`prunemonophylies`: species-specific (monophyletic in-paralog) clades are
+identified topologically and pruned to one representative, using
+`identify_species_specific_clades()` (`prune.c`) — this needs no reference
+species tree at all, since "these leaves are all the same species and form a
+clade" is a fact about the gene tree alone.
 
 ```
-exe <inputfilename>
+for each source tree:
+    collapse every monophyletic same-species clade to one representative
+    if the tree is now fully single-copy:
+        -> one fragment, weight 1.0 (done, skip Stage 2)
+    else:
+        -> still has non-monophyletic duplicate species, hand off to Stage 2
 ```
 
-which re-triggers the exact same full load/registration path from scratch.
-This works even in a brand new process, doesn't depend on
-`pre_decompose_fundamentals[]` still being alive, and needs no new command.
-Print this as guidance (e.g. "To restore the original gene trees, run: exe
-<inputfilename>") after `autodecompose` commits a change, rather than
-building a bespoke `restoregenetrees` command that would just duplicate `exe`.
-The in-memory `pre_decompose_*` snapshot from §6.3 exists for a different,
-narrower purpose — letting `reconstruct`/`recon` work correctly *within the
-same session* without forcing a disk round-trip — not as the primary restore
-mechanism.
+`prune_monophylies()` (the `prunemonophylies` command) and
+`decomposegenetrees`'s Stage 1 share one function,
+`collapse_monophyly_in_tree()` (`prune.c`), so this is exactly the same
+collapse a user already gets from `prunemonophylies`/`autoprunemono` — Stage 1
+is not new logic, it's reuse of it.
 
-### 6.5 What a future coalescent criterion's internal auto-trigger can skip
+### Stage 2 — LCA-mapping decomposition (needs a guide tree)
 
-If a future `criterion=mdc` (or `qfit`, detecting multi-copy input at search
-start) wants to invoke this automatically rather than relying on
-`autodecompose` having already run at load time:
+For a tree still multicopy after Stage 1, Clann's existing gene-tree/
+species-tree reconciliation machinery (`label_gene_tree()`/
+`reconstruct_map()`, used unmodified by `criterion=recon` and `reconstruct`)
+is reused to find duplication nodes:
 
-- **Must run once per analysis setup, never per candidate tree.** This is a
-  preprocessing step that changes the input pool, not a per-SPR-move rescore
-  like `criterion=recon`. Once `fundamentals[]` holds the decomposed
-  fragments, `hs`/`qfit`/`rf`/etc. run exactly as they do today — nothing
-  about the search loop changes.
-- **Skip re-running if `decompose_active` is already set** (§6.3) — check
-  first, don't decompose twice.
-- **Skip the CLI/option-parsing layer entirely.** An internal caller should
-  call the Stage 1/2/3 functions (and `execute_command()`/
-  `clann_load_trees()` for the reload) directly with explicit arguments, not
-  build a command string and route it through `parsed_command[]`. This is
-  exactly why the Stage 1 refactor in §5 (extracting `prune_monophylies`'s
-  per-tree logic out of its command wrapper) matters — the reusable logic,
-  not the CLI command, is the thing a future criterion links against.
-- **The taxon-set hard-error validation for `speciestree=<file>` is simply
-  not exercised** in the internal path, since there's normally no
-  user-supplied file — nothing to explicitly skip, it's just inactive.
-- **The `nj()` guide-tree fallback will rarely trigger** in this context,
-  since by the time a coalescent criterion runs mid-session there's usually
-  already something in `retained_supers[]` from an earlier command. It must
-  still be implemented (fresh single-command sessions do hit it), just don't
-  expect it to be the common path.
-- **Do not skip writing `<filename>_info.txt`.** Keep the decision log even
-  for automatic invocation — a user running `hs criterion=qfit` on multi-copy
-  data should still be able to see what happened to their gene trees, same
-  rationale as §5's "Output" subsection.
+```
+best_rooting = None
+for each possible rooting of the gene tree:
+    map the gene tree onto the guide species tree (LCA mapping)
+    tag duplication nodes: a node is a duplication iff one of its
+        children maps to the same species-tree node as the node itself
+    count duplications
+    keep this rooting if it has the fewest duplications seen so far
+```
 
----
+Duplication calls are rooting-dependent, so the rooting that minimises the
+duplication count is used — the same "try every rooting, keep the best" idea
+`get_recon_score()` already uses for `criterion=recon`, just scored on
+duplication count alone rather than the full duplication+loss cost (losses
+aren't needed for a cut/keep decision).
 
-## 7. Open questions — decide during implementation, don't guess silently
+The tagged tree is then walked top-down. At each duplication node `D`:
 
-- **What exactly gates "well-supported duplication call"?** Candidates: (a)
-  reuse the existing `bsweight`/bootstrap-support infrastructure
-  (`scoring.h:34`) if bootstrap values are present on the gene tree at node D;
-  (b) a minimum branch-length separating D from its parent (near-zero branch
-  → likely gene-tree noise); (c) both, with (a) preferred when available and
-  (b) as fallback. Pick a conservative default that biases toward *not*
-  cutting when evidence is ambiguous — under-splitting loses less information
-  than over-fragmenting on noise.
-- **`dupsupport` default value and units** depend on the answer above (a
-  bootstrap percentage if (a), a branch-length threshold if (b)). Do not
-  invent a number without at least running it against
-  `examples/tutorial_multicopy.ph` (§7) and a larger real dataset to sanity
-  check it doesn't either cut everything or nothing.
-- **Fragment weighting scheme**: start with equal-split (`1/k`) as specified
-  in Stage 3. A size- or informativeness-proportional scheme (e.g. weight by
-  number of quartets a fragment can generate, normalized so the family still
-  sums to 1) is a plausible future refinement but out of scope for the first
-  implementation — don't build it speculatively.
-- **Where `autodecompose` triggers**: at load time (simplest, matches
-  `autoprunemono` precedent) vs. lazily the first time `hs criterion=qfit` (or
-  a future `criterion=mdc`) runs on data still containing multi-copy trees.
-  Default to load time unless that proves awkward during implementation.
+```
+walk(D):
+    if D is not a duplication, or the call at D isn't well-supported:
+        treat D as an ordinary node, recurse through it unchanged
 
----
+    else if every leaf under D maps to a single species (pure in-paralog):
+        collapse D's whole clade to one representative
 
-## 8. Test fixtures already in the repo
+    else:
+        # D genuinely separates out-paralogs -- check each side independently
+        for each child side of D:
+            evaluate against minfragtaxa/minfragspecies
 
-`examples/tutorial_multicopy.ph` (8 trees) already contains the relevant edge
-cases without needing new test data:
+        if both/all sides pass the floor:
+            CUT: each child becomes an independent fragment,
+                 recurse into each one separately (repeat this same walk)
 
-- Lines 1–3: ordinary single-copy trees — should pass through both stages
-  completely unchanged, weight 1.
-- Line 4 `(((Human.alpha,Human.beta),(Chimp.a,Chimp.b)),Gorilla),Orangutan),Macaque)`:
-  clean monophyletic in-paralog pairs for both Human and Chimp — Stage 1
-  (`prune_monophylies` logic) should collapse both pairs and the tree should
-  become fully single-copy without ever reaching Stage 2.
-- Line 5 `((((Human.x,Human.y),(Chimp.x,Chimp.y)),(Gorilla.a,Gorilla.b)),((Mouse.a,Mouse.b),(Rat.a,Rat.b)))`:
-  same pattern across more taxa — same expected outcome as line 4.
-- Line 6 `(((Human.1,Human.2),(Chimp.1,Chimp.2)),((Gorilla.1,Gorilla.2),(Orangutan.1,Orangutan.2)))`:
-  same again.
-- Line 7 `((((Human.alpha,Chimp),(Human.beta,Gorilla)),Orangutan),Macaque)`:
-  **the important one** — `Human.alpha` and `Human.beta` are *not* sisters
-  (Human.alpha pairs with Chimp, Human.beta pairs with Gorilla). Stage 1's
-  monophyly test will not fire (neither subtree is purely Human). This is a
-  genuine test of Stage 2's out-paralog cut logic against a guide tree — use
-  it to verify the support gate and the cut/merge decision actually engage.
-- Line 8 `(((Human.a,(Chimp,Gorilla)),(Human.b,(Orangutan,Macaque))),(Mouse,Rat))`:
-  same category as line 7, different topology — a second Stage 2 test case.
+        else if both/all sides fail the floor:
+            collapse the whole clade under D to one representative
 
-`TUTORIAL.md`'s existing "Part 5: Multicopy gene trees and autoprunemono"
-section (`TUTORIAL.md:232`) documents `autoprunemono` against this same file
-and is the template to extend with a new "Part 6" (or subsection) documenting
-`decomposegenetrees`/`autodecompose` once built, including a worked example
-against line 7 or 8 above showing the `_info.txt` output.
+        else (mixed):
+            keep recursing into the side(s) that passed
+            prune the failing side(s) to a representative and merge
+                it into the passing side -- UNLESS that representative's
+                species already survives on the passing side, in which
+                case drop it instead of merging in a duplicate
+```
 
----
+A subtree whose root and every retained descendant is a speciation node (no
+further duplication tags) is a finished ortholog fragment — recursion stops
+there.
 
-## 9. Suggested implementation order
+**The "mixed" branch's collision check** (drop rather than merge a
+representative whose species is already kept on the passing side) exists
+because a merge is not always safe just because it clears the informativeness
+floor: merging a picked representative into an already-resolved sibling can
+silently reintroduce the exact multicopy-ness the whole procedure exists to
+remove, if that representative's species happens to already be present
+elsewhere in the passing side (from a nested duplication decision made
+earlier in the recursion). Since the entire point of `decomposegenetrees` is
+to hand back single-copy fragments, this case is resolved conservatively —
+drop the representative rather than ever emit a fragment with a duplicate
+species in it.
 
-1. Refactor `prune_monophylies`'s per-tree collapse logic (`prune.c:238-343`)
-   into a reusable function taking a tree and returning a collapsed tree + log
-   entries, called by both the existing command and the new one. Verify
-   `prunemonophylies` still behaves identically after the refactor (run it
-   against `examples/tutorial_multicopy.ph`, diff output against the current
-   `prunedtrees.txt`/`prunedtrees_info.txt`).
-2. Implement guide-tree resolution (§4) as its own function, including the
-   taxon-set validation hard-error for explicit files. Unit-test this in
-   isolation (missing taxon, extra taxon, exact match, `memory` with/without
-   `trees_in_memory`, nothing supplied and nothing in memory → falls through
-   to `nj()`).
-3. Implement Stage 2's cut/collapse/merge decision procedure as a function
-   operating on an already-LCA-mapped-and-tagged gene tree (i.e. build on top
-   of existing `label_gene_tree`/`reconstruct_map`, don't touch those
-   functions). Get this correct against lines 7–8 of
-   `examples/tutorial_multicopy.ph` before wiring up anything else.
-4. Implement Stage 3 weighting and pool integration (adding fragments into
-   `fundamentals[]`/`presence_of_taxa[][]`/`tree_weights[]`).
-5. Wire up the `decomposegenetrees` command (option parsing, output files,
-   help text) following the `prunemonophylies` pattern exactly
-   (`main.c:1232-1240`, `1563`, `2013`).
-6. Wire up `autodecompose=yes|no` following the `autoprunemono` pattern
-   exactly (`main.c:65,152,2215,2811,3247`), including the §6.3
-   `pre_decompose_*`/`decompose_active` snapshot taken *before* the §6.2
-   reload, and the §6.3 changes to `reconstruct`/`get_recon_score` to swap to
-   that snapshot instead of `original_fundamentals[]`-style element swapping.
-7. End-to-end test: `clann exe examples/tutorial_multicopy.ph
-   autodecompose=yes` then `hs criterion=qfit`, confirm all 8 trees (or their
-   decomposed fragments) now contribute instead of only the 3 that are
-   single-copy today. Also verify: `reconstruct` still reports the original
-   duplication/loss counts (not near-zero) after `autodecompose=yes`, and
-   `exe examples/tutorial_multicopy.ph` (no options) fully restores the
-   pre-decomposition state.
-8. Documentation: extend `TUTORIAL.md` Part 5 or add Part 6; add
-   `decomposegenetrees`/`autodecompose` to the option-listing help text blocks
-   in `main.c` (search for where `autoprunemono` appears in help text and add
-   the new option alongside each occurrence, e.g. `main.c:1585,1702,1811`).
+As a final safety net, every fragment is swept once more immediately before
+it's written out: if more than one surviving leaf for the same species still
+made it through (possible when the colliding leaf sits entirely outside any
+node that got flagged as a duplication — the walk above only makes decisions
+*at* duplication nodes), only the first one encountered is kept.
+
+#### The support gate
+
+`node_well_supported(D, dupsupport)` decides whether a duplication call is
+trustworthy enough to act on, using whatever confidence data is attached to
+the branch above `D` in the gene tree's Newick string:
+
+| Data present on the branch above D | Gate |
+|---|---|
+| A numeric label before `:` (bootstrap-style support) | trust the call iff `label ≥ dupsupport` (labels > 1.0 are treated as percentages and divided by 100) |
+| Only a branch length (`:0.0123`, no label) | trust the call iff `branchlength > 0` — a literal zero/near-zero branch is treated as noise, `dupsupport` isn't used for this test |
+| Nothing at all (no label, no branch length) | **trust the call** |
+
+The "nothing at all ⇒ trust it" default deliberately mirrors an existing
+Clann convention: `autoweight=bootstrap` already documents "trees with no
+bootstrap labels are assigned weight 1.0" — absence of confidence data is
+treated as full confidence, not as ambiguity, everywhere else in this
+codebase. The alternative (treating "no data" as "not well-supported") would
+make the cut logic essentially unusable on any tree that doesn't carry
+bootstrap values or branch lengths, which describes a lot of real gene-family
+input, including this feature's own worked example below.
+
+`dupsupport` defaults to `0.5`.
+
+#### The informativeness floor
+
+`minfragtaxa` (default `4`) and `minfragspecies` (default `4`) gate whether a
+candidate fragment is worth keeping on its own, or should be pruned down to a
+representative and merged back into its sibling instead. `minfragtaxa=4`
+reuses the same floor `qfit` already applies internally (`scoring.c`, quartet
+scoring is undefined below 4 taxa) — exposing it as an option here rather
+than adding a second hardcoded literal for the same constraint.
+
+`minfragspecies` defaults to `4` as well, **not** the smaller value you might
+expect for a secondary check — the reasoning is worth spelling out, because
+it's not obvious from the option's one-line description alone. A fragment can
+satisfy `minfragtaxa=4` with, say, 4 leaves from only 2 species (two
+in-paralog pairs that Stage 1's topology-only monophyly test happened to
+miss). Since Clann's delimiter mode already collapses every gene copy of a
+species to the same taxon identity for any species-tree-level comparison
+(`qfit` and friends), such a fragment is exactly as phylogenetically
+uninformative — a degenerate quartet — as the raw `<4`-taxa case `minfragtaxa`
+was already there to prevent. Setting `minfragspecies=4` closes that gap: the
+floor is really "4 distinct species", and `minfragtaxa` alone doesn't
+guarantee that.
+
+### Stage 3 — Weighting
+
+A family tree that survives Stage 1/2 as `k` fragments has each fragment
+weighted `1/k`, so a family that duplicated heavily and produced many small
+fragments doesn't out-vote a family that never duplicated and contributes one
+fragment at weight 1.0. This is deliberately the simplest possible scheme —
+a size- or informativeness-proportional weighting is a plausible future
+refinement, not implemented here.
 
 ---
 
-## 10. Explicitly out of scope for this work
+## 3. Guide-tree resolution
 
-- Implementing the deep-coalescence/MDC criterion itself (`criterion=mdc`) —
-  this note is only about producing clean ortholog-subtree input for
-  *existing* criteria (`qfit` today, `mdc` if it's built later).
-- Any change to `qfit`/`rf`/`recon`/`ml` scoring code — decomposition only
-  changes what goes into `fundamentals[]`, nothing about how those functions
-  score it.
-- Size- or informativeness-proportional fragment weighting (see §6) — ship
-  equal-split first.
+Stage 2 needs a species tree to map gene trees onto. Resolution order
+(`resolve_guide_tree()`, `reconcile.c`), matching `reconstruct`'s existing
+`speciestree=` option for consistency:
+
+```
+1. speciestree=<file> supplied
+       -> read it, hard-error if its taxon set doesn't exactly match
+          the loaded data (both directions: nothing missing, nothing extra)
+2. speciestree=memory, or nothing supplied but a supertree is already
+   in memory (trees_in_memory > 0)
+       -> use retained_supers[0]
+3. Nothing available
+       -> generate one automatically with nj()
+```
+
+Step 3 is the one deliberate difference from `reconstruct`'s own behaviour,
+which hard-errors if nothing is available. `decomposegenetrees` should never
+be fatal for lack of a species tree, since the whole point is that it can run
+standalone with zero setup — `nj()` (an existing, already-used function) is a
+perfectly serviceable fallback.
+
+---
+
+## 4. Two commands, two destructiveness levels
+
+Mirroring the existing `prunemonophylies`/`autoprunemono` split exactly:
+
+| | `decomposegenetrees` | `exe ... autodecompose=yes` |
+|---|---|---|
+| When it runs | On demand, standalone command | At load time, as part of `exe` |
+| Destructive? | No — only writes `<filename>` + `<filename>_info.txt` | Yes — commits fragments into `fundamentals[]` immediately |
+| Adopting the result | `exe <filename>` afterwards | Already live |
+
+### Why the destructive path reloads through `exe`, not a hand-rolled update
+
+Decomposition changes `Total_fund_trees` (one family tree becomes `k`
+fragments), which invalidates every piece of per-tree derived state computed
+at load time — `presence_of_taxa[][]`, the RF bipartition cache, the `dfit`
+distance matrices, `sourcetree_scores[]`, `tree_weights[]` sizing, taxon
+hashes, and so on. Re-deriving all of that by hand in a second code path,
+parallel to what `execute_command()` already does for a freshly loaded file,
+would duplicate logic Clann already trusts to do this correctly. So
+`autodecompose_apply()` instead: writes the fragments to
+`autodecomposed_fragments.txt` using the same `<filename>`/`<filename>_info.txt`
+machinery `decomposegenetrees` uses, then calls `execute_command()` on that
+file — the exact same registration path a fresh `exe <file>` takes. This is
+the only place in the implementation that reuses Clann's own file-loading
+parser rather than working with the in-memory tree structures directly.
+
+### Getting a per-fragment weight into that file
+
+Clann's plain-Newick ("Phylip format") reader already understands a bracketed
+float placed **before** a tree's opening `(`, parsed straight into
+`tree_weights[]`:
+
+```
+[0.333333](A,(B,C));[fragment_name]
+```
+
+— so Stage 3's `1/k` weights ride through the existing loader for free, no
+parser changes needed. There is one quirk to work around: the code that runs
+*before* the very first tree in a file unconditionally treats any leading
+`[...]` as a discardable comment, so **the first tree in a file can never
+pick up a weight via this annotation** — it silently keeps its default of
+1.0. `build_decompose_output_text()` works around this by always writing a
+naturally weight-1.0 fragment first when one exists (a Stage-1 passthrough,
+or any family that didn't need splitting) — true for realistic datasets,
+since most families in a run are single-copy already. For `autodecompose`
+specifically this quirk doesn't matter in practice anyway: after the reload,
+the correct per-fragment weight is re-applied explicitly in memory from
+Stage 3's own record, matched by fragment name rather than relying on the
+file annotation surviving intact.
+
+### Reconciliation still needs the real, undecomposed trees
+
+`reconstruct` (and `criterion=recon`) exist specifically to report
+duplication/loss counts — reconciling against already-decomposed,
+already-single-copy fragments would silently report near-zero duplications
+everywhere, which defeats the purpose of running them at all. `autodecompose`
+therefore keeps a full snapshot of the pristine (pre-decomposition) gene-tree
+set — as resolved full-name Newick text, taken immediately before Stage 1
+runs — independent of `fundamentals[]`'s own lifetime, so it survives the
+`execute_command()` reload that follows. `reconstruct` checks a
+`decompose_active` flag (mirroring `autoprunemono_active`'s existing
+precedent exactly) and, when set, temporarily reloads that pristine snapshot
+in place of the live decomposed pool for the duration of the reconciliation,
+then restores the decomposed pool afterward — printing an equivalent message
+to the existing `"(Using original unpruned trees for reconstruct)"` one.
+
+No separate "undo" command is needed: decomposition never modifies the file
+the user originally loaded from, so `exe <original file>` — a plain reload —
+always fully restores the pre-decomposition state from scratch, in any
+session.
+
+---
+
+## 5. Worked example — `examples/tutorial_multicopy.ph`, tree 6
+
+```
+((((Human.alpha,Chimp),(Human.beta,Gorilla)),Orangutan),Macaque);
+```
+
+`Human.alpha` and `Human.beta` are *not* sisters — one pairs with Chimp, the
+other with Gorilla — so Stage 1's monophyly test doesn't fire at all; this
+tree reaches Stage 2 unchanged. Running
+
+```
+decomposegenetrees minfragtaxa=2 minfragspecies=1
+```
+
+(a looser floor than the default, chosen only because this fixture's
+families are too small — 6-9 leaves — to clear the real `minfragtaxa=4
+minfragspecies=4` defaults) produces:
+
+```
+Tree # 6 [  ]: cut at duplication node -> 2 new fragment(s)
+```
+
+and three surviving fragments in `decomposedtrees.txt`:
+
+```
+[0.333333]((Human.beta,Gorilla));[tree6_frag1]
+[0.333333]((Orangutan,Macaque));[tree6_frag2]
+[0.333333]((Human.alpha,Chimp));[tree6_frag3]
+```
+
+Each is single-copy, each is weighted `1/3` so the family's total
+contribution still sums to 1, and together they salvage real phylogenetic
+signal (the Human/Chimp and Human/Gorilla speciation relationships) from a
+tree that the existing single-copy filter would otherwise have discarded
+completely.
+
+Tree 7 of the same fixture —
+
+```
+(((Human.a,(Chimp,Gorilla)),(Human.b,(Orangutan,Macaque))),(Mouse,Rat));
+```
+
+— demonstrates the mixed cut/merge branch: it cuts once, then on one side
+prunes an uninformative 1-taxon sibling clade (`Human.a`, below even the
+loosened `minfragtaxa=2` floor here) and merges its representative into the
+passing side, while the other spun-off side is dropped entirely for still
+being too small:
+
+```
+Tree # 7 [  ]: cut at duplication node -> 2 new fragment(s)
+Tree # 7 [  ]: pruned uninformative sibling clade under duplication node
+    (< minfragtaxa=2/minfragspecies=1) -> kept Human.b, merged into sibling
+Tree # 7 [  ]: dropped a 1-leaf fragment (below minfragtaxa=2)
+```
+
+---
+
+## 6. Summary diagram
+
+```
+exe <file>                                    exe <file> autodecompose=yes
+    │                                                  │
+    ▼                                                  ▼
+fundamentals[] loaded normally               fundamentals[] loaded normally
+                                                         │
+decomposegenetrees [options]                  Stage 0: snapshot pristine
+    │                                              trees (pre_decompose_*)
+    ├─ resolve_guide_tree()                          │
+    │                                          resolve_guide_tree()
+    ├─ Stage 1: collapse_monophyly_in_tree()          │
+    │      per source tree                    Stage 1 + Stage 2 + Stage 3
+    │                                              (same functions as the
+    ├─ Stage 2: decompose_gene_tree_stage2()          standalone command)
+    │      per still-multicopy tree                   │
+    │                                          write autodecomposed_fragments.txt
+    ├─ Stage 3: 1/k weighting                          │
+    │                                          execute_command(fragments file)
+    ├─ write <filename> + <filename>_info.txt     — the SAME registration path
+    │      (fundamentals[] untouched)               a fresh `exe` uses —
+    │                                              presence_of_taxa[][], RF
+    └─ print "exe <filename> to adopt"             bipartition cache, dfit
+                                                    matrices, tree_weights[]
+                                                    sizing all rebuilt for free
+                                                         │
+                                              decompose_active = 1
+                                              fragments live in fundamentals[]
+                                                         │
+                                    ┌────────────────────┴───────────────────┐
+                                    ▼                                        ▼
+                          hs / nj / alltrees                          reconstruct
+                    use the decomposed fragment pool          swaps to pre_decompose_*
+                                                                for real dup/loss counts,
+                                                                then swaps back
+```
+
+---
+
+## 7. Explicitly out of scope
+
+- The deep-coalescence/MDC criterion itself — this feature only produces
+  clean ortholog-subtree input for existing criteria (`qfit` today, `mdc` if
+  it's built later); no scoring code is touched.
+- Size- or informativeness-proportional fragment weighting — ship equal-split
+  (`1/k`) first.
 - Iterative refinement (decompose → build supertree → re-decompose against
-  the improved guide tree → repeat) — worth doing later once the single-pass
-  version works and its output has been sanity-checked on real data.
+  the improved guide tree → repeat) — worth revisiting once the single-pass
+  version has been used on real data.
+
+See [USER_MANUAL.md](USER_MANUAL.md) (`Autodecompose`/`decomposegenetrees`
+sections) for the full command reference, and
+[TUTORIAL.md](TUTORIAL.md) (Part 5) for a hands-on walkthrough.

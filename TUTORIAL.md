@@ -300,6 +300,128 @@ the species delimiter, which is the Clann default. `Human.alpha` and `Human.beta
 are treated as two copies of species `Human`. If your data uses a different
 delimiter, set it with `set delimiter_char=X` before loading trees.
 
+### Beyond pruning: `decomposegenetrees` and `autodecompose`
+
+`autoprunemono` only helps when a multicopy family collapses to single-copy by
+removing purely same-species clades (in-paralogs). It cannot do anything with
+a tree like line 7 of `tutorial_multicopy.ph`,
+`((((Human.alpha,Chimp),(Human.beta,Gorilla)),Orangutan),Macaque)`, where the
+two `Human` copies are **out-paralogs** — they sit on either side of a real
+duplication node, each paired with a different other species. No
+representative-picking collapse can turn that into one single-copy tree
+without losing one whole side's signal.
+
+`decomposegenetrees` handles this case by reconciling each multicopy gene
+tree against a guide species tree and **cutting** at well-supported
+duplication nodes, splitting the family into two (or more) maximal
+single-copy-ish **ortholog subtree fragments** instead of discarding one side.
+Each fragment is written back out with weight `1/k` (k = number of fragments
+from that source tree), so the family's total contribution to a supertree
+search still sums to 1.
+
+Unlike `autoprunemono`, `decomposegenetrees` is **non-destructive** by
+default — it only writes files, it does not touch the trees currently in
+memory:
+
+```bash
+clann exe examples/tutorial_multicopy.ph
+clann> decomposegenetrees minfragtaxa=2 minfragspecies=1
+```
+
+(The tutorial fixture is small — 6-9 leaves per family — so the command's
+own defaults, `minfragtaxa=4 minfragspecies=4`, are too strict to produce any
+fragments from trees 6/7 here; a real dataset with larger gene families
+would normally just use the defaults. `minfragtaxa`/`minfragspecies` set the
+floor a candidate fragment must clear — in leaves and in distinct species
+respectively — to be kept rather than dropped or merged back into a
+sibling. `minfragspecies` defaults to `4`, matching `minfragtaxa`, since a
+fragment's phylogenetic informativeness for quartet-based criteria depends
+on distinct species diversity, not raw leaf count.)
+
+This writes `decomposedtrees.txt` (the fragments, ready to `exe`) and
+`decomposedtrees.txt_info.txt` (a decision log). The decision log entries for
+line 7 (0-indexed tree 6) of the fixture look like this:
+
+```
+Tree # 6 [  ]
+	KEPT:Macaque
+	Tree # 6 [  ]: cut at duplication node -> 2 new fragment(s)
+```
+
+and the corresponding lines written to `decomposedtrees.txt`:
+
+```
+[0.333333]((Human.beta,Gorilla));[tree6_frag1]
+[0.333333]((Orangutan,Macaque));[tree6_frag2]
+[0.333333]((Human.alpha,Chimp));[tree6_frag3]
+```
+
+Three single-copy fragments, each weighted `1/3`, together covering all six
+of the original tree's leaves with no species duplicated in any one
+fragment.
+
+To adopt the fragments into the working pool, `exe` the output file (this is
+the same reload step `prunemonophylies`'s output would need, and it is
+spelled out by the command's own closing message):
+
+```bash
+clann> exe decomposedtrees.txt
+```
+
+**File-format quirk worth knowing if you `exe` a `decomposegenetrees` output
+file by hand:** Clann's Newhampshire/Phylip reader supports an optional
+`[weight]` bracket immediately before each tree, e.g. `[0.333333](...);`. A
+`[...]` seen before the very first tree in a file is always treated as a
+discardable leading comment, so the first tree in the file can never receive
+a weight via this syntax. `decomposegenetrees`/`autodecompose` route around
+this by always writing a naturally weight-`1.0` fragment first when one
+exists (true for this fixture, since lines 1-3/4-6 are always weight-1
+passthroughs) — the only case where this could still bite is a file where
+every single surviving fragment needs a non-1.0 weight, which the info file's
+header notes explicitly.
+
+`autodecompose=yes` runs the same decomposition automatically at load time
+and, unlike the standalone command, commits the fragments straight into the
+working pool (destructive to the in-memory pool, never to your input file):
+
+```bash
+clann exe examples/tutorial_multicopy.ph autodecompose=yes
+```
+
+Output:
+```
+autodecompose: committed 7 fragments decomposed from 8 original gene tree families.
+Decision log written to "autodecomposed_fragments.txt_info.txt"
+(Original pristine gene trees preserved in memory for 'reconstruct'.)
+To restore the original gene trees, run: exe tutorial_multicopy.ph
+```
+
+After this, all 7 fragments are single-copy and available to any criterion,
+including `qfit`:
+
+```bash
+clann> set criterion=qfit
+clann> hs
+```
+
+`reconstruct` still works exactly as it does with `autoprunemono` — it
+transparently swaps back to the **pristine, pre-decomposition** gene trees
+for the duration of the reconciliation, so duplication/loss counts are
+computed against the real multicopy families rather than the fragments, then
+restores the decomposed pool afterward:
+
+```bash
+clann> nj
+clann> reconstruct speciestree=memory
+```
+
+To fully restore the original, non-decomposed session state, just reload the
+original file, exactly as with `autoprunemono`:
+
+```bash
+clann> exe examples/tutorial_multicopy.ph
+```
+
 ---
 
 ## Part 6: Exploring tree space with visitedtrees

@@ -236,6 +236,10 @@ FILE * infile = NULL, *BR_file = NULL, *commands_file=NULL, *psfile = NULL, *log
 char **taxa_names = NULL, *commands_filename = NULL, ***fulltaxanames = NULL, **parsed_command = NULL, **fundamentals = NULL, **stored_funds = NULL, **retained_supers = NULL, **stored_commands = NULL, *tempsuper = NULL, **best_topology = NULL, **tree_names = NULL;
 char **original_fundamentals = NULL;   /* originals preserved for reconstruct when autoprunemono is active */
 int   autoprunemono_active   = 0;      /* set to TRUE when autoprunemono=yes was used at load time */
+char **pre_decompose_fundamentals = NULL; /* whole-dataset snapshot: pristine pre-decompose gene trees */
+char **pre_decompose_tree_names   = NULL; /* whole-dataset snapshot: matching tree names */
+int    pre_decompose_total_trees  = 0;    /* tree count the above two snapshots are sized to */
+int    decompose_active           = 0;    /* set to TRUE when autodecompose=yes has committed */
 int  *numtaxaintrees = NULL, fullnamesnum = 0, fullnamesassignments = 1, fundamental_assignments = 0, tree_length_assignments = 1, parsed_command_assignments = 1, name_assignments = 0, *taxa_incidence = NULL, number_of_taxa = 0, Total_fund_trees = 0, *same_tree = NULL, **Cooccurrance = NULL, NUMSWAPS = 0;
 int ***fund_scores = NULL, ***stored_fund_scores = NULL, **super_scores = NULL, *number_of_comparisons = NULL, *stored_num_comparisons = NULL, **presence_of_taxa = NULL, **stored_presence_of_taxa = NULL, *presenceof_SPRtaxa = NULL;
 int seed, num_commands = 0, number_retained_supers = 10, number_of_steps = 99999, largest_tree = 0, smallest_tree = 1000000, criterion = 0, parts = 0, **total_coding = NULL, *coding_from_tree = NULL, total_nodes = 0, quartet_normalising = 3, splits_weight = 2, dweight =1, *from_tree = NULL, method = 3, tried_regrafts = 0, hsprint = TRUE, max_name_length = NAME_LENGTH, got_weights = FALSE, num_excluded_trees = 0, num_excluded_taxa = 0, calculated_fund_scores = FALSE, select_longest=FALSE;

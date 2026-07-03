@@ -39,6 +39,15 @@ void  nj(void);
 void  sourcetree_dists(void);
 void  spr_dist(void);
 void  reconstruct(int print_settings);
+int   decompose_use_pristine_for_reconstruct(void);
+void  decompose_restore_after_reconstruct(void);
+int   resolve_guide_tree(char *speciestree_opt, char *out_tree, char *error_msg);
+int   decompose_gene_tree_stage2(int treenum, char *guide_tree_str, float dupsupport, int minfragtaxa, int minfragspecies, FILE *fragfile, FILE *infofile);
+struct decompose_fragment; /* full definition in reconcile.h */
+int   decompose_gene_trees_stage3(char *guide_tree_str, float dupsupport, int minfragtaxa, int minfragspecies, FILE *infofile, struct decompose_fragment **out_frags);
+char *build_decompose_output_text(struct decompose_fragment *frags, int n);
+void  free_decompose_fragments(struct decompose_fragment *frags, int n);
+void  decompose_gene_trees_cmd(void);
 void  hgt_reconstruction(void);
 void  mapunknowns(void);
 void  generatetrees(void);

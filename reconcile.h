@@ -41,6 +41,37 @@ void  tree_coordinates(char *tree, int bootstrap, int build, int mapping, int fu
  * Neighbour-joining supertree command
  * ----------------------------------------------------------------------- */
 void  nj(void);
+int   resolve_guide_tree(char *speciestree_opt, char *out_tree, char *error_msg);
+int   decompose_gene_tree_stage2(int treenum, char *guide_tree_str, float dupsupport, int minfragtaxa, int minfragspecies, FILE *fragfile, FILE *infofile);
+
+/* -----------------------------------------------------------------------
+ * decomposegenetrees Stage 3: weighting and pool-integration prep
+ * (see NOTES_gene_tree_decomposition.md §5 Stage 3 / §9 step 4). Does NOT
+ * itself touch fundamentals[]/presence_of_taxa[][]/Total_fund_trees -- it
+ * only produces an in-memory fragment list (with weights already assigned)
+ * plus the exact bracket-annotated text ("[weight](tree);[name]") that a
+ * caller can write to disk and reload via clann_load_trees()/execute_command,
+ * per §6.2's "let the existing loader do pool registration" decision. That
+ * reload wiring itself is step 5/6's job, not this one's. */
+struct decompose_fragment
+	{
+	char  *newick;          /* fragment Newick, trailing ';', NO weight bracket */
+	char   name[NAME_LENGTH];
+	float  weight;          /* 1.0 for Stage 1 passthroughs, 1.0/k for Stage 2 output */
+	int    source_treenum;  /* index into fundamentals[]/tree_names[] this came from */
+	int    fragindex;       /* 1-based index of this fragment within its source family */
+	int    k;               /* total surviving fragments from source_treenum (this->weight == 1.0f/k, or 1 for a passthrough) */
+	};
+
+int   decompose_gene_trees_stage3(char *guide_tree_str, float dupsupport, int minfragtaxa, int minfragspecies, FILE *infofile, struct decompose_fragment **out_frags);
+char *build_decompose_output_text(struct decompose_fragment *frags, int n);
+void  free_decompose_fragments(struct decompose_fragment *frags, int n);
+
+/* -----------------------------------------------------------------------
+ * decomposegenetrees CLI command (see NOTES_gene_tree_decomposition.md §3,
+ * §9 step 5). Non-destructive: writes <filename>/<filename>_info.txt only.
+ * ----------------------------------------------------------------------- */
+void  decompose_gene_trees_cmd(void);
 
 /* -----------------------------------------------------------------------
  * Gene-tree / species-tree reconciliation

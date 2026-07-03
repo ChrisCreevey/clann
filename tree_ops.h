@@ -89,6 +89,7 @@ void  print_named_tree(struct taxon *position, char *tree);
 void  print_fullnamed_tree(struct taxon *position, char *tree, int fundtreenum);
 void  print_tree(struct taxon *position, char *tree);
 void  print_single_subtree(struct taxon *node, char *buf);
+void  print_single_subtree_named(struct taxon *node, char *buf);
 void  print_tree_withinternals(struct taxon *position, char *tree);
 
 /* -----------------------------------------------------------------------
