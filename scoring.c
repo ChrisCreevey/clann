@@ -294,11 +294,19 @@ static int collect_biparts_newick_sz(const char *nwk, uint64_t total_hash,
             uint64_t comp    = total_hash ^ child_h;
             uint64_t bh      = (child_h < comp) ? child_h : comp;
             int stored = 0;
-            if(bh != 0)
+            int other_c    = ntaxa - child_c;
+            int min_side   = (child_c < other_c) ? child_c : other_c;
+            /* Skip trivial bipartitions: bh==0 is the empty/full split; min_side<2
+             * is a pendant (leaf) edge — non-informative for RF. A pendant split
+             * can appear as a spurious internal edge when a source tree is stored
+             * with a redundant degree-2 root (extra outer parentheses), e.g.
+             * '(((A,(B,C)),D));'. Counting it inflates the source-tree bipartition
+             * count and makes an otherwise-displayed tree look like a conflict,
+             * producing scores inconsistent with the exhaustive/usertrees path. */
+            if(bh != 0 && min_side >= 2)
                 {
-                int other_c    = ntaxa - child_c;
                 out[cnt]       = bh;
-                sizes_out[cnt] = (child_c < other_c) ? child_c : other_c;
+                sizes_out[cnt] = min_side;
                 cnt++;
                 stored = 1;
                 }

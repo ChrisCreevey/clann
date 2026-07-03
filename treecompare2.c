@@ -290,6 +290,13 @@ int    rep_abandon         = 0;    /* threadprivate: set when this rep should be
 int    hs_par_rep          = 0;    /* threadprivate: 1-based rep number for the rep currently running on this thread */
 int    hs_thread_report_interval = 0; /* shared: per-thread status report interval in seconds (0=disabled) */
 time_t thread_report_last = 0;        /* threadprivate: wall-clock time of last per-thread status print */
+int    plateau_moves       = 0;    /* threadprivate: consecutive equal-score lateral moves since last strict improvement */
+int    hs_plateau          = 1;    /* shared: 1=allow equal-score lateral moves to cross plateaus; 0=strict hill-climb */
+int    hs_max_plateau      = -1;   /* shared: max consecutive lateral plateau moves (0=disabled, -1=auto: 2*N) */
+int    hs_max_plateau_is_auto = 1; /* 1=auto-scale to 2*N at search start; 0=user set an explicit value */
+int    hs_ils_kicks        = 10;   /* shared: iterated-local-search kicks without improvement before a rep stops (0=ILS disabled) */
+int    hs_ils_strength     = 3;    /* shared: number of random SPR moves applied per ILS perturbation kick */
+double hs_exhaustive_limit = 1000000.0; /* shared: for user hs, auto-route to exhaustive alltrees when tree space <= this (0=never) */
 
 /****** OpenMP thread-private state: one independent copy per thread in parallel regions ******/
 #ifdef _OPENMP
@@ -303,7 +310,7 @@ time_t thread_report_last = 0;        /* threadprivate: wall-clock time of last 
     thread_seed, \
     visited_set, thread_visited_acc, landscape_map, \
     rep_start_time, hs_do_print, last_status_score, \
-    skip_streak, nni_swaps, rep_abandon, hs_par_rep, thread_report_last, \
+    skip_streak, nni_swaps, rep_abandon, hs_par_rep, thread_report_last, plateau_moves, \
     fundamentals, presence_of_taxa, fund_scores, number_of_comparisons, \
     fund_bipart_sets \
 )
@@ -3580,6 +3587,7 @@ void heuristic_search(int user, int print, int sample, int nreps)
     {
     int i=0, j=0, k=0, l=0, swaps = 0, keep = 0, nbest = 0, start = 2, error = FALSE, numswaps = 1000000, different=TRUE, do_histogram = FALSE, here = FALSE, **taxa_comp = NULL, bins = 20, found = FALSE, missing_method = 1, random_num, numspectries = 2, numgenetries = 2, nthreads = 1;
     hs_maxskips_is_auto = 1;   /* reset: auto-scale N² unless user sets maxskips= this call */
+    hs_max_plateau_is_auto = 1;/* reset: auto-scale plateau budget unless user sets maxplateau= this call */
     char *tree = NULL, c = '\0', *best_tree = NULL, *temptree = NULL, **starths = NULL, userfilename[10000], useroutfile[10000], histogramfile_name[10000];
     char *memory_start_tree = NULL;  /* saved copy of retained_supers[0] for start=memory (captured at parse time, before the retained_supers reset) */
     FILE *userfile = NULL, *outfile = NULL, *paupfile = NULL, *histogram_file = NULL;
@@ -3963,6 +3971,59 @@ void heuristic_search(int user, int print, int sample, int nreps)
 				}
 			hs_maxskips_is_auto = 0;   /* user has set an explicit value — don't auto-scale */
 			}
+		if(strcmp(parsed_command[i], "plateau") == 0)
+			{
+			if(strcmp(parsed_command[i+1], "yes") == 0)
+				hs_plateau = 1;
+			else if(strcmp(parsed_command[i+1], "no") == 0)
+				hs_plateau = 0;
+			else
+				{
+				printf2("Error: plateau must be 'yes' or 'no'\n");
+				error = TRUE;
+				}
+			}
+		if(strcmp(parsed_command[i], "maxplateau") == 0)
+			{
+			hs_max_plateau = toint(parsed_command[i+1]);
+			if(hs_max_plateau < 0)
+				{
+				printf2("Error: maxplateau must be >= 0 (0=disabled)\n");
+				hs_max_plateau = -1;
+				error = TRUE;
+				}
+			hs_max_plateau_is_auto = 0;   /* user has set an explicit value — don't auto-scale */
+			}
+		if(strcmp(parsed_command[i], "maxexhaustive") == 0)
+			{
+			hs_exhaustive_limit = atof(parsed_command[i+1]);
+			if(hs_exhaustive_limit < 0)
+				{
+				printf2("Error: maxexhaustive must be >= 0 (0=never auto-route to exhaustive)\n");
+				hs_exhaustive_limit = 0;
+				error = TRUE;
+				}
+			}
+		if(strcmp(parsed_command[i], "ils") == 0)
+			{
+			hs_ils_kicks = toint(parsed_command[i+1]);
+			if(hs_ils_kicks < 0)
+				{
+				printf2("Error: ils must be >= 0 (0=disabled; N=perturb+re-optimise until N kicks yield no improvement)\n");
+				hs_ils_kicks = 0;
+				error = TRUE;
+				}
+			}
+		if(strcmp(parsed_command[i], "ilsstrength") == 0)
+			{
+			hs_ils_strength = toint(parsed_command[i+1]);
+			if(hs_ils_strength < 1)
+				{
+				printf2("Error: ilsstrength must be >= 1 (number of random SPR moves per perturbation)\n");
+				hs_ils_strength = 3;
+				error = TRUE;
+				}
+			}
 		if(strcmp(parsed_command[i], "strategy") == 0)
 			{
 			if(strcmp(parsed_command[i+1], "first") == 0)
@@ -4127,6 +4188,31 @@ void heuristic_search(int user, int print, int sample, int nreps)
     if(!error)
         {
 
+        /* Small-tree exhaustive auto-routing: when the whole supertree space is
+         * small enough to score in full, an exhaustive search is both faster and
+         * guaranteed to find the global optimum, so a heuristic hill-climb (which
+         * can trap in local optima) is the wrong tool. Route the user's 'hs' call
+         * to alltrees_search() when the number of distinct unrooted supertrees
+         * (sup) is at or below hs_exhaustive_limit. Only for criteria that
+         * alltrees_search scores directly (dfit/sfit/qfit/rf/ml); MRP, avcon and
+         * recon are excluded. Disabled by maxexhaustive=0. */
+        if(user && hs_exhaustive_limit > 0 && sup >= 1 && sup <= hs_exhaustive_limit
+           && (criterion == 0 || criterion == 2 || criterion == 3 ||
+               criterion == 6 || criterion == 7))
+            {
+            if(hsprint)
+                printf2("\nSupertree space is small (%g possible trees <= maxexhaustive=%g):\n"
+                        "  running an exhaustive search instead of the heuristic — this is\n"
+                        "  faster here and guaranteed to find the global optimum.\n"
+                        "  (set 'maxexhaustive 0' to force the heuristic search.)\n",
+                        sup, hs_exhaustive_limit);
+            alltrees_search(user);
+            free(best_tree);
+            free(temptree);
+            if(memory_start_tree) free(memory_start_tree);
+            return;
+            }
+
 		if(sample > sup) sample=sup;
 		if(nreps > sup) nreps=sup;
 
@@ -4135,6 +4221,12 @@ void heuristic_search(int user, int print, int sample, int nreps)
          * N=10 → 1000, N=20 → 8000, N=30 → 27000, N=50 → 125000. */
         if(hs_maxskips_is_auto)
             hs_maxskips = number_of_taxa * number_of_taxa * number_of_taxa;
+
+        /* Auto-scale the plateau-move budget to 2*N when no explicit value was
+         * given: enough lateral steps to walk across a typical flat region but
+         * bounded so the search cannot wander indefinitely on huge plateaus. */
+        if(hs_max_plateau_is_auto)
+            hs_max_plateau = 2 * number_of_taxa;
 
         /* Initialise global landscape map if visitedtrees= was specified */
         if(g_landscape_file[0])
@@ -4196,6 +4288,20 @@ void heuristic_search(int user, int print, int sample, int nreps)
                     }
                 else
                     printf2("\tMax consecutive visited skips (maxskips) = disabled\n");
+                if(hs_plateau && hs_max_plateau != 0)
+                    {
+                    if(hs_max_plateau_is_auto)
+                        printf2("\tPlateau (equal-score) lateral moves (maxplateau) = %d (auto: 2*N)\n", hs_max_plateau);
+                    else
+                        printf2("\tPlateau (equal-score) lateral moves (maxplateau) = %d\n", hs_max_plateau);
+                    }
+                else
+                    printf2("\tPlateau (equal-score) lateral moves (plateau) = disabled\n");
+                if(hs_ils_kicks > 0)
+                    printf2("\tIterated local search (ils) = on (%d kicks w/o improvement; strength=%d random SPRs)\n",
+                            hs_ils_kicks, hs_ils_strength);
+                else
+                    printf2("\tIterated local search (ils) = disabled\n");
 #ifdef _OPENMP
                 if(hs_progress_interval == 0)
                     printf2("\tParallel progress reporting (progress) = every improvement\n");
@@ -5418,9 +5524,136 @@ void heuristic_search(int user, int print, int sample, int nreps)
 
 
 
+/* hs_random_spr_perturb: apply `nmoves` random SPR moves to in_nwk, writing the
+ * result to out_nwk. Used by the iterated-local-search (ILS) escape to kick a
+ * converged local optimum into a nearby but different basin. Pure string-native
+ * operations via spr_tree.c (no clann pointer surgery). All taxa are preserved
+ * (SPR = prune + regraft the same subtree), so the taxon count is unchanged.
+ * Thread-safe: uses rand_r(&thread_seed) and only stack/heap-local state. */
+static void hs_random_spr_perturb(const char *in_nwk, char *out_nwk, int nmoves)
+    {
+    char *cur = malloc(TREE_LENGTH * sizeof(char));
+    char *sub = malloc(TREE_LENGTH * sizeof(char));
+    char *rem = malloc(TREE_LENGTH * sizeof(char));
+    if(!cur || !sub || !rem) { free(cur); free(sub); free(rem); if(out_nwk != in_nwk) strcpy(out_nwk, in_nwk); return; }
+    strcpy(cur, in_nwk);
+
+    for(int m = 0; m < nmoves && !user_break; m++)
+        {
+        struct spr_node *t = spr_parse(cur);
+        if(!t) break;
+        int nn = spr_count_nodes(t);
+        struct spr_node **edges = malloc((nn + 1) * sizeof(struct spr_node *));
+        int ne = 0;
+        if(edges) spr_get_edges(t, edges, &ne);
+        if(!edges || ne < 2) { free(edges); spr_free(t); break; }
+
+        int pe = (int)(rand_r(&thread_seed) % (unsigned)ne);  /* random prune edge */
+        if(spr_bisect(t, edges[pe], sub, rem, TREE_LENGTH) != 0)
+            { free(edges); spr_free(t); continue; }
+
+        struct spr_node *remt = spr_parse(rem);
+        if(!remt) { free(edges); spr_free(t); continue; }
+        int nrn = spr_count_nodes(remt);
+        struct spr_node **gedges = malloc((nrn + 1) * sizeof(struct spr_node *));
+        int nge = 0;
+        if(gedges) spr_get_edges(remt, gedges, &nge);
+        if(!gedges || nge < 1) { free(gedges); spr_free(remt); free(edges); spr_free(t); continue; }
+
+        int ge = (int)(rand_r(&thread_seed) % (unsigned)nge);  /* random graft edge */
+        spr_graft(sub, remt, gedges[ge], cur, TREE_LENGTH);    /* cur := new topology */
+
+        free(gedges); spr_free(remt);
+        free(edges); spr_free(t);
+        }
+
+    strcpy(out_nwk, cur);
+    free(cur); free(sub); free(rem);
+    }
+
+/* hs_local_search: run SPR/TBR to convergence from the current tree_top, then a
+ * post-SPR/TBR NNI refinement pass. On entry tree_top holds the starting tree;
+ * on exit rep_spr_result holds the best Newick found and tree_top is the
+ * NNI-refined tree. sprscore and the global-best retained_supers[] are updated
+ * by the scoring path as usual. Factored out of do_search so the ILS loop can
+ * re-run the same local search after each perturbation kick. */
+static void hs_local_search(int maxswaps, int numspectries, int numgenetries, char *rep_spr_result)
+    {
+    int better_score = TRUE;
+
+    /* Capture the starting tree as the initial best-of-this-descent. */
+    rep_spr_result[0] = '\0';
+    print_named_tree(tree_top, rep_spr_result);
+    strcat(rep_spr_result, ";");
+    while(unroottree(rep_spr_result));
+
+    do/* SPR/TBR to convergence */
+        {
+#ifdef _OPENMP
+        #pragma omp flush(user_break)
+#endif
+        if(user_break) break;
+        branchpointer = NULL;
+        if(method == 3)
+            better_score = tbr_new2(tree_top, maxswaps, numspectries, numgenetries);
+        else
+            better_score = spr_new3(tree_top, maxswaps, numspectries, numgenetries);
+        if(better_score)
+            {
+            /* tree_top is valid here — save before next pass may corrupt it */
+            rep_spr_result[0] = '\0';
+            print_named_tree(tree_top, rep_spr_result);
+            strcat(rep_spr_result, ";");
+            while(unroottree(rep_spr_result));
+            }
+        /* droprep: only when this pass found no improvement — the descent has
+         * converged and can be meaningfully compared to the global best. */
+#ifdef _OPENMP
+        if(!better_score && hs_droprep > 0.0f && omp_get_num_threads() > 1 &&
+           sprscore != -1.0f)
+            {
+            float _pbest;
+            #pragma omp atomic read
+            _pbest = par_progress_best;
+            if(_pbest != -1.0f)
+                {
+                float _denom = _pbest > 0.0f ?  _pbest
+                             : _pbest < 0.0f ? -_pbest : 1.0f;
+                if((sprscore - _pbest) / _denom > hs_droprep)
+                    rep_abandon = 1;
+                }
+            }
+#endif
+        }while(better_score == TRUE && tried_regrafts < maxswaps && !user_break && !rep_abandon
+           && (hs_maxskips == 0 || skip_streak < hs_maxskips));
+
+    /* Post-SPR/TBR NNI refinement pass: polish the local optimum found by
+     * SPR/TBR with fast NNI swaps until no further improvement. */
+    nni_swaps = 0;
+    if(!user_break && !rep_abandon)
+        {
+        if(tree_top != NULL) { dismantle_tree(tree_top); tree_top = NULL; }
+        temp_top = NULL;
+        { int _to = 0; tree_build(1, rep_spr_result, tree_top, TRUE, -1, &_to); }
+        tree_top = temp_top;
+        temp_top = NULL;
+        fix_parent_pointers(tree_top, NULL);
+        branchpointer = NULL;
+        nni_swaps = branchswap(maxswaps, -1, numspectries, numgenetries);
+        /* Keep rep_spr_result in sync with the NNI-refined global best so the
+         * ILS loop perturbs the polished topology, not the pre-NNI one. */
+        if(scores_retained_supers[0] >= 0.0f && retained_supers[0][0] != '\0')
+            {
+            strcpy(rep_spr_result, retained_supers[0]);
+            if(sprscore < 0.0f || scores_retained_supers[0] < sprscore)
+                sprscore = scores_retained_supers[0];
+            }
+        }
+    }
+
 int do_search(char *tree, int user, int print, int maxswaps, FILE *outfile, int numspectries, int numgenetries)
     {
-    int swaps = 0, i=0, better_score = TRUE;
+    int swaps = 0, i=0;
 	char *temporary_tree = malloc(TREE_LENGTH * sizeof(char));
 	char *rep_spr_result = NULL;  /* best topology Newick for this rep after SPR/TBR converges */
 
@@ -5443,12 +5676,13 @@ int do_search(char *tree, int user, int print, int maxswaps, FILE *outfile, int 
         hs_do_print       = print;
         last_status_score = -1.0f;
         skip_streak       = 0;
+        plateau_moves     = 0;
         rep_abandon       = 0;
 /*		print_tree(tree_top, temporary_tree);
 		printf2("built tree = %s\n", temporary_tree);
   */      if(method == 1)
             {
-            /* if NNI is to be carried out */       
+            /* if NNI is to be carried out */
             swaps = branchswap(maxswaps,-1, numspectries, numgenetries);
             }
         if(method == 2 || method == 3)
@@ -5456,110 +5690,68 @@ int do_search(char *tree, int user, int print, int maxswaps, FILE *outfile, int 
             sprscore = -1;
             tried_regrafts = 0;
             for(i=0; i<Total_fund_trees; i++) sourcetree_scores[i] = -1;  /* invalidate per-rep cache */
-            /* if SPR is to be carried out */
-/*            while(better_score == TRUE && tried_regrafts < maxswaps && !user_break)
-                {
-                do
-                    {
-                    branchpointer = NULL;
-                    better_score = spr(tree_top, maxswaps, numspectries, numgenetries);
-                    }while(better_score == FALSE && remaining_spr(tree_top) > 0 && tried_regrafts < maxswaps && !user_break);
-					printf2("better_score = %d\t, remaining_spr = %d\ttried_regrafts = %d\tuserbreak = %d\n", better_score, remaining_spr(tree_top), tried_regrafts, user_break);
-                reset_spr(tree_top);
-                }
-            swaps = tried_regrafts;
- */
- 
 
-			/* Allocate a buffer to capture the best topology Newick for this rep.
-			 * spr_new() leaves tree_top in a partially-pruned state after its final
-			 * (non-improving) pass — the last branch pruned in its inner loop is never
-			 * restored.  We save the valid topology after each pass that finds an
-			 * improvement so we can rebuild tree_top cleanly before the NNI pass. */
 			rep_spr_result = malloc(TREE_LENGTH * sizeof(char));
 			rep_spr_result[0] = '\0';
-			print_named_tree(tree_top, rep_spr_result);
-			strcat(rep_spr_result, ";");
-			while(unroottree(rep_spr_result));
 
-			do/* for a single rep */
+			/* Initial local search from the starting tree. */
+			hs_local_search(maxswaps, numspectries, numgenetries, rep_spr_result);
+
+			/* Iterated local search (ILS): escape local optima by perturbing the
+			 * best tree with a few random SPR moves and re-optimising. Keeps the
+			 * better result (walk-on-the-best). A converged SPR/TBR+NNI descent
+			 * stops at a local optimum that plateau moves alone cannot leave;
+			 * the perturbation jumps to a nearby basin so the next descent can
+			 * find a different — possibly deeper — optimum. Stops after
+			 * hs_ils_kicks consecutive kicks yield no improvement. */
+			if(hs_ils_kicks > 0 && !user_break && !rep_abandon)
 				{
-				/* Ensure this thread sees the latest user_break value (ARM64 / Apple
-				 * Silicon requires an explicit OMP flush for cross-core visibility;
-				 * volatile alone only prevents compiler register-caching). */
-#ifdef _OPENMP
-				#pragma omp flush(user_break)
-#endif
-				if(user_break) break;   /* bail out before the expensive spr_new() call */
-				branchpointer = NULL;
-				if(method == 3)
-					better_score = tbr_new2(tree_top, maxswaps, numspectries, numgenetries);
-				else
-					better_score = spr_new3(tree_top, maxswaps, numspectries, numgenetries);
-				if(better_score)
+				char *ils_best     = malloc(TREE_LENGTH * sizeof(char));
+				char *ils_perturbed = malloc(TREE_LENGTH * sizeof(char));
+				if(ils_best && ils_perturbed && retained_supers[0][0] != '\0')
 					{
-					/* tree_top is valid here — save before next pass may corrupt it */
-					rep_spr_result[0] = '\0';
-					print_named_tree(tree_top, rep_spr_result);
-					strcat(rep_spr_result, ";");
-					while(unroottree(rep_spr_result));
+					float ils_best_score  = scores_retained_supers[0];
+					int   kicks_no_improve = 0;
+					strcpy(ils_best, retained_supers[0]);
+					while(kicks_no_improve < hs_ils_kicks && !user_break && !rep_abandon
+					      && tried_regrafts < maxswaps)
+						{
+						/* Perturb the best-known topology. */
+						hs_random_spr_perturb(ils_best, ils_perturbed, hs_ils_strength);
+
+						/* Rebuild tree_top from the perturbed topology and reset the
+						 * per-descent references so the local search climbs from here. */
+						if(tree_top != NULL) { dismantle_tree(tree_top); tree_top = NULL; }
+						temp_top = NULL;
+						{ int _to = 0; tree_build(1, ils_perturbed, tree_top, TRUE, -1, &_to); }
+						tree_top = temp_top;
+						temp_top = NULL;
+						fix_parent_pointers(tree_top, NULL);
+						sprscore     = -1;
+						skip_streak  = 0;
+						plateau_moves = 0;
+
+						hs_local_search(maxswaps, numspectries, numgenetries, rep_spr_result);
+
+						if(scores_retained_supers[0] >= 0.0f &&
+						   (ils_best_score < 0.0f || scores_retained_supers[0] < ils_best_score))
+							{
+							ils_best_score = scores_retained_supers[0];
+							strcpy(ils_best, retained_supers[0]);
+							kicks_no_improve = 0;   /* improved — reset the kick budget */
+							}
+						else
+							kicks_no_improve++;     /* no improvement from this kick */
+						}
 					}
-                /* droprep: only when this SPR pass found no improvement — the rep has
-                 * converged to its local optimum and we can meaningfully compare it to
-                 * the global best.  Checking mid-climb would drop brand-new reps whose
-                 * starting tree is legitimately far from any optimum. */
-#ifdef _OPENMP
-                if(!better_score && hs_droprep > 0.0f && omp_get_num_threads() > 1 &&
-                   sprscore != -1.0f)
-                    {
-                    float _pbest;
-                    #pragma omp atomic read
-                    _pbest = par_progress_best;
-                    if(_pbest != -1.0f)
-                        {
-                        float _denom = _pbest > 0.0f ?  _pbest
-                                     : _pbest < 0.0f ? -_pbest : 1.0f;
-                        if((sprscore - _pbest) / _denom > hs_droprep)
-                            rep_abandon = 1;
-                        }
-                    }
-#endif
-				}while(better_score == TRUE && tried_regrafts < maxswaps && !user_break && !rep_abandon
-			       && (hs_maxskips == 0 || skip_streak < hs_maxskips));
+				free(ils_best);
+				free(ils_perturbed);
+				}
 
             swaps = tried_regrafts;
-
-            /* Post-SPR/TBR NNI refinement pass: polish the local optimum found
-             * by SPR/TBR with fast NNI swaps until no further improvement.
-             * NNI is O(N) per round and can tighten hill-climbing after the
-             * coarser SPR/TBR search, improving inter-rep convergence. */
-            nni_swaps = 0;
-            if(!user_break && !rep_abandon)
-                {
-                /* Rebuild tree_top from the last known-good SPR/TBR topology.
-                 * spr_new() leaves tree_top in a partially-pruned state after its
-                 * final non-improving pass.  Rebuild from the saved Newick so NNI
-                 * operates on the full tree.  Also fixes parent pointers broken
-                 * by regraft() (which sets position->parent = NULL). */
-                if(tree_top != NULL) { dismantle_tree(tree_top); tree_top = NULL; }
-                temp_top = NULL;
-                { int _to = 0; tree_build(1, rep_spr_result, tree_top, TRUE, -1, &_to); }
-                tree_top = temp_top;
-                temp_top = NULL;
-                fix_parent_pointers(tree_top, NULL);
-                branchpointer = NULL;
-                /* branchswap() (NNI) uses its own internal counter; capture it directly */
-                nni_swaps = branchswap(maxswaps, -1, numspectries, numgenetries);
-                swaps += nni_swaps;
-                /* If NNI improved the score, update sprscore so the per-rep
-                 * completion report reflects the final post-NNI score. */
-                if(scores_retained_supers[0] >= 0.0f &&
-                   (sprscore < 0.0f || scores_retained_supers[0] < sprscore))
-                    sprscore = scores_retained_supers[0];
-                }
 			free(rep_spr_result);
 			rep_spr_result = NULL;
-			
+
             }
     /* Accumulate this rep's unique topologies into the thread-level accumulator,
      * then free the per-replicate set. */
@@ -7568,9 +7760,9 @@ static float probe_candidate(const char *candidate_nwk,
 			}
 		}
 	else if(criterion == 6)
-		tmpscore = compare_trees_rf(TRUE);
+		tmpscore = compare_trees_rf(FALSE);
 	else if(criterion == 7)
-		tmpscore = compare_trees_ml(TRUE);
+		tmpscore = compare_trees_ml(FALSE);
 
 	/* Always restore sourcetree_scores — no permanent state change */
 	for(i = 0; i < Total_fund_trees; i++) sourcetree_scores[i] = tmp_fund_scores[i];
@@ -7640,13 +7832,21 @@ static int evaluate_candidate(const char *candidate_nwk,
 	strcat(best_tree, ";");
 	while(unroottree(best_tree));
 
-	/* Score by criterion */
+	/* Score by criterion.
+	 * Use the full-recompute path (FALSE) for every criterion, matching dfit
+	 * (criterion 0) and the NNI path. The cached path (TRUE) is gated by
+	 * presenceof_SPRtaxa[], which the string-native SPR/TBR driver never sets
+	 * (it rebuilds tree_top from Newick per candidate), so the cache would reuse
+	 * stale per-source-tree scores and return a total inconsistent with the
+	 * authoritative recompute used by usertrees/alltrees/final re-scoring. That
+	 * inconsistency mislead the search (spurious optima) and, with ILS exploring
+	 * more, could overwrite the true optimum. */
 	if(criterion == 0)
 		tmpscore = compare_trees(FALSE);
 	else if(criterion == 2)
-		tmpscore = compare_trees_sfit(TRUE);
+		tmpscore = compare_trees_sfit(FALSE);
 	else if(criterion == 3)
-		tmpscore = compare_trees_qfit(TRUE);
+		tmpscore = compare_trees_qfit(FALSE);
 	else if(criterion == 5)
 		{
 		print_tree(tree_top, temptree);
@@ -7655,9 +7855,9 @@ static int evaluate_candidate(const char *candidate_nwk,
 		tmpscore = get_recon_score(temptree, numspectries, numgenetries);
 		}
 	else if(criterion == 6)
-		tmpscore = compare_trees_rf(TRUE);
+		tmpscore = compare_trees_rf(FALSE);
 	else if(criterion == 7)
-		tmpscore = compare_trees_ml(TRUE);
+		tmpscore = compare_trees_ml(FALSE);
 
 	/* Landscape recording — store display-scale score (lnL for ML, raw for others)
 	 * so the TSV column is on the same scale as all other reported values. */
@@ -7687,7 +7887,7 @@ static int evaluate_candidate(const char *candidate_nwk,
 			{
 			if(tmpscore < BESTSCORE) BESTSCORE = tmpscore;
 			if(tmpscore < sprscore)
-				{ better_score = TRUE; sprscore = tmpscore; }
+				{ better_score = TRUE; sprscore = tmpscore; plateau_moves = 0; }
 			if(tmpscore < scores_retained_supers[0])
 				{
 				better_score = TRUE;
@@ -7737,7 +7937,9 @@ static int evaluate_candidate(const char *candidate_nwk,
 			}
 		else
 			{
-			/* Not strictly better — check for equal-score distinct topology */
+			/* Not strictly better — check for equal-score distinct topology.
+			 * These are retained as alternative equal-best topologies whenever
+			 * they tie the global best, regardless of whether we adopt the move. */
 			if(tmpscore == scores_retained_supers[0])
 				{
 				j = 0;
@@ -7756,11 +7958,29 @@ static int evaluate_candidate(const char *candidate_nwk,
 					scores_retained_supers[j] = tmpscore;
 					}
 				}
-			/* Restore sourcetree_scores to last-known-good state */
-			for(i = 0; i < Total_fund_trees; i++)
-				sourcetree_scores[i] = tmp_fund_scores[i];
-			/* Dismantle non-improving tree_top */
-			dismantle_tree(tree_top); tree_top = NULL;
+			/* Plateau traversal: if this topology ties the current tree's score
+			 * (a flat step, not an improvement), adopt it as the new current tree
+			 * so the hill-climb can walk across flat regions of the landscape to
+			 * reach a different — possibly deeper — basin. The per-replicate
+			 * visited-set prevents revisiting, and hs_max_plateau bounds the number
+			 * of consecutive lateral moves so the walk cannot wander indefinitely.
+			 * plateau_moves resets to 0 on any strict improvement (above). */
+			if(hs_plateau && hs_max_plateau != 0 && tmpscore == sprscore
+			   && plateau_moves < hs_max_plateau && !user_break && !rep_abandon)
+				{
+				plateau_moves++;
+				better_score = TRUE;   /* keep climbing from this new (equal) topology */
+				/* Adopt the move: keep tree_top and its sourcetree_scores intact
+				 * (do NOT restore or dismantle). */
+				}
+			else
+				{
+				/* Restore sourcetree_scores to last-known-good state */
+				for(i = 0; i < Total_fund_trees; i++)
+					sourcetree_scores[i] = tmp_fund_scores[i];
+				/* Dismantle non-improving tree_top */
+				dismantle_tree(tree_top); tree_top = NULL;
+				}
 			}
 		}
 
@@ -7927,7 +8147,10 @@ static int spr_new3(struct taxon *master, int maxswaps, int numspectries, int nu
 		if(hs_strategy == 1 && best_nwk[0] != '\0')
 			{
 			float threshold = (sprscore >= 0.0f) ? sprscore : 1e30f;
-			if(best_score < threshold)
+			/* '<=' lets an equal-score (plateau) best candidate through to
+			 * evaluate_candidate, which enforces the hs_max_plateau budget and
+			 * only adopts the lateral move if the budget allows. */
+			if(best_score <= threshold)
 				better_score = evaluate_candidate(best_nwk, tmp_fund_scores,
 				                                  numspectries, numgenetries);
 			}
@@ -8155,7 +8378,10 @@ static int tbr_new2(struct taxon *master, int maxswaps, int numspectries, int nu
 		if(hs_strategy == 1 && best_nwk[0] != '\0')
 			{
 			float threshold = (sprscore >= 0.0f) ? sprscore : 1e30f;
-			if(best_score < threshold)
+			/* '<=' lets an equal-score (plateau) best candidate through to
+			 * evaluate_candidate, which enforces the hs_max_plateau budget and
+			 * only adopts the lateral move if the budget allows. */
+			if(best_score <= threshold)
 				better_score = evaluate_candidate(best_nwk, tmp_fund_scores,
 				                                  numspectries, numgenetries);
 			}
