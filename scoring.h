@@ -59,4 +59,12 @@ float quartet_compatibility(char *supertree);
 void  compute_raw_rf_dists(float *dists_out);
 int   compute_taxon_conflict(float *conflict_w);
 
+/* Smoothed search surrogate (transfer-distance ML) and its search-time
+ * dispatcher. ml_smooth_search toggles the surrogate for guiding the hill-climb
+ * (defined in treecompare2.c). Final scoring/reporting always uses
+ * compare_trees_ml() directly. */
+extern int ml_smooth_search;
+float compare_trees_transfer(int spr);
+float compare_trees_ml_search(int spr);
+
 #endif /* CLANN_SCORING_H */

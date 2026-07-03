@@ -301,6 +301,7 @@ int    hs_ils_guided       = 0;    /* shared: 1=direct ILS kicks at conflicted t
                                     * locally-conflicted taxa did not beat random kicks (65% vs 62%, p=0.68);
                                     * kept as opt-in ('ilsguided yes') and for the conflict diagnostic. */
 double hs_exhaustive_limit = 1000000.0; /* shared: for user hs, auto-route to exhaustive alltrees when tree space <= this (0=never) */
+int    ml_smooth_search    = 0;    /* shared: 1=guide the ML search with the transfer-distance surrogate (smoother landscape); final scoring stays true ML */
 
 /****** OpenMP thread-private state: one independent copy per thread in parallel regions ******/
 #ifdef _OPENMP
@@ -4037,6 +4038,15 @@ void heuristic_search(int user, int print, int sample, int nreps)
 			else
 				{ printf2("Error: ilsguided must be 'yes' or 'no'\n"); error = TRUE; }
 			}
+		if(strcmp(parsed_command[i], "smoothsearch") == 0)
+			{
+			if(strcmp(parsed_command[i+1], "yes") == 0)
+				ml_smooth_search = 1;
+			else if(strcmp(parsed_command[i+1], "no") == 0)
+				ml_smooth_search = 0;
+			else
+				{ printf2("Error: smoothsearch must be 'yes' or 'no'\n"); error = TRUE; }
+			}
 		if(strcmp(parsed_command[i], "strategy") == 0)
 			{
 			if(strcmp(parsed_command[i+1], "first") == 0)
@@ -4316,6 +4326,10 @@ void heuristic_search(int user, int print, int sample, int nreps)
                             hs_ils_guided ? "guided at conflicted taxa" : "uniform-random");
                 else
                     printf2("\tIterated local search (ils) = disabled\n");
+                if(criterion == 7)
+                    printf2("\tSearch surrogate (smoothsearch) = %s\n",
+                            ml_smooth_search ? "transfer-distance (smoothed); reported as true ML"
+                                             : "true RF-based ML");
 #ifdef _OPENMP
                 if(hs_progress_interval == 0)
                     printf2("\tParallel progress reporting (progress) = every improvement\n");
@@ -6261,7 +6275,7 @@ int swapper(struct taxon * position,struct taxon * prev_pos, int stepstaken, str
 
 											if(criterion==7)
 												{
-												distance = compare_trees_ml(FALSE);
+												distance = compare_trees_ml_search(FALSE);
 												}
 
                                             /* Landscape recording: NNI-scored topology */
@@ -7870,7 +7884,7 @@ static float probe_candidate(const char *candidate_nwk,
 	else if(criterion == 6)
 		tmpscore = compare_trees_rf(FALSE);
 	else if(criterion == 7)
-		tmpscore = compare_trees_ml(FALSE);
+		tmpscore = compare_trees_ml_search(FALSE);
 
 	/* Always restore sourcetree_scores — no permanent state change */
 	for(i = 0; i < Total_fund_trees; i++) sourcetree_scores[i] = tmp_fund_scores[i];
@@ -7965,7 +7979,7 @@ static int evaluate_candidate(const char *candidate_nwk,
 	else if(criterion == 6)
 		tmpscore = compare_trees_rf(FALSE);
 	else if(criterion == 7)
-		tmpscore = compare_trees_ml(FALSE);
+		tmpscore = compare_trees_ml_search(FALSE);
 
 	/* Landscape recording — store display-scale score (lnL for ML, raw for others)
 	 * so the TSV column is on the same scale as all other reported values. */

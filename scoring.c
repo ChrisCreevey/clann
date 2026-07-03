@@ -1211,6 +1211,152 @@ ctc_cleanup:
     return cnt;
     }
 
+/* -----------------------------------------------------------------------
+ * Smoothed search surrogate: transfer-distance ML.
+ *
+ * The RF-based ML score counts each source-tree split as present (0) or absent
+ * (1). That is flat near the optimum — a supertree three splits from the true
+ * tree scores the same, per split, as one thirty splits away — so the hill-climb
+ * has no gradient to follow. compare_trees_transfer replaces the 0/1 term with
+ * the TRANSFER INDEX of each source split: the minimum number of taxa that must
+ * be moved for that split to appear in the induced supertree (Lemoine et al.
+ * 2018). A split one taxon short scores 1, three taxa short scores 3, so the
+ * surrogate gives a graded signal that funnels the search toward the right
+ * basin. It shares the true optimum (every source split displayed => transfer 0
+ * => score 0), so the search can optimise the surrogate and be re-scored with
+ * true ML for the reported result.
+ * ----------------------------------------------------------------------- */
+
+/* enum_biparts_local: enumerate the nontrivial bipartitions of the integer-label
+ * Newick nwk as bitsets over LOCAL taxon indices (g2l maps a global taxon id to
+ * 0..ntaxa_i-1, or -1 if absent). Writes one bitset per branch into
+ * bits[branch*nwords ...] (the branch's subtree side; transfer distance is
+ * complement-invariant so either side works). Returns the branch count. */
+static int enum_biparts_local(const char *nwk, const int *g2l, int ntaxa_i,
+                              int nwords, uint64_t *bits)
+    {
+    int maxdepth = 2 * ntaxa_i + 8;
+    uint64_t *ms = calloc((size_t)(maxdepth + 1) * nwords, sizeof(uint64_t));
+    int cnt = 0, d = 0, p = 0, w;
+    if(!ms) return 0;
+    while(nwk[p] && nwk[p] != ';')
+        {
+        char c = nwk[p];
+        if(c == '(')
+            { d++; if(d > maxdepth) break; for(w = 0; w < nwords; w++) ms[d*nwords+w] = 0; p++; }
+        else if(c == ')')
+            {
+            int pc = 0;
+            for(w = 0; w < nwords; w++) pc += __builtin_popcountll(ms[d*nwords+w]);
+            int other = ntaxa_i - pc, minside = (pc < other) ? pc : other;
+            if(minside >= 2)
+                { for(w = 0; w < nwords; w++) bits[cnt*nwords+w] = ms[d*nwords+w]; cnt++; }
+            if(d > 0) for(w = 0; w < nwords; w++) ms[(d-1)*nwords+w] |= ms[d*nwords+w];
+            d--; if(d < 0) d = 0;
+            p++;
+            while(nwk[p] && nwk[p] != '(' && nwk[p] != ')' && nwk[p] != ',' && nwk[p] != ';') p++;
+            }
+        else if(c == ',') p++;
+        else if(c == ':') { while(nwk[p] && nwk[p] != ',' && nwk[p] != ')' && nwk[p] != ';') p++; }
+        else
+            {
+            char num[64]; int nj = 0;
+            while(nwk[p] && nwk[p] != '(' && nwk[p] != ')' && nwk[p] != ',' && nwk[p] != ':') num[nj++] = nwk[p++];
+            num[nj] = '\0';
+            int gid = atoi(num), lid = (gid >= 0 && gid < number_of_taxa) ? g2l[gid] : -1;
+            if(lid >= 0) ms[d*nwords + (lid >> 6)] |= (1ULL << (lid & 63));
+            }
+        }
+    free(ms);
+    return cnt;
+    }
+
+float compare_trees_transfer(int spr)
+    {
+    (void)spr;   /* surrogate always recomputes fully */
+    int i, j;
+    float total = 0.0f;
+    int nwmax = (number_of_taxa + 63) / 64;
+    char     *pruned_nwk = malloc(TREE_LENGTH * sizeof(char));
+    char     *tmp        = malloc(TREE_LENGTH * sizeof(char));
+    int      *g2l        = malloc(number_of_taxa * sizeof(int));
+    uint64_t *superbits  = malloc((size_t)(number_of_taxa + 1) * nwmax * sizeof(uint64_t));
+    uint64_t *srcbits    = malloc((size_t)(number_of_taxa + 1) * nwmax * sizeof(uint64_t));
+    if(!pruned_nwk || !tmp || !g2l || !superbits || !srcbits)
+        { free(pruned_nwk); free(tmp); free(g2l); free(superbits); free(srcbits); return 0.0f; }
+
+    for(i = 0; i < Total_fund_trees; i++)
+        {
+        if(user_break) break;
+        if(!sourcetreetag[i]) continue;
+
+        int ntaxa_i = 0;
+        for(j = 0; j < number_of_taxa; j++) g2l[j] = -1;
+        for(j = 0; j < number_of_taxa; j++) if(presence_of_taxa[i][j]) g2l[j] = ntaxa_i++;
+        if(ntaxa_i < 4) { sourcetree_scores[i] = 0.0f; continue; }
+        int nwords = (ntaxa_i + 63) / 64;
+
+        /* supertree branches induced on this source tree's taxa */
+        prune_tree(tree_top, i);
+        shrink_tree(tree_top);
+        pruned_nwk[0] = '\0';
+        if(print_pruned_tree(tree_top, 0, pruned_nwk, FALSE, 0) > 1)
+            { tmp[0] = '\0'; strcpy(tmp, "("); strcat(tmp, pruned_nwk); strcat(tmp, ")"); strcpy(pruned_nwk, tmp); }
+        strcat(pruned_nwk, ";");
+        while(unroottree(pruned_nwk));
+        int ns = enum_biparts_local(pruned_nwk, g2l, ntaxa_i, nwords, superbits);
+        reset_tree(tree_top);
+
+        /* source-tree branches */
+        int ng = enum_biparts_local(fundamentals[i], g2l, ntaxa_i, nwords, srcbits);
+
+        /* For each source branch, its transfer index (min taxa-moves to appear
+         * among the supertree branches). Exact matches (index 0) are the shared
+         * splits, so we recover the true RF distance in the same pass:
+         *   d_rf = ns + ng - 2*shared      (identical to compare_trees_ml)
+         *   d_tr = sum of transfer indices (graded near-miss signal)
+         * The search score keeps true RF as the PRIMARY term and uses transfer
+         * only to break ties on RF plateaus (lexicographic via a large BIG),
+         * so the true optimum and ranking are preserved — transfer supplies a
+         * gradient only where RF is flat, without rewarding near-misses. */
+        int shared = 0, a, b;
+        double td = 0.0;
+        for(a = 0; a < ng; a++)
+            {
+            int best = ntaxa_i;   /* upper bound */
+            for(b = 0; b < ns; b++)
+                {
+                int hd = 0, w;
+                for(w = 0; w < nwords; w++)
+                    hd += __builtin_popcountll(srcbits[a*nwords+w] ^ superbits[b*nwords+w]);
+                int t = (hd < ntaxa_i - hd) ? hd : ntaxa_i - hd;
+                if(t < best) best = t;
+                if(best == 0) break;
+                }
+            if(best == 0) shared++;
+            td += (double)best;
+            }
+        double d_rf = (double)(ns + ng - 2 * shared);
+        double BIG  = (double)Total_fund_trees * number_of_taxa * number_of_taxa + 1.0;
+        double combined = d_rf * BIG + td;   /* RF dominates; transfer breaks ties */
+
+        float sc = (float)(ml_beta * combined * (ml_scale == 1 ? LOG10E : 1.0f)) * tree_weights[i];
+        sourcetree_scores[i] = sc;
+        total += sc;
+        }
+
+    free(pruned_nwk); free(tmp); free(g2l); free(superbits); free(srcbits);
+    return total;
+    }
+
+/* Search-time ML dispatcher: smoothed transfer surrogate when ml_smooth_search
+ * is set (for guiding the hill-climb), else the true RF-based ML. The final
+ * re-scoring and reporting always use compare_trees_ml() directly. */
+float compare_trees_ml_search(int spr)
+    {
+    return ml_smooth_search ? compare_trees_transfer(spr) : compare_trees_ml(spr);
+    }
+
 float compare_trees_rf(int spr)
     {
     int i, j;
