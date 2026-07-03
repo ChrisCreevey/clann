@@ -302,6 +302,7 @@ int    hs_ils_guided       = 0;    /* shared: 1=direct ILS kicks at conflicted t
                                     * kept as opt-in ('ilsguided yes') and for the conflict diagnostic. */
 double hs_exhaustive_limit = 1000000.0; /* shared: for user hs, auto-route to exhaustive alltrees when tree space <= this (0=never) */
 int    ml_smooth_search    = 0;    /* shared: 1=guide the ML search with the transfer-distance surrogate (smoother landscape); final scoring stays true ML */
+int    hs_vns              = 0;    /* shared: 1=Variable Neighborhood Descent local search (escalate NNI->SPR->TBR, reset on improvement); 0=single-operator SPR/TBR+NNI */
 
 /****** OpenMP thread-private state: one independent copy per thread in parallel regions ******/
 #ifdef _OPENMP
@@ -4047,6 +4048,15 @@ void heuristic_search(int user, int print, int sample, int nreps)
 			else
 				{ printf2("Error: smoothsearch must be 'yes' or 'no'\n"); error = TRUE; }
 			}
+		if(strcmp(parsed_command[i], "vns") == 0)
+			{
+			if(strcmp(parsed_command[i+1], "yes") == 0)
+				hs_vns = 1;
+			else if(strcmp(parsed_command[i+1], "no") == 0)
+				hs_vns = 0;
+			else
+				{ printf2("Error: vns must be 'yes' or 'no'\n"); error = TRUE; }
+			}
 		if(strcmp(parsed_command[i], "strategy") == 0)
 			{
 			if(strcmp(parsed_command[i+1], "first") == 0)
@@ -4321,11 +4331,14 @@ void heuristic_search(int user, int print, int sample, int nreps)
                 else
                     printf2("\tPlateau (equal-score) lateral moves (plateau) = disabled\n");
                 if(hs_ils_kicks > 0)
-                    printf2("\tIterated local search (ils) = on (%d kicks w/o improvement; strength=%d SPRs; %s)\n",
+                    printf2("\tIterated local search (ils) = on (%d kicks w/o improvement; strength=%d SPRs adaptive; %s)\n",
                             hs_ils_kicks, hs_ils_strength,
                             hs_ils_guided ? "guided at conflicted taxa" : "uniform-random");
                 else
                     printf2("\tIterated local search (ils) = disabled\n");
+                printf2("\tLocal search = %s\n",
+                        hs_vns ? "Variable Neighborhood Descent (NNI->SPR->TBR escalation)"
+                               : (method == 3 ? "TBR + NNI" : method == 2 ? "SPR + NNI" : "NNI"));
                 if(criterion == 7)
                     printf2("\tSearch surrogate (smoothsearch) = %s\n",
                             ml_smooth_search ? "transfer-distance (smoothed); reported as true ML"
@@ -5675,13 +5688,37 @@ static void hs_spr_perturb(const char *in_nwk, char *out_nwk, int nmoves, const 
     free(cur); free(sub); free(rem);
     }
 
-/* hs_local_search: run SPR/TBR to convergence from the current tree_top, then a
+/* hs_score_objective: score the current tree_top with the active search
+ * objective (the same one the operators optimise — the transfer surrogate for
+ * ml when smoothsearch is on, else the true criterion). Populates
+ * sourcetree_scores[] and returns the score. Used by VND for rep-local
+ * improvement detection. */
+static float hs_score_objective(int numspectries, int numgenetries)
+    {
+    int i;
+    for(i = 0; i < Total_fund_trees; i++) sourcetree_scores[i] = -1;
+    if(criterion == 0)      return compare_trees(FALSE);
+    else if(criterion == 2) return compare_trees_sfit(FALSE);
+    else if(criterion == 3) return compare_trees_qfit(FALSE);
+    else if(criterion == 6) return compare_trees_rf(FALSE);
+    else if(criterion == 7) return compare_trees_ml_search(FALSE);
+    else if(criterion == 5)
+        {
+        char *t = malloc(TREE_LENGTH * sizeof(char)); float s = 0.0f;
+        if(t) { print_tree(tree_top, t); strcat(t, ";"); while(unroottree(t));
+                s = get_recon_score(t, numspectries, numgenetries); free(t); }
+        return s;
+        }
+    return compare_trees(FALSE);
+    }
+
+/* hs_spr_tbr_nni: run SPR/TBR to convergence from the current tree_top, then a
  * post-SPR/TBR NNI refinement pass. On entry tree_top holds the starting tree;
  * on exit rep_spr_result holds the best Newick found and tree_top is the
  * NNI-refined tree. sprscore and the global-best retained_supers[] are updated
- * by the scoring path as usual. Factored out of do_search so the ILS loop can
- * re-run the same local search after each perturbation kick. */
-static void hs_local_search(int maxswaps, int numspectries, int numgenetries, char *rep_spr_result)
+ * by the scoring path as usual. This is the default single-operator local
+ * search; hs_local_search() dispatches to it or to hs_vnd() per hs_vns. */
+static void hs_spr_tbr_nni(int maxswaps, int numspectries, int numgenetries, char *rep_spr_result)
     {
     int better_score = TRUE;
 
@@ -5755,6 +5792,103 @@ static void hs_local_search(int maxswaps, int numspectries, int numgenetries, ch
         }
     }
 
+/* hs_vnd: Variable Neighborhood Descent. From tree_top, search progressively
+ * larger move neighborhoods — NNI (branchswap), then SPR (spr_new3), then TBR
+ * (tbr_new2) — each to convergence. Whenever a neighborhood finds an
+ * improvement, drop back to the smallest (NNI); when a neighborhood is exhausted
+ * without improvement, escalate to the next. The result is a tree locally
+ * optimal under ALL three move sets, which escapes traps that hold a single
+ * operator: a configuration with no improving SPR move can often be improved by
+ * one TBR move. On exit best_nwk holds the VND optimum and tree_top is built
+ * from it. Rep-local improvement is judged by re-scoring each neighborhood's
+ * best candidate with the active objective (hs_score_objective). */
+static void hs_vnd(int maxswaps, int numspectries, int numgenetries, char *best_nwk)
+    {
+    char *cand = malloc(TREE_LENGTH * sizeof(char));
+    if(!cand) { hs_spr_tbr_nni(maxswaps, numspectries, numgenetries, best_nwk); return; }
+
+    best_nwk[0] = '\0';
+    print_named_tree(tree_top, best_nwk);
+    strcat(best_nwk, ";");
+    while(unroottree(best_nwk));
+    float best_score = hs_score_objective(numspectries, numgenetries);
+
+    int op = 1;   /* 1 = NNI, 2 = SPR, 3 = TBR */
+    while(op <= 3 && !user_break && !rep_abandon && tried_regrafts < maxswaps)
+        {
+#ifdef _OPENMP
+        #pragma omp flush(user_break)
+#endif
+        if(user_break) break;
+
+        /* clean start of this neighborhood pass from the current best */
+        if(tree_top != NULL) { dismantle_tree(tree_top); tree_top = NULL; }
+        temp_top = NULL;
+        { int _to = 0; tree_build(1, best_nwk, tree_top, TRUE, -1, &_to); }
+        tree_top = temp_top; temp_top = NULL;
+        fix_parent_pointers(tree_top, NULL);
+        branchpointer = NULL;
+        sprscore      = best_score;   /* accept only trees better than the current best */
+        skip_streak   = 0;
+        plateau_moves = 0;
+
+        strcpy(cand, best_nwk);   /* fallback if this neighborhood finds nothing */
+
+        if(op == 1)
+            {
+            /* NNI: branchswap runs to convergence in place */
+            nni_swaps += branchswap(maxswaps, -1, numspectries, numgenetries);
+            if(tree_top != NULL)
+                { cand[0] = '\0'; print_named_tree(tree_top, cand); strcat(cand, ";"); while(unroottree(cand)); }
+            }
+        else
+            {
+            int improved = TRUE;
+            while(improved && !user_break && !rep_abandon && tried_regrafts < maxswaps
+                  && (hs_maxskips == 0 || skip_streak < hs_maxskips))
+                {
+                if(op == 3) improved = tbr_new2(tree_top, maxswaps, numspectries, numgenetries);
+                else        improved = spr_new3(tree_top, maxswaps, numspectries, numgenetries);
+                if(improved)
+                    { cand[0] = '\0'; print_named_tree(tree_top, cand); strcat(cand, ";"); while(unroottree(cand)); }
+                }
+            /* spr_new3/tbr_new2 leave tree_top NULL after their final non-improving
+             * pass; rebuild from cand so scoring below has a valid tree. */
+            }
+
+        /* rep-local score of this neighborhood's best candidate */
+        if(tree_top != NULL) { dismantle_tree(tree_top); tree_top = NULL; }
+        temp_top = NULL;
+        { int _to = 0; tree_build(1, cand, tree_top, TRUE, -1, &_to); }
+        tree_top = temp_top; temp_top = NULL;
+        float cand_score = (tree_top != NULL) ? hs_score_objective(numspectries, numgenetries) : best_score;
+
+        if(cand_score < best_score - 1e-6f)
+            { strcpy(best_nwk, cand); best_score = cand_score; op = 1; }   /* improved: reset to NNI */
+        else
+            op++;                                                          /* escalate */
+        }
+
+    /* leave tree_top built from the VND optimum */
+    if(tree_top != NULL) { dismantle_tree(tree_top); tree_top = NULL; }
+    temp_top = NULL;
+    { int _to = 0; tree_build(1, best_nwk, tree_top, TRUE, -1, &_to); }
+    tree_top = temp_top; temp_top = NULL;
+    free(cand);
+    }
+
+/* hs_local_search: dispatch to VND (escalating neighborhoods) when hs_vns is
+ * set, else the default single-operator SPR/TBR + NNI descent. Same contract:
+ * on entry tree_top = start, on exit rep_spr_result holds the best Newick and
+ * tree_top is built from it. */
+static void hs_local_search(int maxswaps, int numspectries, int numgenetries, char *rep_spr_result)
+    {
+    if(hs_vns)
+        hs_vnd(maxswaps, numspectries, numgenetries, rep_spr_result);
+    else
+        hs_spr_tbr_nni(maxswaps, numspectries, numgenetries, rep_spr_result);
+    }
+
 int do_search(char *tree, int user, int print, int maxswaps, FILE *outfile, int numspectries, int numgenetries)
     {
     int swaps = 0, i=0;
@@ -5825,6 +5959,10 @@ int do_search(char *tree, int user, int print, int maxswaps, FILE *outfile, int 
 					float ils_best_score  = scores_retained_supers[0];
 					int   kicks_no_improve = 0;
 					strcpy(ils_best, retained_supers[0]);
+					/* Adaptive kick strength (basin hopping): grow the perturbation
+					 * each failed kick so a persistent trap gets ever-bigger jumps;
+					 * reset to the base strength on improvement. Capped at 4x. */
+					int   cur_strength = hs_ils_strength;
 					/* Per-taxon conflict signal for the current best (guided only). */
 					if(guided)
 						n_conflict = hs_compute_conflict_weights(ils_best, conflict_w);
@@ -5833,7 +5971,7 @@ int do_search(char *tree, int user, int print, int maxswaps, FILE *outfile, int 
 						{
 						/* Perturb: directed at conflicted taxa when guided and any
 						 * conflict remains, else a uniform-random kick. */
-						hs_spr_perturb(ils_best, ils_perturbed, hs_ils_strength,
+						hs_spr_perturb(ils_best, ils_perturbed, cur_strength,
 						               (guided && n_conflict > 0) ? conflict_w : NULL);
 
 						/* Rebuild tree_top from the perturbed topology and reset the
@@ -5856,13 +5994,17 @@ int do_search(char *tree, int user, int print, int maxswaps, FILE *outfile, int 
 							ils_best_score = scores_retained_supers[0];
 							strcpy(ils_best, retained_supers[0]);
 							kicks_no_improve = 0;   /* improved — reset the kick budget */
+							cur_strength = hs_ils_strength;   /* and reset the kick size */
 							/* Recompute conflict for the new best so subsequent kicks
 							 * aim at whatever conflict remains. */
 							if(guided)
 								n_conflict = hs_compute_conflict_weights(ils_best, conflict_w);
 							}
 						else
+							{
 							kicks_no_improve++;     /* no improvement from this kick */
+							if(cur_strength < hs_ils_strength * 4) cur_strength++;   /* jump farther next time */
+							}
 						}
 					}
 				free(ils_best);
