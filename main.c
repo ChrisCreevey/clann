@@ -24,6 +24,7 @@
 #include "tree_io.h"
 #include "viz.h"
 #include "main.h"
+#include "reconcile.h"   /* full struct decompose_fragment definition, needed by autodecompose_apply() */
 
 #ifdef CLANN_LIBRARY_MODE
 #include "clann_api.h"   /* for clann_jmp_exit / clann_exit_code declarations */
@@ -53,16 +54,19 @@ static const char *clann_commands[] = {
     "excludetrees", "includetrees", "deletetaxa", "restoretaxa",
     "randomisetrees", "rfdists", "sprdists", "consensus", "reconstruct",
     "mlscores", "generatetrees", "alltrees", "yaptp", "prunemonophylies",
+    "decomposegenetrees",
     "mapunknowns", "randomprune", "ideal", "tips", "hgtanalysis",
     "exhaustivespr", "log", "savetrees", "recluster", "help", "quit", NULL
 };
 
 static const char *opts_exe[] = {
     "maxnamelen=", "delimiter_char=", "summary=", "autoprunemono=",
+    "autodecompose=",
     "autoweight=", "clanfile=", "print", NULL
 };
 static const char *vals_maxnamelen[]   = { "full", "delimited", NULL };
 static const char *vals_autoprunemono[]= { "yes", "no", NULL };
+static const char *vals_autodecompose[]= { "yes", "no", NULL };
 static const char *vals_autoweight[]   = { "clan", "splitviol", "bootstrap", NULL };
 static const char *vals_summary[]      = { "short", "full", NULL };
 
@@ -89,7 +93,7 @@ static const char *opts_usertrees[] = {
 };
 static const char *opts_set[] = {
     "criterion=", "seed=", "mlbeta=", "mleta=", "mlscale=", "mlscale=",
-    "autoprunemono=", "autoweight=", "clanfile=", "maxnamelen=", NULL
+    "autoprunemono=", "autodecompose=", "autoweight=", "clanfile=", "maxnamelen=", NULL
 };
 static const char *opts_showtrees[] = {
     "range=", "namecontains=", "savetrees=", "filename=", "display=",
@@ -150,6 +154,7 @@ static const opt_vals_t opt_val_map[] = {
     { "tests",        vals_yesno        },
     { "progress",     vals_yesno        },
     { "autoprunemono",vals_autoprunemono},
+    { "autodecompose",vals_autodecompose},
     { "autoweight",   vals_autoweight   },
     { "maxnamelen",   vals_maxnamelen   },
     { "summary",      vals_summary      },
@@ -1245,8 +1250,23 @@ int main(int argc, char *argv[])
                                                                                                                             }
                                                                                                                         else
                                                                                                                         	{
+                                                                                                                        	if(strcmp(parsed_command[0], "decomposegenetrees") == 0)
+                                                                                                                        		{
+                                                                                                                        		if(num_commands == 2 && parsed_command[1][0] == '?')
+                                                                                                                        			print_commands(33);
+                                                                                                                        		else
+                                                                                                                        			{
+                                                                                                                        			if(number_of_taxa > 0)
+                                                                                                                        				{
+                                                                                                                        				decompose_gene_trees_cmd();
+                                                                                                                        				}
+                                                                                                                        			else
+                                                                                                                        				printf2("Error: You need to load source trees before using this command\n");
+                                                                                                                        			}
+                                                                                                                        		}
+                                                                                                                        	else
                                                                                                                         	if(strcmp(parsed_command[0], "tips") == 0)
-                                                                                                                            	{                                     
+                                                                                                                            	{
                                                                                                                             	if(num_commands == 2 && parsed_command[1][0] == '?')
 	                                                                                                                                print_commands(26);
 	                                                                                                                            else
@@ -1561,6 +1581,7 @@ void print_commands(int num)
         printf2("\nExperimental Options:\n");
         printf2("\treconstruct\t- Carry out a gene-tree reconciliation (source trees against a species tree)\n");
         printf2("\tprunemonophylies - Prunes clades which consist of multiple sequences from the same species, to a single representative\n");
+        printf2("\tdecomposegenetrees - Decomposes multi-copy gene family trees into single-copy-ish ortholog subtrees (non-destructive; writes files)\n");
         printf2("\tsprdists\t- Carry out estimation of SPR distances of real data versus ideal and randomised versions of the data\n");
 
         printf2("\n\n\nType a command followed by '?' in interactive mode to get information on the options available i.e.: \"exe ?\"\n");
@@ -1586,6 +1607,11 @@ void print_commands(int num)
 		printf2("\n\t  (prune monophyletic same-species clades from multicopy trees at load time;");
 		printf2("\n\t   trees that become single-copy after pruning join the supertree pool;");
 		printf2("\n\t   original unpruned trees are preserved for 'reconstruct')");
+		printf2("\n\tautodecompose\tyes | no\t\t\t*no");
+		printf2("\n\t  (decompose multi-copy gene family trees into ortholog subtree fragments");
+		printf2("\n\t   at load time and commit them into the pool immediately (destructive);");
+		printf2("\n\t   pristine multicopy trees are preserved for 'reconstruct'; run 'exe <file>'");
+		printf2("\n\t   again to restore the original gene trees)");
 		printf2("\n\tautoweight\tclan | splitviol | bootstrap\t*off");
 		printf2("\n\t  bootstrap: weights = mean bootstrap support across bipartitions (no clanfile needed)");
 		printf2("\n\t             labels >1 treated as percentages and divided by 100;");
@@ -1700,6 +1726,7 @@ void print_commands(int num)
                 printf2("\n\tdroprep\t\t<float 0-1>\t\t\t0 (disabled; abandon rep if score >X%% above global best; parallel only)");
 #endif
             printf2("\n\tautoprunemono\t(set via exe) prune monophyletic same-species clades from multicopy trees at load time");
+            printf2("\n\tautodecompose\t(set via exe) decompose multi-copy gene family trees into ortholog subtree fragments at load time");
             printf2("\n\tvisitedtrees\t<filename>\t\t\t(disabled) Record all visited topologies (TSV: newick, score, visit_count)");
             printf2("\n\t  Landscape clustering options (require visitedtrees=):");
             printf2("\n\tclusterlandscape yes | no\t\t\t*no (cluster landscape after search)");
@@ -1809,6 +1836,7 @@ void print_commands(int num)
 				printf2("\n\tdroprep\t\t<float 0-1>\t\t\t0 (disabled; abandon rep if score >X%% above global best; parallel only)");
 #endif
 			printf2("\n\tautoprunemono\t(set via exe) prune monophyletic same-species clades from multicopy trees at load time");
+			printf2("\n\tautodecompose\t(set via exe) decompose multi-copy gene family trees into ortholog subtree fragments at load time");
 			printf2("\n\tconsensus\tstrict | majrule | minor | <proportion>\t*majrule");
 			printf2("\n\tconsensusfile\t<filename>\t\t\tconsensus.ph\n");
             printf2("\n");
@@ -2091,6 +2119,25 @@ void print_commands(int num)
         printf2("\t===========================================================\n");
 		
 		printf2("\n\trange\t\t<integer value> - <integer value> \t*all\n\tsize\t\tequalto <integer value>\n\t\t\tlessthan <integer value>\n\t\t\tgreaterthan <integer value>\t\t*none\n\tnamecontians\t<character string>\t\t\t*none\n\tcontainstaxa\t<character string>\t\t\t*none\n\tscore\t\t<min score> - <max score>\t\t*none\n\tfilename\t<output file name>\t\t\t*savedtrees.txt\n");
+		}
+
+	if(num == 33)
+		{
+		printf2("\ndecomposegenetrees [options]\t\n\n");
+		printf2("  Decomposes multi-copy gene family trees into maximal single-copy-ish\n");
+		printf2("  ortholog subtrees, by collapsing in-paralogs and cutting at well-supported\n");
+		printf2("  duplication nodes against a guide (species) tree. Non-destructive: only\n");
+		printf2("  writes the two output files below; run \"exe <filename>\" afterwards to\n");
+		printf2("  adopt the decomposed fragments as the new source-tree pool.\n\n");
+		printf2("\tOptions\t\tSettings\t\t\tCurrent\n");
+        printf2("\t===========================================================\n");
+		printf2("\n\tspeciestree\tmemory | <file>\t\t\t*none (falls back to nj())");
+		printf2("\n\tdupsupport\t<float>\t\t\t\t*0.5");
+		printf2("\n\tminfragtaxa\t<integer>\t\t\t*4");
+		printf2("\n\tminfragspecies\t<integer>\t\t\t*4");
+		printf2("\n\tselection\trandom | length\t\t\t*random\n\n\tIf \"length\" is chosen, then name MUST have a number directly following the name of the species\n\t representing the sequence length. i.e.: \"Speces.length.XXXXXX\n");
+		printf2("\n\tfilename\t<output file name>\t\t*decomposedtrees.txt\n");
+		printf2("\n\tOutput: <filename> (decomposed fragments) and <filename>_info.txt (decision log)\n");
 		}
 
 	if(num == 32)
@@ -2747,9 +2794,449 @@ static void compute_autoweights_bootstrap(void)
         printf2("  Weight range: %.4f – %.4f\n", wmin, wmax);
     }
 
+/* --- autodecompose helpers (NOTES_gene_tree_decomposition.md sec 9 step 6) --- */
+
+/* Guards execute_command()'s per-exe teardown against wiping out the
+ * pre_decompose_* snapshot during the NESTED execute_command() call
+ * autodecompose_apply() itself makes to reload the decomposed fragments
+ * (sec 6.2/6.3). Without this, that reload's own teardown -- the exact
+ * same code path a genuine top-level "exe <file>" goes through, which is
+ * supposed to clear stale pre_decompose_* state for a truly new dataset --
+ * would free the snapshot the instant it runs, before autodecompose_apply()
+ * gets a chance to use it again afterward (discovered via testing: without
+ * this guard, "autodecompose: committed N fragments decomposed from 0
+ * original gene tree families" printed 0 instead of the real family count,
+ * and reconstruct() would have found pre_decompose_fundamentals == NULL).
+ * Set TRUE immediately before, and FALSE immediately after, the nested
+ * execute_command() call inside autodecompose_apply(). */
+static int in_autodecompose_reload = FALSE;
+
+/* Persisted across the whole session while decompose_active is set, so that
+ * reconstruct() (reconcile.c) can round-trip out to the pristine dataset and
+ * back via decompose_use_pristine_for_reconstruct()/
+ * decompose_restore_after_reconstruct() below, without re-deriving anything
+ * by hand -- mirrors sec 6.2's own "just reload through execute_command()"
+ * philosophy, applied a second time for this narrower need. */
+static char g_decompose_fragfilename[10000] = "";
+static struct decompose_fragment *g_decompose_frags = NULL;
+static int  g_decompose_num_frags = 0;
+
+static void free_g_decompose_frags(void)
+    {
+    if(g_decompose_frags != NULL)
+        {
+        free_decompose_fragments(g_decompose_frags, g_decompose_num_frags);
+        g_decompose_frags = NULL;
+        }
+    g_decompose_num_frags = 0;
+    }
+
+/* Re-applies each fragment's exact weight (from g_decompose_frags[], matched
+ * by fragment name) on top of whatever the file loader guessed -- see the
+ * "first-tree-weight-loss" comment at the call site in autodecompose_apply()
+ * for why this is needed at all. Shared by autodecompose_apply() and
+ * decompose_restore_after_reconstruct() so the exact same fix-up logic runs
+ * both times fragments are (re)loaded. */
+static void decompose_apply_fragment_weights(void)
+    {
+    int t, f;
+    for(t=0; t<Total_fund_trees; t++)
+        {
+        for(f=0; f<g_decompose_num_frags; f++)
+            {
+            if(strcmp(tree_names[t], g_decompose_frags[f].name) == 0)
+                {
+                tree_weights[t] = g_decompose_frags[f].weight;
+                break;
+                }
+            }
+        }
+    }
+
+/* Sec 6.3: reconstruct()/get_recon_score() must reconcile against the
+ * PRISTINE multicopy gene trees, never the already-decomposed single-copy
+ * fragments (which would silently report near-zero duplications/losses).
+ * An earlier version of this mechanism tried a raw pointer-swap of
+ * fundamentals[]/tree_names[]/Total_fund_trees (mirroring autoprunemono's
+ * per-index string swap, just at the whole-array level) -- that segfaulted:
+ * tree_build() resolves each leaf's fullname via
+ * fulltaxanames[fund_num][taxaorder], and fulltaxanames[] stays sized/
+ * ordered for the CURRENT (decomposed) dataset at each index, not the much
+ * larger pristine multicopy tree a raw pointer-swap would suddenly point
+ * fundamentals[fund_num] at -- taxaorder runs past the smaller fragment's
+ * recorded leaf count and reads garbage. The safe fix, consistent with
+ * sec 6.2's own reasoning: reload the pristine snapshot through the exact
+ * same execute_command() registration path used everywhere else, so
+ * fulltaxanames[]/presence_of_taxa[][]/etc are all freshly, correctly
+ * (re)derived for it -- exactly as if the user had typed
+ * "exe <pristine-snapshot-file>" themselves.
+ *
+ * Returns TRUE if the swap happened (caller must later call
+ * decompose_restore_after_reconstruct()), FALSE if there was nothing to do
+ * (decompose_active not set) or the swap failed outright (aborts to keep
+ * the live decomposed dataset intact rather than leaving a half-reloaded
+ * mess -- reconstruct() should bail out in that case). */
+int decompose_use_pristine_for_reconstruct(void)
+    {
+    int i;
+    char snapfilename[10000];
+    FILE *sf;
+
+    if(!decompose_active || pre_decompose_fundamentals == NULL) return FALSE;
+
+    strcpy(snapfilename, "pre_decompose_snapshot_reload.txt");
+    sf = fopen(snapfilename, "w");
+    if(sf == NULL)
+        {
+        printf2("Error: could not open '%s' for writing -- cannot reconstruct against the pristine gene trees this session\n", snapfilename);
+        return FALSE;
+        }
+    for(i=0; i<pre_decompose_total_trees; i++)
+        {
+        fprintf(sf, "%s", pre_decompose_fundamentals[i]);
+        if(pre_decompose_tree_names[i] != NULL && strcmp(pre_decompose_tree_names[i], "") != 0)
+            fprintf(sf, "[%s]", pre_decompose_tree_names[i]);
+        fprintf(sf, "\n");
+        }
+    fclose(sf);
+
+        {
+        int saved_num_commands = num_commands;
+        num_commands = 0;
+        in_autodecompose_reload = TRUE;   /* reuse the same teardown guard -- this reload must not wipe the pre_decompose_ snapshot either */
+        execute_command(snapfilename, TRUE);
+        in_autodecompose_reload = FALSE;
+        num_commands = saved_num_commands;
+        }
+
+    return TRUE;
+    }
+
+/* Undoes decompose_use_pristine_for_reconstruct(): reloads the previously
+ * committed decomposed-fragments file (g_decompose_fragfilename) the same
+ * guarded way, re-applies the exact per-fragment weights, and restores
+ * decompose_active -- leaving the live dataset exactly as it was before
+ * reconstruct() temporarily swapped out to the pristine trees. */
+void decompose_restore_after_reconstruct(void)
+    {
+    if(g_decompose_fragfilename[0] == '\0') return;
+
+        {
+        int saved_num_commands = num_commands;
+        num_commands = 0;
+        in_autodecompose_reload = TRUE;
+        execute_command(g_decompose_fragfilename, TRUE);
+        in_autodecompose_reload = FALSE;
+        num_commands = saved_num_commands;
+        }
+
+    decompose_apply_fragment_weights();
+    decompose_active = 1;
+    printf2("(Restored decomposed fragments after reconstruct)\n");
+    }
+
+/* Free any previous pre_decompose_* snapshot and reset the accounting.
+ * Called both when a fresh snapshot is about to be taken and from
+ * execute_command()'s per-exe teardown (mirrors the original_fundamentals[]/
+ * autoprunemono_active reset immediately below it) -- except during the
+ * nested reload guarded by in_autodecompose_reload above. */
+static void free_pre_decompose_snapshot(void)
+    {
+    int i;
+    if(pre_decompose_fundamentals != NULL)
+        {
+        for(i=0; i<pre_decompose_total_trees; i++)
+            if(pre_decompose_fundamentals[i] != NULL) free(pre_decompose_fundamentals[i]);
+        free(pre_decompose_fundamentals);
+        pre_decompose_fundamentals = NULL;
+        }
+    if(pre_decompose_tree_names != NULL)
+        {
+        for(i=0; i<pre_decompose_total_trees; i++)
+            if(pre_decompose_tree_names[i] != NULL) free(pre_decompose_tree_names[i]);
+        free(pre_decompose_tree_names);
+        pre_decompose_tree_names = NULL;
+        }
+    pre_decompose_total_trees = 0;
+    }
+
+/* After loading trees, decompose multi-copy gene family trees into
+ * ortholog-subtree fragments and commit them into the live pool immediately
+ * (destructive -- see NOTES_gene_tree_decomposition.md sec 6.1, contrast with
+ * the non-destructive standalone "decomposegenetrees" command).
+ *
+ * Sec 6.2: rather than hand-rolling presence_of_taxa[][]/fund_bipart_sets/
+ * dfit-matrix/tree_weights[] re-derivation for the new (post-decomposition)
+ * tree count, this writes the decomposed fragments to a file and reloads
+ * through the exact same execute_command() path a fresh "exe <file>" uses,
+ * which recomputes all of that for free, correctly.
+ *
+ * Sec 6.3: execute_command()'s per-exe teardown unconditionally frees
+ * fundamentals[]/original_fundamentals[] (and, per the change below, the
+ * pre_decompose_* snapshot too) at the very start of the reload this
+ * function triggers -- so the pristine pre-decompose dataset is snapshotted
+ * into pre_decompose_*, a structure with its OWN lifetime independent of
+ * original_fundamentals[]'s (old) indexing, before that reload happens. */
+static void autodecompose_apply(void)
+    {
+    int i, num_frags = 0;
+    float dupsupport = 0.5f;
+    int minfragtaxa = 4, minfragspecies = 4;
+    char guide_tree[TREE_LENGTH];
+    char error_msg[2000];
+    char speciestree_opt[10000];
+    char saved_inputfilename[10000];
+    char fragfilename[10000], infofilename[10000];
+    struct decompose_fragment *frags = NULL;
+    char *outtext = NULL;
+    int swapped_pristine = FALSE;
+
+    /* Idempotency guard (sec 6.3 / sec 6.5): a second autodecompose request
+     * against a dataset that's already decomposed is a no-op, not a re-run. */
+    if(decompose_active)
+        {
+        printf2("autodecompose: this dataset is already decomposed -- skipping (run 'exe %s' first to start from the original gene trees again if you want to redo it)\n", inputfilename);
+        return;
+        }
+
+    select_longest = FALSE;
+    speciestree_opt[0] = '\0';
+    strcpy(saved_inputfilename, inputfilename);   /* execute_command()'s reload below will overwrite the global */
+
+    /* Read decomposition options from the SAME "exe ..." command line that
+     * carried "autodecompose=yes" -- mirrors decompose_gene_trees_cmd()'s
+     * option parsing exactly (NOTES_gene_tree_decomposition.md sec 3). These
+     * option names are not in opts_exe[]'s own known-option list, so
+     * execute_command()'s option loop above simply ignores them without
+     * erroring; they are still present in parsed_command[]/num_commands for
+     * this loop to read. */
+    for(i=0; i<num_commands; i++)
+        {
+        if(strcmp(parsed_command[i], "speciestree") == 0)
+            strcpy(speciestree_opt, parsed_command[i+1]);
+        if(strcmp(parsed_command[i], "dupsupport") == 0)
+            dupsupport = atof(parsed_command[i+1]);
+        if(strcmp(parsed_command[i], "minfragtaxa") == 0)
+            minfragtaxa = atoi(parsed_command[i+1]);
+        if(strcmp(parsed_command[i], "minfragspecies") == 0)
+            minfragspecies = atoi(parsed_command[i+1]);
+        if(strcmp(parsed_command[i], "selection") == 0)
+            {
+            if(strcmp(parsed_command[i+1], "length") == 0) select_longest = TRUE;
+            }
+        }
+
+    /* Stage 0 (sec 5): always decompose from the pristine gene trees, never
+     * from anything autoprunemono/prunemonophylies already collapsed earlier
+     * in this same session -- same swap pattern reconstruct() uses. */
+    if(autoprunemono_active && original_fundamentals != NULL)
+        {
+        for(i=0; i<Total_fund_trees; i++)
+            {
+            if(original_fundamentals[i] != NULL)
+                {
+                char *tmp_swap = fundamentals[i];
+                fundamentals[i] = original_fundamentals[i];
+                original_fundamentals[i] = tmp_swap;
+                }
+            }
+        swapped_pristine = TRUE;
+        printf2("(autodecompose: using original unpruned trees as decomposition input)\n");
+        }
+
+    /* Snapshot the whole pristine dataset now -- after Stage 0's swap-in,
+     * before Stage 1 runs -- as deep copies, since fundamentals[]/
+     * tree_names[] are about to be freed by the execute_command() reload
+     * below (sec 6.3's central problem: a naive reload destroys the
+     * pre-decompose trees before reconstruct()/get_recon_score() can use
+     * them).
+     *
+     * IMPORTANT: store each tree as FULL-NAME Newick text (via
+     * returntree_fullnames(), the same call autoprunemono_apply() uses to
+     * materialise fundamentals[i] for writing), NOT the raw numeric-taxon-ID
+     * fundamentals[i] text. fundamentals[i]'s numeric IDs are only
+     * meaningful together with fulltaxanames[i] (populated once per tree at
+     * ITS OWN original load time) -- and the execute_command() reload below
+     * unconditionally re-populates fulltaxanames[] for the NEW (decomposed)
+     * tree count/indices, permanently invalidating the old fulltaxanames[i]
+     * entries this snapshot would otherwise depend on. Storing resolved
+     * full-name text up front sidesteps that entirely: reconstruct() can
+     * later write these lines straight to a plain file and reload them
+     * through the normal name-resolving parser, exactly like any other
+     * fresh input file (found by testing: reconstruct() segfaulted when an
+     * earlier version of this function swapped raw fundamentals[]/
+     * tree_names[]/Total_fund_trees pointers directly instead -- tree_build()
+     * indexes fulltaxanames[fund_num][taxaorder] by the CURRENT (decomposed)
+     * tree's position, which is sized/ordered for the decomposed fragment at
+     * that index, not the much larger pristine multicopy tree being
+     * re-parsed into it). */
+    free_pre_decompose_snapshot();
+    pre_decompose_total_trees  = Total_fund_trees;
+    pre_decompose_fundamentals = (char **)calloc(Total_fund_trees, sizeof(char *));
+    pre_decompose_tree_names   = (char **)calloc(Total_fund_trees, sizeof(char *));
+    if(pre_decompose_fundamentals == NULL || pre_decompose_tree_names == NULL)
+        {
+        printf2("Error: out of memory for autodecompose snapshot -- aborted\n");
+        free_pre_decompose_snapshot();
+        goto restore_and_return;
+        }
+    for(i=0; i<Total_fund_trees; i++)
+        {
+        char *fullname_text = malloc(TREE_LENGTH * sizeof(char));
+        if(fullname_text == NULL)
+            {
+            printf2("Error: out of memory for autodecompose snapshot -- aborted\n");
+            free_pre_decompose_snapshot();
+            goto restore_and_return;
+            }
+        strcpy(fullname_text, fundamentals[i]);
+        returntree_fullnames(fullname_text, i);
+        pre_decompose_fundamentals[i] = strdup(fullname_text);
+        free(fullname_text);
+        pre_decompose_tree_names[i]   = strdup(tree_names[i]);
+        }
+
+    /* Stage 1-3, operating on fundamentals[], which is now guaranteed
+     * pristine. Guide tree resolution follows exactly the same priority
+     * order the standalone "decomposegenetrees" command uses. */
+    guide_tree[0] = '\0';
+    error_msg[0] = '\0';
+    if(resolve_guide_tree(speciestree_opt, guide_tree, error_msg) == FALSE)
+        {
+        printf2("autodecompose: %s\n", error_msg);
+        printf2("autodecompose: aborted, dataset left unchanged\n");
+        goto restore_and_return;
+        }
+
+    strcpy(fragfilename, "autodecomposed_fragments.txt");
+    strcpy(infofilename, "autodecomposed_fragments.txt_info.txt");
+
+    tempoutfile = fopen(infofilename, "w");
+    if(tempoutfile == NULL)
+        {
+        printf2("autodecompose: could not open '%s' for writing -- aborted\n", infofilename);
+        goto restore_and_return;
+        }
+    fprintf(tempoutfile, "autodecompose decision log\n");
+    fprintf(tempoutfile, "dupsupport=%.4f minfragtaxa=%d minfragspecies=%d selection=random\n\n",
+        dupsupport, minfragtaxa, minfragspecies);
+
+    num_frags = decompose_gene_trees_stage3(guide_tree, dupsupport, minfragtaxa, minfragspecies, tempoutfile, &frags);
+    fclose(tempoutfile);
+    tempoutfile = NULL;
+
+    if(num_frags <= 0)
+        {
+        printf2("autodecompose: 0 fragments survived decomposition (minfragtaxa=%d/minfragspecies=%d may be too strict for this data) -- dataset left unchanged\n",
+            minfragtaxa, minfragspecies);
+        free_decompose_fragments(frags, num_frags);
+        goto restore_and_return;
+        }
+
+    outtext = build_decompose_output_text(frags, num_frags);
+        {
+        FILE *ff = fopen(fragfilename, "w");
+        if(ff == NULL)
+            {
+            printf2("autodecompose: could not open '%s' for writing -- aborted\n", fragfilename);
+            free(outtext);
+            free_decompose_fragments(frags, num_frags);
+            goto restore_and_return;
+            }
+        fprintf(ff, "%s", outtext);
+        fclose(ff);
+        }
+    free(outtext);
+
+    /* Sec 6.2: reload through the SAME registration path a fresh "exe <file>"
+     * uses, so presence_of_taxa[][], fund_bipart_sets, the dfit distance
+     * matrices, sourcetree_scores[], tree_weights[] sizing, taxon hashes etc
+     * are all fully consistent for the new (decomposed) tree count -- do not
+     * hand-roll this. This nested call resets decompose_active=0 and frees
+     * original_fundamentals[]/pre_decompose_* as a side effect of its own
+     * per-exe teardown; harmless, since pre_decompose_* was already
+     * deep-copied above, and decompose_active is (re)set to 1 explicitly
+     * below, after this call returns, in this (outer) call's own frame.
+     *
+     * CRITICAL: execute_command()'s option-parsing loops read the GLOBAL
+     * parsed_command[]/num_commands, not a parameter -- they are NOT scoped
+     * to the "commandline" argument passed in below. If left untouched,
+     * this nested call would re-see the OUTER call's own "autodecompose=yes"
+     * token and re-trigger autodecompose_apply() on top of the fragments
+     * file it is itself in the middle of loading (discovered by testing:
+     * this produced doubled "_frag1_frag1" fragment names and a corrupted
+     * "[1" taxon from decomposing already-decomposed single-copy fragments
+     * a second time). Fix: temporarily blank out num_commands so none of
+     * execute_command()'s option checks match anything for the duration of
+     * this nested call, then restore it. This does mean options like
+     * maxnamelen=/delimiter_char= from the outer "exe" are not re-applied
+     * on this reload -- acceptable (documented in the handoff notes as a
+     * known limitation), since those flags are already in effect globally
+     * and this reload only needs to re-register the new tree pool. */
+        {
+        int saved_num_commands = num_commands;
+        num_commands = 0;
+        in_autodecompose_reload = TRUE;
+        execute_command(fragfilename, TRUE);
+        in_autodecompose_reload = FALSE;
+        num_commands = saved_num_commands;
+        }
+
+    /* Sec 6.1's "first-tree-weight-loss" file-format quirk: a leading
+     * "[...]" before the very first tree in a Phylip-format file is
+     * discarded as a comment rather than parsed as a weight, so that tree
+     * can never pick up its correct weight from the reloaded file even
+     * though build_decompose_output_text() orders weight==1.0 fragments
+     * first specifically to make that case rare. For the in-memory
+     * autodecompose path there is no need to rely on that workaround at
+     * all: explicitly re-apply the exact per-fragment weight from frags[]
+     * (which the file parser never sees), matched by fragment name --
+     * NOT by output-file order, since build_decompose_output_text()
+     * reorders fragments relative to frags[]'s own order.
+     *
+     * frags[]/fragfilename are handed off to g_decompose_frags/
+     * g_decompose_fragfilename (not freed here) so that reconstruct()'s
+     * later round trip (decompose_use_pristine_for_reconstruct() /
+     * decompose_restore_after_reconstruct(), defined above) can redo this
+     * exact same fix-up after it reloads the fragments file again. */
+    free_g_decompose_frags();
+    g_decompose_frags     = frags;
+    g_decompose_num_frags = num_frags;
+    strcpy(g_decompose_fragfilename, fragfilename);
+    decompose_apply_fragment_weights();
+
+    decompose_active = 1;
+    printf2("\nautodecompose: committed %d fragment%s decomposed from %d original gene tree famil%s.\n",
+        num_frags, (num_frags == 1 ? "" : "s"),
+        pre_decompose_total_trees, (pre_decompose_total_trees == 1 ? "y" : "ies"));
+    printf2("Decision log written to \"%s\"\n", infofilename);
+    printf2("(Original pristine gene trees preserved in memory for 'reconstruct'.)\n");
+    printf2("To restore the original gene trees, run: exe %s\n", saved_inputfilename);
+
+    return;
+
+restore_and_return:
+    /* Leave fundamentals[]/original_fundamentals[] exactly as they were
+     * before this function ran (undo Stage 0's swap-in) on any early exit,
+     * since none of these failure paths reach the reload that would
+     * otherwise make this moot. */
+    if(swapped_pristine)
+        {
+        for(i=0; i<Total_fund_trees; i++)
+            {
+            if(original_fundamentals[i] != NULL)
+                {
+                char *tmp_swap = fundamentals[i];
+                fundamentals[i] = original_fundamentals[i];
+                original_fundamentals[i] = tmp_swap;
+                }
+            }
+        }
+    }
+
 void execute_command(char *commandline, int do_all)
     {
-    int i = 0, j=0, k=0, printfundscores = FALSE, error = FALSE, do_autoprunemono = FALSE;
+    int i = 0, j=0, k=0, printfundscores = FALSE, error = FALSE, do_autoprunemono = FALSE, do_autodecompose = FALSE;
     int do_clan_weights = 0;  /* 0=off, 1=clan-compatibility, 2=split-violation, 3=bootstrap */
     char c = '\0', temp[NAME_LENGTH], filename[10000], *newbietree, string_num[1000];
     char clanfile_name[10000];
@@ -2817,6 +3304,18 @@ void execute_command(char *commandline, int do_all)
             else
                 {
                 printf2("Error: value '%s' not valid for autoprunemono (use yes or no)\n", parsed_command[i+1]);
+                error = TRUE;
+                }
+            }
+        if(strcmp(parsed_command[i], "autodecompose") == 0)
+            {
+            if(strcmp(parsed_command[i+1], "yes") == 0)
+                do_autodecompose = TRUE;
+            else if(strcmp(parsed_command[i+1], "no") == 0)
+                do_autodecompose = FALSE;
+            else
+                {
+                printf2("Error: value '%s' not valid for autodecompose (use yes or no)\n", parsed_command[i+1]);
                 error = TRUE;
                 }
             }
@@ -2905,6 +3404,23 @@ void execute_command(char *commandline, int do_all)
             original_fundamentals = NULL;
             }
         autoprunemono_active = 0;
+        /* Reset autodecompose state when new trees are loaded (sec 6.3/6.4:
+         * a fresh "exe <inputfilename>" is the documented way to fully
+         * restore the pre-decomposition state -- this reset is what makes
+         * that true). Skipped during autodecompose_apply()'s own NESTED
+         * reload of the fragments file (in_autodecompose_reload guard,
+         * defined above) -- that reload must NOT wipe the very
+         * pre_decompose_* snapshot it was triggered to preserve; the
+         * decompose_active=1 restoration that follows a successful
+         * decomposition happens explicitly in autodecompose_apply() itself,
+         * in its own (outer) call frame, after this nested call returns. */
+        if(!in_autodecompose_reload)
+            {
+            free_pre_decompose_snapshot();
+            free_g_decompose_frags();
+            g_decompose_fragfilename[0] = '\0';
+            decompose_active = 0;
+            }
 
         
 		
@@ -3122,6 +3638,47 @@ void execute_command(char *commandline, int do_all)
                     {
                     for(i=0; i<10; i++) string_num[i] = '\0';
 					i=0;
+					/* Bug fix (found while verifying autodecompose=yes, see
+					 * NOTES_gene_tree_decomposition.md HANDOFF STATUS): a
+					 * per-tree "[weight]" bracket on the SECOND or later
+					 * tree in a file was never recognised as a weight --
+					 * only "[...]" encountered via the inner loop's own
+					 * lookahead getc() (line ~3479 below) was handled, but
+					 * the leading '[' of tree N+1 is already sitting in `c`
+					 * at this exact point (left there by the previous
+					 * tree's trailing "[name]"-skipping loop, which stops
+					 * as soon as it sees a '[' it doesn't otherwise
+					 * recognise). Without this, that leading '[weight]'
+					 * bracket was appended into the tree's own Newick text
+					 * as literal characters, which the tree parser then
+					 * read as if it were a real (garbage) leaf name --
+					 * confirmed via a minimal 2-tree repro file, e.g.
+					 * "[1.000000](A,B,C);[t1]\n[0.333333]((D,E));[t2]\n"
+					 * loaded as 6 taxa (A,B,C,D,E + a spurious "[0" taxon)
+					 * instead of 5. This affected every multi-tree
+					 * bracket-annotated file, not just autodecompose's
+					 * output -- e.g. decomposegenetrees's own
+					 * "exe decomposedtrees.txt" round trip from step 5 was
+					 * previously (mis-)verified as clean by checking only
+					 * "number of multicopy trees", which stayed 0 even with
+					 * this corruption present; re-checking "number of
+					 * unique taxa" reveals the same bug on that file. */
+					while(c == '[' && !feof(infile))
+						{
+						j = 0;
+						c = getc(infile);
+						while(c != ']' && !feof(infile))
+							{
+							if(j < 999) string_num[j] = c;
+							j++;
+							c = getc(infile);
+							}
+						string_num[j < 999 ? j : 999] = '\0';
+						tree_weights[Total_fund_trees] = atof(string_num);
+						c = getc(infile);
+						while((c == ' ' || c == '\t' || c == '\n' || c == '\r') && !feof(infile))
+							c = getc(infile);
+						}
                     while(!feof(infile) && c != ';' )
                         {
 						if(c != ' ' && c != '\n' && c != '\r')
@@ -3260,6 +3817,15 @@ void execute_command(char *commandline, int do_all)
             else
                 compute_autoweights_clan(clanfile_name, do_clan_weights - 1);
             }
+
+		/* Apply autodecompose if requested (sec 9 step 6). Runs after
+		 * autoprunemono/autoweight so it always sees their effects (Stage 0
+		 * un-does autoprunemono's mutation internally, decomposing from the
+		 * pristine trees regardless of ordering here). */
+		if(do_autodecompose && Total_fund_trees > 0)
+			{
+			autodecompose_apply();
+			}
 
 		free(newbietree);
 

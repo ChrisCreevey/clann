@@ -37,6 +37,14 @@ extern char **retained_supers, **stored_commands, *tempsuper;
 extern char **best_topology, **tree_names;
 extern char **original_fundamentals;
 extern int   autoprunemono_active;
+/* Whole-dataset snapshot of the pristine pre-decompose gene-tree pool,
+ * independent of original_fundamentals[] (see NOTES_gene_tree_decomposition.md
+ * §6.3 -- original_fundamentals[] is sized 1:1 to the OLD tree count and is
+ * freed by the very execute_command() reload that autodecompose needs to
+ * survive, so a separate, own-lifetime snapshot is required). */
+extern char **pre_decompose_fundamentals, **pre_decompose_tree_names;
+extern int   pre_decompose_total_trees;
+extern int   decompose_active;
 extern float *tree_weights;
 extern int  *numtaxaintrees, fullnamesnum, fullnamesassignments;
 extern int   fundamental_assignments, tree_length_assignments, parsed_command_assignments;

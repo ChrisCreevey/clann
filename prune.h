@@ -35,6 +35,11 @@ void  prune_monophylies(void);
 void  random_prune(char *fund_tree);
 void  collapse_clades(struct taxon *position, float user_limit, int *to_delete, FILE *rp_outfile);
 
+/* Shared per-tree monophyly-collapse logic, reused by prune_monophylies()
+ * and decomposegenetrees() Stage 1 (see NOTES_gene_tree_decomposition.md). */
+int   collapse_monophyly_in_tree(int treenum, FILE *infofile, char *out_tree, int *out_num_commas, int *out_still_multicopy, int *out_presence);
+void  count_surviving_leaves(struct taxon *position, int *presence);
+
 /* -----------------------------------------------------------------------
  * Branch-length helpers
  * ----------------------------------------------------------------------- */

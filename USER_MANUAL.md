@@ -40,6 +40,8 @@ See COPYING.txt for full licence terms.
    - [yaptp](#yaptp)
    - [Autoprunemono](#autoprunemono)
    - [prunemonophylies](#prunemonophylies)
+   - [Autodecompose](#autodecompose)
+   - [decomposegenetrees](#decomposegenetrees)
    - [sprdists](#sprdists)
    - [log](#log)
    - [tips](#tips)
@@ -277,6 +279,7 @@ exe <filename> [options]
 | `delimiter_char` | `<character>` | `.` | Character used to split gene-copy names into species names. Only active when delimiter mode is on. |
 | `summary` | `short`, `long` | `long` | Controls how much detail is printed about loaded trees. |
 | `autoprunemono` | `yes`, `no` | `no` | At load time, prune monophyletic same-species clades from multicopy trees. Trees that become single-copy after pruning are promoted into the supertree search pool. Trees that remain multicopy after pruning (genuine deep paralogs) stay in the multicopy pool for `reconstruct`. Original unpruned trees are preserved for `reconstruct`. See [Autoprunemono](#autoprunemono) below. |
+| `autodecompose` | `yes`, `no` | `no` | At load time, decompose multicopy gene family trees into maximal single-copy-ish ortholog subtree fragments (cutting at well-supported duplication nodes, collapsing pure in-paralogs, dropping/merging fragments below the informativeness floor), and commit the resulting fragments into the supertree search pool in place of the original multicopy trees. The original pristine gene trees are preserved in memory for `reconstruct`. See [Autodecompose](#autodecompose) below. |
 
 **Examples:**
 ```
@@ -284,6 +287,7 @@ exe trees.ph
 exe trees.ph maxnamelen=full
 exe trees.ph delimiter_char=_ summary=short
 exe mydata.ph autoprunemono=yes
+exe mydata.ph autodecompose=yes
 ```
 
 ---
@@ -966,6 +970,78 @@ prunemonophylies selection=length filename=pruned.ph
 
 ---
 
+### Autodecompose
+
+The `autodecompose=yes` option on the `exe` command decomposes multicopy gene family trees into maximal single-copy-ish **ortholog subtree fragments**, so that more of a multicopy family's phylogenetic signal can contribute to the supertree search than `autoprunemono`/`prunemonophylies` alone can salvage. Where `autoprunemono` can only collapse *monophyletic* same-species clades (pure in-paralogs), `autodecompose` additionally cuts trees apart at well-supported gene-duplication nodes (out-paralog splits, e.g. scattered/non-monophyletic copies of the same species) using LCA-mapping reconciliation against a guide species tree, so a family that `autoprunemono` cannot touch at all can still yield usable fragments.
+
+**Algorithm (three stages):**
+1. **Monophyly collapse** — same logic as `prunemonophylies`/`autoprunemono`: species-specific clades are collapsed to a single representative. Trees that become fully single-copy at this stage go straight into the pool at weight 1.0.
+2. **LCA-mapping decomposition** — for trees still multicopy after stage 1, the gene tree is mapped onto a guide species tree (see `speciestree` below) and walked for duplication nodes. At each duplication node: a support gate decides whether the duplication call is trustworthy enough to cut on; pure in-paralog clades are collapsed to one representative; clades below the `minfragtaxa`/`minfragspecies` floor are pruned to a representative tip and merged into their sibling rather than spun off as an uninformative fragment; otherwise the tree is cut, and each side becomes an independent fragment, recursively decomposed the same way.
+3. **Weighting** — a family tree that yields `k` surviving fragments has each fragment weighted `1/k`, so a heavily-duplicated family does not out-vote families that never duplicated.
+
+**Behaviour:**
+- The original pristine (pre-decomposition, pre-`autoprunemono`) gene trees are preserved internally for `reconstruct`, exactly as `autoprunemono` preserves originals — `reconstruct` always reports true duplication/loss counts against the real multicopy trees, never against the decomposed fragments.
+- Decomposition always starts from the pristine gene trees, even if `autoprunemono` already ran earlier in the same session.
+- A second `autodecompose` request against an already-decomposed dataset is a no-op (idempotent) — reload the original file first (see below) if you want to redo it with different options.
+- Fragment Newick trees and a decision log are written to `autodecomposed_fragments.txt` / `autodecomposed_fragments.txt_info.txt` as a side effect, even though the fragments are also committed live in memory — useful for auditing exactly what happened to each gene family.
+
+**Example output:**
+```
+autodecompose: committed 7 fragments decomposed from 8 original gene tree families.
+Decision log written to "autodecomposed_fragments.txt_info.txt"
+(Original pristine gene trees preserved in memory for 'reconstruct'.)
+To restore the original gene trees, run: exe mydata.ph
+```
+
+**Workflow:**
+```
+clann> exe mydata.ph autodecompose=yes
+clann> hs criterion=qfit                # uses the decomposed fragment pool
+clann> reconstruct speciestree memory   # uses the pristine multicopy trees
+clann> exe mydata.ph                    # fully restores the pre-decomposition state
+```
+
+**Options** (read from the same `exe` command line, alongside `autodecompose=yes`):
+
+| Option | Values | Default | Description |
+|--------|--------|---------|-------------|
+| `speciestree` | `memory`, `<file>` | resolved automatically | Guide species tree for stage 2's LCA mapping. `memory` uses the current supertree in `retained_supers[0]`; an explicit file is hard-validated to have exactly the same taxon set as the loaded data. If neither is supplied, falls back to `memory` if a supertree is already in memory, otherwise Clann builds one automatically with `nj`. |
+| `dupsupport` | `<float>` | `0.5` | Minimum bootstrap-support fraction (if the gene tree carries bootstrap labels) required to trust a duplication call before cutting on it. If the gene tree instead carries branch lengths but no bootstrap labels, a duplication is trusted only if its branch length is greater than zero. If neither is present, the duplication call is trusted by default (matches the "no bootstrap labels ⇒ weight 1.0" convention used elsewhere in Clann). |
+| `minfragtaxa` | `<integer>` | `4` | Minimum number of taxa a fragment must retain to be kept as its own fragment rather than pruned/merged into its sibling. |
+| `minfragspecies` | `<integer>` | `4` | Minimum number of distinct species a fragment must retain to be kept. Defaults to `4`, matching `minfragtaxa`, because a fragment's phylogenetic informativeness (e.g. for quartet-based criteria like `qfit`) depends on distinct *species* diversity, not raw leaf count — a fragment could otherwise satisfy `minfragtaxa=4` with leaves from only 2 species and still be phylogenetically uninformative. |
+| `selection` | `random`, `length` | `random` | How to choose the retained representative when collapsing an in-paralog clade — same semantics as `prunemonophylies`'s `selection`. |
+
+> **Note:** This is the destructive, load-time counterpart of `decomposegenetrees` (below), which is non-destructive and requires an explicit `exe <filename>` to adopt its output. Use `autodecompose=yes` for an automated, in-session workflow; use `decomposegenetrees` when you want to inspect the decision log before deciding whether to adopt the result.
+
+---
+
+### decomposegenetrees
+
+Decompose multicopy gene family trees currently in memory into ortholog subtree fragments, using the same three-stage algorithm as `autodecompose` (see [Autodecompose](#autodecompose) above for the full algorithm description). Unlike `autodecompose`, this is a **standalone, non-destructive** command: it only writes output files — the source trees in memory are left completely unchanged. Run `exe <filename>` afterwards to explicitly adopt the decomposed fragments.
+
+```
+decomposegenetrees [options]
+```
+
+| Option | Values | Default | Description |
+|--------|--------|---------|-------------|
+| `speciestree` | `memory`, `<file>` | resolved automatically | Same as `autodecompose`'s `speciestree` option. |
+| `dupsupport` | `<float>` | `0.5` | Same as `autodecompose`'s `dupsupport` option. |
+| `minfragtaxa` | `<integer>` | `4` | Same as `autodecompose`'s `minfragtaxa` option. |
+| `minfragspecies` | `<integer>` | `4` | Same as `autodecompose`'s `minfragspecies` option. |
+| `selection` | `random`, `length` | `random` | Same as `prunemonophylies`'s `selection` option. |
+| `filename` | `<filename>` | `decomposedtrees.txt` | Output file for the decomposed fragments. A companion decision log is written to `<filename>_info.txt`. |
+
+**Examples:**
+```
+decomposegenetrees
+decomposegenetrees minfragtaxa=6 minfragspecies=3
+decomposegenetrees speciestree=species.ph filename=fragments.ph
+exe fragments.ph                        # adopt the decomposed fragments
+```
+
+---
+
 ### sprdists
 
 Estimate the SPR (Subtree Pruning and Regrafting) distance between: the real source trees and a supertree, an ideal dataset derived from the supertree, and a randomised dataset. Used to assess how well the supertree explains the source data.
@@ -1279,6 +1355,11 @@ hs nreps=10
 | `robinson_foulds.txt` | `rfdists` | Pairwise RF distances between source trees |
 | `SPRdistances.txt` | `sprdists` | SPR distance analysis results |
 | `prunedtrees.txt` | `prunemonophylies` | Pruned source trees |
+| `prunedtrees.txt_info.txt` | `prunemonophylies` | Decision log of removed/kept taxa per tree |
+| `decomposedtrees.txt` (or custom name) | `decomposegenetrees` | Decomposed ortholog subtree fragments (weight-and-name annotated), not adopted until `exe`'d |
+| `decomposedtrees.txt_info.txt` (or `<filename>_info.txt`) | `decomposegenetrees` | Decision log: collapsed/pruned/cut/merged nodes and assigned fragment weights per source tree |
+| `autodecomposed_fragments.txt` | `exe ... autodecompose=yes` | Decomposed ortholog subtree fragments committed live into the pool (also written to disk for auditing) |
+| `autodecomposed_fragments.txt_info.txt` | `exe ... autodecompose=yes` | Decision log for the auto-committed decomposition, same format as `decomposegenetrees`'s |
 | `clann.log` | `log` | Complete session log |
 | `supertree.ps` | `hs`, `alltrees` | PostScript rendering of the supertree |
 | `<input>.recon` | `reconstruct` | Reconciliation mapping for each gene tree |
@@ -1308,8 +1389,10 @@ hs nreps=10
 **Q: Clann says "number of single copy trees: 0".**
 All trees are multicopy. Options:
 - Use `exe mydata.ph autoprunemono=yes` to automatically prune monophyletic same-species clades at load time — trees that become single-copy after pruning are promoted into the supertree search pool.
+- Use `exe mydata.ph autodecompose=yes` to also cut apart trees with non-monophyletic (out-paralog) duplications, salvaging fragments that `autoprunemono` cannot touch at all. See [Autodecompose](#autodecompose).
 - Set `criterion=recon` to use all multicopy trees directly via DL reconciliation.
 - Run `prunemonophylies`, save the output, reload the pruned file, then run `hs`.
+- Run `decomposegenetrees`, inspect the decision log, then `exe` the output if you're happy with it. See [decomposegenetrees](#decomposegenetrees).
 
 **Q: `bootstrap` or `hs` with `mrp` or `avcon` fails with an error about PAUP\*.**
 These criteria require PAUP\* to be installed and accessible on your PATH. Install PAUP\* and ensure the `paup` executable is findable, or switch to a different criterion (e.g., `dfit`).

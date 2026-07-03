@@ -193,34 +193,208 @@ int untag_taxa(struct taxon *position, int * to_delete, int keep, int count, FIL
 	return(count);
 	}
 
+/* -----------------------------------------------------------------------
+ * collapse_monophyly_in_tree: collapse species-specific (monophyletic
+ * in-paralog) clades in a single fundamental tree down to one representative
+ * per clade.  This is the per-tree logic shared by prune_monophylies()
+ * (the "prunemonophylies" command) and decomposegenetrees()'s Stage 1
+ * (see NOTES_gene_tree_decomposition.md §5, §9 step 1).
+ *
+ * treenum   : index into fundamentals[]/tree_names[] to collapse. Assumes
+ *             select_longest has already been set by the caller (controls
+ *             the representative-choice rule used by identify_species_specific_clades).
+ * infofile  : if non-NULL, appends a "Tree # N [ name ]\n\tRemoved:...\tKEPT:...\n"
+ *             report block, byte-identical to what prune_monophylies has
+ *             always written to prunedtrees_info.txt.
+ * out_tree  : caller-allocated buffer (>= TREE_LENGTH) that receives the
+ *             collapsed Newick: numeric taxon ids, parenthesis-wrapped if
+ *             more than one node remains, terminated with ';'.
+ * out_num_commas : set to the number of top-level commas in *out_tree
+ *             (the existing "4 or more taxa" gate used elsewhere is
+ *             *out_num_commas > 2).
+ * out_still_multicopy : if non-NULL, set to TRUE if any taxon still has
+ *             more than one surviving copy in the collapsed tree (i.e. this
+ *             tree needs further, non-topological decomposition), FALSE if
+ *             the tree is now fully single-copy. May be NULL if the caller
+ *             doesn't need this (prune_monophylies doesn't).
+ * out_presence : if non-NULL, caller-allocated array of length
+ *             number_of_taxa that receives the per-taxon surviving-leaf
+ *             counts for the collapsed tree (same counts used internally
+ *             for out_still_multicopy, exposed so callers -- e.g.
+ *             decomposegenetrees Stage 3 -- can apply their own
+ *             minfragtaxa/minfragspecies floor check without re-parsing
+ *             *out_tree or re-deriving counts via print_pruned_tree's
+ *             unreliable return value). Only populated if out_still_multicopy
+ *             is also non-NULL; may be NULL if the caller doesn't need it.
+ *
+ * Returns the number of leaves retained (as returned by print_pruned_tree).
+ * ----------------------------------------------------------------------- */
+int collapse_monophyly_in_tree(int treenum, FILE *infofile, char *out_tree, int *out_num_commas, int *out_still_multicopy, int *out_presence)
+	{
+	int k=0, l=0, numt=0, *taxa_fate = NULL, clannID=0, report=FALSE, taxaorder=0, leaf_count=0, i=0, num_nodes=0;
+	char *tmp = NULL, **taxa_fate_names = NULL;
+	char *temptree = malloc(TREE_LENGTH * sizeof(char));
+	if(!temptree) { printf2("Error: out of memory in collapse_monophyly_in_tree\n"); return 0; }
+	tmp = malloc(TREE_LENGTH * sizeof(char));
+	if(!tmp) { free(temptree); printf2("Error: out of memory in collapse_monophyly_in_tree\n"); return 0; }
+
+	if(tree_top != NULL) dismantle_tree(tree_top);  /* Dismantle any trees already in memory */
+	tree_top = NULL;
+
+	temp_top = NULL;
+	taxaorder=0;
+	strcpy(temptree, fundamentals[treenum]);
+	returntree_fullnames(temptree, treenum);
+
+	/***  build the sourcetree in memory ***/
+	if(tree_top != NULL)
+        {
+        dismantle_tree(tree_top);
+        tree_top = NULL;
+        }
+    temp_top = NULL;
+    basic_tree_build(1, temptree, tree_top, TRUE);
+
+    tree_top = temp_top;
+    temp_top = NULL;
+    reset_tree(tree_top);
+
+    /* Number all taxa in the tree for tracing which taxa were deleted or retained and record the number of taxa in the variable numt */
+    numt=0; clannID=0;
+    numt = number_tree2(tree_top, numt);
+    /* alloc an arrary to hold all the names of hte taxa in the order they are found on the tree */
+    taxa_fate_names = malloc(numt*sizeof(char*));
+    for(k=0; k<numt; k++)
+    	{
+    	taxa_fate_names[k] = malloc(NAME_LENGTH*sizeof(char));
+    	taxa_fate_names[k][0] = '\0';
+    	}
+    get_taxa_names(tree_top, taxa_fate_names); /* copy names into the array taxa_fate_names */
+
+    /* Define an array to record the species that are pruned (and kept) in this tree */
+    taxa_fate = malloc(numt*sizeof(int));
+    for(k=0; k<numt; k++)
+		{
+		taxa_fate[k]=0;
+		}
+
+    clannID = identify_species_specific_clades(tree_top, numt, taxa_fate, clannID);  /* Call recursive function to travel down the tree looking for species-specific clades */
+    if(infofile != NULL)
+    	{
+    	fprintf(infofile, "\nTree # %d [ %s ]\n\t", treenum, tree_names[treenum]);
+    	/* Print out the list of deleted and pruned taxa from the taxa_fate array */
+    	for(k=1; k<=numt; k++)
+    		{
+    		report=FALSE;
+    		/* find out if there are any taxa in clann k for reporting */
+    		for(l=0; l<numt; l++)
+    			{
+    			if(abs(taxa_fate[l]) == k)
+    				{
+    				report=TRUE;
+    				l=numt;
+    				}
+    			}
+    		if(report == TRUE)
+    			{
+    			for(l=0; l<numt; l++)
+    				{
+    				if(taxa_fate[l] == k*-1)
+    					fprintf(infofile, "Removed:%s\t", taxa_fate_names[l]);
+    				}
+    			for(l=0; l<numt; l++)
+    				{
+    				if(taxa_fate[l] == k)
+    					fprintf(infofile, "KEPT:%s\n\t", taxa_fate_names[l]);
+    				}
+    			}
+    		}
+    	}
+
+	free(taxa_fate);
+    for(k=0; k<numt; k++) free(taxa_fate_names[k]);
+    free(taxa_fate_names);
+
+    shrink_tree(tree_top);    /* Shrink the pruned tree by switching off any internal nodes that are not needed */
+
+    if(out_still_multicopy != NULL)
+    	{
+    	int *presence = out_presence != NULL ? out_presence : malloc(number_of_taxa*sizeof(int));
+    	for(k=0; k<number_of_taxa; k++) presence[k] = 0;
+    	count_surviving_leaves(tree_top, presence);
+    	*out_still_multicopy = FALSE;
+    	for(k=0; k<number_of_taxa; k++)
+    		if(presence[k] > 1) { *out_still_multicopy = TRUE; break; }
+    	if(out_presence == NULL) free(presence);
+    	}
+
+    out_tree[0] = '\0'; /* initialise the string */
+    leaf_count = print_pruned_tree(tree_top, 0, out_tree, TRUE, treenum);
+    if(leaf_count > 1)
+        {
+        tmp[0] = '\0';
+        strcpy(tmp, "(");
+        strcat(tmp, out_tree);
+        strcat(tmp, ")");
+        strcpy(out_tree, tmp);
+        }
+    strcat(out_tree, ";");
+
+    num_nodes=0;
+    for(i=0; i<(int)strlen(out_tree); i++)
+    	{if(out_tree[i] == ',') num_nodes++;	}
+    if(out_num_commas != NULL) *out_num_commas = num_nodes;
+
+    if(tree_top != NULL) { dismantle_tree(tree_top); tree_top = NULL; }
+    temp_top = NULL;
+
+    free(temptree);
+    free(tmp);
+    return(leaf_count);
+	}
+
+/* Recursively count surviving (tag != FALSE) leaves per taxon id, for the
+ * still-multicopy check in collapse_monophyly_in_tree.  Mirrors the
+ * tag-based skip logic used by print_pruned_tree/autoprunemono's
+ * recount_from_tree (main.c). */
+void count_surviving_leaves(struct taxon *position, int *presence)
+	{
+	while(position != NULL)
+		{
+		if(position->daughter != NULL)
+			count_surviving_leaves(position->daughter, presence);
+		else
+			{
+			if(position->tag != FALSE && position->name >= 0 && position->name < number_of_taxa)
+				presence[position->name]++;
+			}
+		position = position->next_sibling;
+		}
+	}
+
 void prune_monophylies(void)
     {
-    int i=0, j=0, k=0, l=0, num_nodes=0, trees_included=0, trees_excluded=0, numt=0, *taxa_fate = NULL, clannID =0, report=FALSE, taxaorder=0;
-    char *pruned_tree = NULL, *tmp = NULL, filename2[10000];
-    char *temptree = malloc(TREE_LENGTH * sizeof(char));
-    char filename3[10000], **taxa_fate_names = NULL;
+    int j=0, num_nodes=0, trees_included=0, trees_excluded=0;
+    char *pruned_tree = NULL, filename2[10000];
+    char filename3[10000];
     FILE *pm_outfile = NULL;
-    if(!temptree) { printf2("Error: out of memory in prune_monophylies\n"); return; }
     select_longest=FALSE;
     filename2[0]= filename3[0] = '\0';
-    temptree[0] = '\0';
     strcpy(filename2, "prunedtrees.txt");
     strcpy(filename3, "prunedtrees_info.txt");
-    
-    tmp = malloc(TREE_LENGTH*sizeof(char));
-    tmp[0] = '\0';
+
     pruned_tree = malloc(TREE_LENGTH*sizeof(char));
     pruned_tree[0] = '\0';
 
-    for(i=0; i<num_commands; i++)
+    for(j=0; j<num_commands; j++)
         {
-        if(strcmp(parsed_command[i], "selection") == 0)
-            {       
-            if(strcmp(parsed_command[i+1], "length")==0) select_longest=TRUE; 
+        if(strcmp(parsed_command[j], "selection") == 0)
+            {
+            if(strcmp(parsed_command[j+1], "length")==0) select_longest=TRUE;
             }
-        if(strcmp(parsed_command[i], "filename") == 0)
-            {       
-            strcpy(filename2, parsed_command[i+1]); 
+        if(strcmp(parsed_command[j], "filename") == 0)
+            {
+            strcpy(filename2, parsed_command[j+1]);
             strcpy(filename3, filename2);
             strcat(filename3, "_info.txt");
             }
@@ -237,99 +411,11 @@ void prune_monophylies(void)
 
     for(j=0; j<Total_fund_trees; j++)
         {
-        if(tree_top != NULL) dismantle_tree(tree_top);  /* Dismantle any trees already in memory */
-        tree_top = NULL;
-        
-        temp_top = NULL;
-        taxaorder=0;
-        strcpy(temptree, fundamentals[j]);
-		returntree_fullnames(temptree, j);
+        pruned_tree[0] = '\0';
+        collapse_monophyly_in_tree(j, tempoutfile, pruned_tree, &num_nodes, NULL, NULL);
 
-		/***  build the sourcetree in memory ***/
-		if(tree_top != NULL)
-	        {
-	        dismantle_tree(tree_top);
-	        tree_top = NULL;
-	        }
-	    temp_top = NULL;
-	    basic_tree_build(1, temptree, tree_top, TRUE);
-
-       /* tree_build(1, fundamentals[j], tree_top, 0, j, 0);  build the tree passed to the function */
-        tree_top = temp_top;
-        temp_top = NULL;
-        reset_tree(tree_top);
-      /*  fprintf(tempoutfile, "\nTree # %d [ %s ]\n\t", j, tree_names[j]); */
-
-        /* Number all taxa in the tree for tracing which taxa were deleted or retained and record the number of taxa in the variable numt */
-        numt=0; clannID=0;
-        numt = number_tree2(tree_top, numt);
-        /* alloc an arrary to hold all the names of hte taxa in the order they are found on the tree */
-        taxa_fate_names = malloc(numt*sizeof(char*));
-        for(k=0; k<numt; k++)
-        	{
-        	taxa_fate_names[k] = malloc(NAME_LENGTH*sizeof(char));
-        	taxa_fate_names[k][0] = '\0';
-        	}
-        get_taxa_names(tree_top, taxa_fate_names); /* copy names into the array taxa_fate_names */
-
-        /* Define an array to record the species that are pruned (and kept) in this tree */
-        taxa_fate = malloc(numt*sizeof(int));
-        for(k=0; k<numt; k++)
-    		{
-    		taxa_fate[k]=0;
-    		}
-
-        clannID = identify_species_specific_clades(tree_top, numt, taxa_fate, clannID);  /* Call recursive function to travel down the tree looking for species-specific clades */
-    	fprintf(tempoutfile, "\nTree # %d [ %s ]\n\t", j, tree_names[j]);
-    	/* Print out the list of deleted and pruned taxa from the taxa_fate array */	
-    	for(k=1; k<=numt; k++)
-    		{
-    		report=FALSE;
-    		/* find out if there are any taxa in clann k for reporting */
-    		for(l=0; l<numt; l++)
-    			{	
-    			if(abs(taxa_fate[l]) == k)
-    				{
-    				report=TRUE;
-    				l=numt;
-    				} 
-    			}
-    		if(report == TRUE)
-    			{	
-    			for(l=0; l<numt; l++)
-    				{	
-    				if(taxa_fate[l] == k*-1)
-    					fprintf(tempoutfile, "Removed:%s\t", taxa_fate_names[l]);
-    				}
-    			for(l=0; l<numt; l++)
-    				{	
-    				if(taxa_fate[l] == k)
-    					fprintf(tempoutfile, "KEPT:%s\n\t", taxa_fate_names[l]);
-    				}
-    			}
-    		}
-
-    	free(taxa_fate);
-	    for(k=0; k<numt; k++) free(taxa_fate_names[k]);
-	    free(taxa_fate_names);
-
-        shrink_tree(tree_top);    /* Shrink the pruned tree by switching off any internal nodes that are not needed */
-        pruned_tree[0] = '\0'; /* initialise the string */
-        if(print_pruned_tree(tree_top, 0, pruned_tree, TRUE, j) >1)
-            {
-            tmp[0] = '\0';
-            strcpy(tmp, "(");
-            strcat(tmp, pruned_tree);
-            strcat(tmp, ")");
-            strcpy(pruned_tree, tmp);
-            }
-        strcat(pruned_tree, ";");
-
-        num_nodes=0;
-        for(i=0; i<strlen(pruned_tree); i++)
-        	{if(pruned_tree[i] == ',') num_nodes++;	}
     	if(num_nodes > 2) /* if the remaining tree has more then 3 taxa */
-    		{    
+    		{
 	        if(strcmp(tree_names[j], "") != 0)
 	        	fprintf(pm_outfile, "%s[%s]\n", pruned_tree, tree_names[j]);
 	        else
@@ -337,16 +423,14 @@ void prune_monophylies(void)
 	        trees_included++;
         	}
         else
-        	{	
+        	{
         	trees_excluded++;
         	}
         }
-    
+
     printf2("\nPruning finished. %d pruned trees with 4 or more taxa written to the file \"%s\"\n", trees_included, filename2);
-   printf2("Information on pruned and retained taxa in each tree written to the file \"%s\"\n",  filename3); 
+   printf2("Information on pruned and retained taxa in each tree written to the file \"%s\"\n",  filename3);
     printf2("%d pruned trees with less than 4 taxa were excluded\n",trees_excluded );
-    free(temptree);
-    free(tmp);
     free(pruned_tree);
     fclose(pm_outfile);
     fprintf(tempoutfile, "\n");

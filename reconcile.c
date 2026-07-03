@@ -19,6 +19,7 @@
  *  59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  */
 #include "reconcile.h"
+#include "prune.h"   /* for extract_length()/select_longest, reused by decomposegenetrees Stage 2's representative-choice logic */
 
 void gene_content_parsimony(struct taxon * position, int * array)
 	{
@@ -113,6 +114,1208 @@ void nj(void)
 		free(tree);
 		}
 
+	}
+
+/* -----------------------------------------------------------------------
+ * resolve_guide_tree: shared guide-tree resolution logic for
+ * decomposegenetrees() (NOTES_gene_tree_decomposition.md §4, §9 step 2).
+ *
+ * Priority order:
+ *   1. speciestree_opt is a filename (anything other than NULL, "", or
+ *      "memory") -> read it, and hard-validate that its leaf-taxon set is
+ *      *exactly* the current taxa_names[] registry (both directions: no
+ *      missing taxa, no extra ones). On mismatch, fail and describe exactly
+ *      what's missing/extra rather than silently intersecting.
+ *   2. speciestree_opt == "memory", or nothing supplied but trees_in_memory
+ *      > 0 -> use retained_supers[0] (same source reconstruct() uses).
+ *   3. Nothing available at all -> generate one via nj() (deliberate
+ *      deviation from reconstruct(), which hard-errors here; a missing
+ *      guide tree should never be fatal for decomposegenetrees since the
+ *      whole point is it can run standalone with zero setup).
+ *
+ * out_tree   : caller-allocated buffer, >= TREE_LENGTH bytes. On success,
+ *              receives the guide tree as a raw Newick string (terminated
+ *              with ';', not yet built into a struct taxon tree).
+ * error_msg  : caller-allocated buffer (>=2000 bytes recommended), or NULL
+ *              if the caller doesn't want a message. On failure (return
+ *              FALSE), filled with a human-readable description.
+ *
+ * Returns TRUE on success, FALSE on failure (error_msg explains why).
+ * Deliberately does NOT touch parsed_command[]/num_commands -- the caller
+ * (decomposegenetrees' own option parser) extracts the speciestree= value
+ * and passes it in, which also makes this function trivially unit-testable
+ * in isolation (see NOTES_gene_tree_decomposition.md, §9 step 2).
+ * ----------------------------------------------------------------------- */
+int resolve_guide_tree(char *speciestree_opt, char *out_tree, char *error_msg)
+	{
+	int explicit_file = (speciestree_opt != NULL && strlen(speciestree_opt) > 0 && strcmp(speciestree_opt, "memory") != 0);
+
+	out_tree[0] = '\0';
+	if(error_msg != NULL) error_msg[0] = '\0';
+
+	if(explicit_file)
+		{
+		FILE *stfile = fopen(speciestree_opt, "r");
+		char *temptree = NULL;
+		char **leafnames = NULL;
+		int nleaf = 0, li = 0, ti = 0, si = 0, sc, len;
+		char *missing = NULL, *extra = NULL;
+
+		if(stfile == NULL)
+			{
+			if(error_msg != NULL) sprintf(error_msg, "Error: Cannot open species tree file '%s'", speciestree_opt);
+			return FALSE;
+			}
+
+		temptree = malloc(TREE_LENGTH*sizeof(char));
+		while((sc = getc(stfile)) != EOF && sc != ';' && si < TREE_LENGTH-2) temptree[si++] = (char)sc;
+		temptree[si++] = ';';
+		temptree[si] = '\0';
+		fclose(stfile);
+		len = (int)strlen(temptree);
+
+		/* Extract leaf names: any run of non-structural characters that
+		 * directly follows '(' or ',' (this skips internal-node support
+		 * labels, which only ever follow ')'). */
+		leafnames = malloc((number_of_taxa+len+10)*sizeof(char*));
+		li = 0;
+		while(li < len)
+			{
+			if(temptree[li] == '(' || temptree[li] == ',')
+				{
+				int j = li+1, k = 0;
+				char namebuf[NAME_LENGTH];
+				while(j < len && temptree[j] != '(' && temptree[j] != ')' && temptree[j] != ',' && temptree[j] != ':' && temptree[j] != ';' && k < NAME_LENGTH-1)
+					{
+					namebuf[k++] = temptree[j];
+					j++;
+					}
+				namebuf[k] = '\0';
+				if(k > 0)
+					{
+					leafnames[nleaf] = malloc((k+1)*sizeof(char));
+					strcpy(leafnames[nleaf], namebuf);
+					nleaf++;
+					}
+				}
+			li++;
+			}
+
+		missing = malloc(TREE_LENGTH*sizeof(char));
+		extra = malloc(TREE_LENGTH*sizeof(char));
+		missing[0] = '\0';
+		extra[0] = '\0';
+
+		for(ti=0; ti<number_of_taxa; ti++)
+			{
+			int found = FALSE;
+			for(li=0; li<nleaf; li++)
+				if(strcmp(taxa_names[ti], leafnames[li]) == 0) { found = TRUE; break; }
+			if(!found) { strcat(missing, taxa_names[ti]); strcat(missing, " "); }
+			}
+		for(li=0; li<nleaf; li++)
+			{
+			int found = FALSE;
+			for(ti=0; ti<number_of_taxa; ti++)
+				if(strcmp(taxa_names[ti], leafnames[li]) == 0) { found = TRUE; break; }
+			if(!found) { strcat(extra, leafnames[li]); strcat(extra, " "); }
+			}
+		for(li=0; li<nleaf; li++) free(leafnames[li]);
+		free(leafnames);
+
+		if(strlen(missing) > 0 || strlen(extra) > 0)
+			{
+			if(error_msg != NULL)
+				{
+				sprintf(error_msg, "Error: species tree file '%s' taxon set does not match the loaded taxa.\n", speciestree_opt);
+				if(strlen(missing) > 0) { strcat(error_msg, "  Missing from species tree: "); strcat(error_msg, missing); strcat(error_msg, "\n"); }
+				if(strlen(extra) > 0) { strcat(error_msg, "  Extra in species tree (not among loaded taxa): "); strcat(error_msg, extra); strcat(error_msg, "\n"); }
+				}
+			free(missing); free(extra); free(temptree);
+			return FALSE;
+			}
+
+		free(missing); free(extra);
+		strcpy(out_tree, temptree);
+		free(temptree);
+		return TRUE;
+		}
+
+	/* speciestree=memory, or nothing supplied but something's already loaded */
+	if(trees_in_memory > 0)
+		{
+		strcpy(out_tree, retained_supers[0]);
+		return TRUE;
+		}
+
+	if(speciestree_opt != NULL && strcmp(speciestree_opt, "memory") == 0)
+		{
+		/* explicitly asked for memory, but there's nothing there -- this one still hard-errors */
+		if(error_msg != NULL) sprintf(error_msg, "Error: No supertree in memory for 'speciestree=memory'.");
+		return FALSE;
+		}
+
+	/* Nothing supplied, nothing in memory -> generate a guide tree on the fly */
+	nj();
+	if(trees_in_memory > 0)
+		{
+		strcpy(out_tree, retained_supers[0]);
+		return TRUE;
+		}
+
+	if(error_msg != NULL) sprintf(error_msg, "Error: could not generate a guide tree via nj().");
+	return FALSE;
+	}
+
+/* =========================================================================
+ * decomposegenetrees Stage 2 -- LCA-mapping decomposition
+ * (NOTES_gene_tree_decomposition.md §5, §9 step 3).
+ *
+ * Builds on label_gene_tree()/reconstruct_map() (defined below, unmodified)
+ * without touching them.  Everything here is new.
+ * ========================================================================= */
+
+/* Support-gate default, resolved in the NOTES.md HANDOFF STATUS section:
+ * conservative, biases toward NOT cutting when evidence is ambiguous. */
+#define DECOMPOSE_DEFAULT_DUPSUPPORT 0.5
+
+/* node_well_supported(): implements the §7-resolved semantics for "is this
+ * duplication call well-supported enough to cut on":
+ *   - weight == ""                       -> TRUE (no data at all; matches
+ *     compute_autoweights_bootstrap's precedent of treating "no bootstrap
+ *     label" as full confidence, and is required for the cut logic to ever
+ *     fire on examples/tutorial_multicopy.ph, which has zero branch lengths
+ *     or bootstrap values anywhere).
+ *   - "label:branchlength" or bare "label" (no ':') -> treat label as a
+ *     bootstrap value (rescaled from percentage if >1.0), gate on
+ *     bootstrap >= dupsupport.
+ *   - ":branchlength" (no label)         -> gate on branchlength > 0 (fixed
+ *     zero test, dupsupport not used in this branch).
+ */
+/* tag_duplications_only(): same duplication *detection* test as
+ * reconstruct_map() (reconcile.c above, unmodified) -- a node is a
+ * duplication iff one of its daughters' tag/name equals its own tag -- but
+ * WITHOUT reconstruct_map()'s side effect of splicing in extra "newbie"
+ * wrapper nodes around the mismatched-tag daughter. That splicing exists
+ * solely to prepare the tree for add_losses() (reconcile.c) to insert
+ * missing-lineage branches immediately afterward; since Stage 2 only needs
+ * duplication *tags*, not loss reconstruction, calling the real
+ * reconstruct_map() here would leave the gene tree in a half-transformed
+ * state (extra single-child wrapper nodes, confirmed by direct testing to
+ * corrupt Stage 2's fragment output) because add_losses() never runs to
+ * finish what it started. This is a separate, non-mutating function, not a
+ * modification of reconstruct_map() itself. */
+static int tag_duplications_only(struct taxon *position)
+	{
+	struct taxon *tmp;
+	int found, num_dups = 0;
+
+	while(position != NULL)
+		{
+		if(position->daughter != NULL)
+			{
+			num_dups += tag_duplications_only(position->daughter);
+			tmp = position->daughter;
+			found = FALSE;
+			while(tmp != NULL)
+				{
+				if(tmp->name == -1)
+					{
+					if(tmp->tag == position->tag) found = TRUE;
+					}
+				else
+					{
+					if(tmp->name == position->tag) found = TRUE;
+					}
+				tmp = tmp->next_sibling;
+				}
+			if(found)
+				{
+				position->loss = 2;
+				num_dups++;
+				}
+			}
+		position = position->next_sibling;
+		}
+	return(num_dups);
+	}
+
+static int node_well_supported(struct taxon *node, float dupsupport)
+	{
+	char *w = node->weight;
+	char *colon;
+	char label[100];
+	int len;
+	float boot, brlen;
+
+	if(w[0] == '\0') return TRUE;
+
+	colon = strchr(w, ':');
+	if(colon == NULL)
+		{
+		boot = atof(w);
+		if(boot > 1.0) boot /= 100.0;
+		return(boot >= dupsupport);
+		}
+	if(colon == w)
+		{
+		brlen = atof(w+1);
+		return(brlen > 0);
+		}
+	len = (int)(colon - w);
+	if(len > 99) len = 99;
+	strncpy(label, w, len);
+	label[len] = '\0';
+	boot = atof(label);
+	if(boot > 1.0) boot /= 100.0;
+	return(boot >= dupsupport);
+	}
+
+/* Recursively collect, for the subtree rooted at `node` (node itself plus
+ * its whole daughter chain -- NOT node's own next_sibling), which species
+ * (taxa_names[] ids) are present among its leaves and how many leaves there
+ * are in total.  Mirrors the "descend"/list_taxa_in_clade style already
+ * used elsewhere in this file/prune.c, but scoped to a single clade root
+ * rather than a whole tree or a whole sibling chain. */
+static void collect_clade_stats(struct taxon *node, int *presence, int *leafcount)
+	{
+	if(node->daughter != NULL)
+		{
+		struct taxon *child = node->daughter;
+		while(child != NULL)
+			{
+			collect_clade_stats(child, presence, leafcount);
+			child = child->next_sibling;
+			}
+		}
+	else
+		{
+		if(node->name >= 0 && node->name < number_of_taxa) presence[node->name] = TRUE;
+		(*leafcount)++;
+		}
+	}
+
+static void count_leaves_rec(struct taxon *node, int *count)
+	{
+	if(node->daughter != NULL)
+		{
+		struct taxon *child = node->daughter;
+		while(child != NULL) { count_leaves_rec(child, count); child = child->next_sibling; }
+		}
+	else (*count)++;
+	}
+
+/* Total surviving (->spr == TRUE) leaves under `node`, post-fragment_shrink.
+ * NOT the same thing as fragment_print()'s/print_pruned_tree()'s return
+ * value -- that return value is the number of *direct items at the
+ * top-level sibling chain* (used there only for comma-placement/"wrap in
+ * parens" bookkeeping), which happens to be small and unrelated to the
+ * true leaf count whenever the root has few direct children (e.g. our
+ * 2-way wrapper). Confirmed by direct testing: using fragment_print()'s
+ * return value against minfragtaxa silently misclassified full multi-leaf
+ * fragments as 1- or 2-leaf ones. */
+static void count_kept_leaves(struct taxon *node, int *count)
+	{
+	if(node->daughter != NULL)
+		{
+		struct taxon *child = node->daughter;
+		while(child != NULL) { count_kept_leaves(child, count); child = child->next_sibling; }
+		}
+	else
+		{
+		if(node->spr) (*count)++;
+		}
+	}
+
+static void enforce_single_copy_rec(struct taxon *node, int *seen, int treenum, FILE *infofile)
+	{
+	if(node->daughter != NULL)
+		{
+		struct taxon *child = node->daughter;
+		while(child != NULL) { enforce_single_copy_rec(child, seen, treenum, infofile); child = child->next_sibling; }
+		}
+	else
+		{
+		if(node->spr && node->name >= 0 && node->name < number_of_taxa)
+			{
+			if(seen[node->name])
+				{
+				node->spr = FALSE;
+				if(infofile != NULL)
+					fprintf(infofile, "Tree # %d [ %s ]: dropped %s (a duplication node's decision left this fragment with a second copy of a species already kept elsewhere in it -- final single-copy safety net, not expected to fire in ordinary cases)\n", treenum, tree_names[treenum], node->fullname);
+				}
+			else seen[node->name] = TRUE;
+			}
+		}
+	}
+
+/* Last-resort safety net: decompose_walk()'s per-duplication-node decisions
+ * (cut/collapse/merge) are each locally correct, but a merge that pulls a
+ * failing side's representative in next to an already-fully-resolved
+ * passing side can still, in topologies where the true duplication/species
+ * boundary doesn't line up with which node got flagged loss==2 (e.g. the
+ * species-colliding leaf sits *outside* any duplication node's direct
+ * children -- see the fix note on the "mixed" branch above, which closes
+ * the common case but not every possible nesting), leave more than one
+ * surviving leaf for the same species somewhere in the final fragment.
+ * Found by direct testing against examples/tutorial_multicopy.ph tree 7
+ * (0-indexed): the mixed-branch collision check above did not catch every
+ * random-representative-selection case, and a fragment still occasionally
+ * came out multicopy (`Human.a` AND `Human.b` both survived, with `Human.a`
+ * never touched by any duplication-node decision because its immediate
+ * ancestor chain up to the point where it rejoins `Human.b`'s clade was
+ * not itself flagged as a duplication node). Since producing single-copy-
+ * ish ortholog subtrees is decomposegenetrees' entire purpose (§1), this is
+ * enforced unconditionally, in tree (pre-order) traversal order, right
+ * before fragment_shrink() in process_fragment_root(): keep the first
+ * ->spr==TRUE leaf seen per species, drop any later ->spr==TRUE leaf of a
+ * species already kept. Verified this closes the gap: 25 repeated runs of
+ * `exe examples/tutorial_multicopy.ph autodecompose=yes` (which exercises
+ * `selection=random`'s nondeterminism, the condition that surfaced this)
+ * all now report "number of multicopy trees: 0", vs ~24% of runs failing
+ * before this net was added. */
+static void enforce_single_copy(struct taxon *root, int treenum, FILE *infofile)
+	{
+	int *seen = calloc(number_of_taxa, sizeof(int));
+	enforce_single_copy_rec(root, seen, treenum, infofile);
+	free(seen);
+	}
+
+/* Species (taxa_names[] ids) among leaves under `node` that are still
+ * KEPT (->spr == TRUE), i.e. survived whatever decompose_walk() has already
+ * done to this subtree. Used by the "mixed" (merge) branch below to check
+ * whether a representative picked from a *failing* sibling would collide
+ * (same species) with something already kept on the *passing* sibling(s) --
+ * see the collision-avoidance fix documented at that call site. */
+static void collect_kept_species(struct taxon *node, int *presence)
+	{
+	if(node->daughter != NULL)
+		{
+		struct taxon *child = node->daughter;
+		while(child != NULL) { collect_kept_species(child, presence); child = child->next_sibling; }
+		}
+	else
+		{
+		if(node->spr && node->name >= 0 && node->name < number_of_taxa) presence[node->name] = TRUE;
+		}
+	}
+
+static void find_representative_rec(struct taxon *node, int *idx, int keep, struct taxon **best, long *bestlen)
+	{
+	if(node->daughter != NULL)
+		{
+		struct taxon *child = node->daughter;
+		while(child != NULL) { find_representative_rec(child, idx, keep, best, bestlen); child = child->next_sibling; }
+		}
+	else
+		{
+		if(select_longest)
+			{
+			long len = extract_length(node->fullname);
+			if(*best == NULL || len > *bestlen) { *best = node; *bestlen = len; }
+			}
+		else
+			{
+			if(*idx == keep) *best = node;
+			(*idx)++;
+			}
+		}
+	}
+
+/* Choose one representative leaf under `node`, using the same
+ * selection=length|random convention as prune_monophylies (prune.c) --
+ * longest embedded sequence-length if select_longest is set, otherwise a
+ * uniformly random leaf. */
+static struct taxon *pick_representative(struct taxon *node)
+	{
+	int leafcount = 0, idx = 0, keep;
+	struct taxon *best = NULL;
+	long bestlen = -1;
+
+	count_leaves_rec(node, &leafcount);
+	keep = (leafcount > 0) ? (int)fmod(rand(), leafcount) : 0;
+	find_representative_rec(node, &idx, keep, &best, &bestlen);
+	return best;
+	}
+
+/* Set ->spr = FALSE on every leaf under `node` except `keep` (or every leaf
+ * if keep == NULL).  Internal-node flags are left for fragment_shrink() to
+ * derive afterward, exactly as prune.c's untag_nodes_below/shrink_tree()
+ * collapse logic does for ->tag.
+ *
+ * IMPORTANT: this uses ->spr, NOT ->tag, as the keep/remove flag --
+ * deliberately different from Stage 1 (prune.c) and every other tag-based
+ * collapse convention in this codebase. Reason (found by direct testing,
+ * not by inspection): label_gene_tree()/reconstruct_map() (reconcile.c,
+ * unmodified, called earlier in decompose_gene_tree_stage2() to find the
+ * best rooting and tag duplications) permanently overwrite ->tag on every
+ * node with its LCA-mapped species-tree node id -- including leaves, whose
+ * ->tag becomes their taxon id. Since taxon ids are 0-based, any leaf whose
+ * species happens to be taxon #0 (e.g. "Human" in
+ * examples/tutorial_multicopy.ph) ends up with ->tag == 0 == FALSE, which
+ * silently made print_pruned_tree()/shrink_tree() (tree_ops.c, also
+ * unmodified) treat that leaf as already deleted. Using the otherwise-
+ * unused ->spr field (scratch space for SPR search elsewhere, never
+ * touched by these freshly-built, isolated gene-tree copies) sidesteps the
+ * collision entirely rather than fighting over the meaning of ->tag. See
+ * init_keep_flags()/fragment_shrink()/fragment_print() below, which are
+ * this function's ->spr-based counterparts to reset_tree()/shrink_tree()/
+ * print_pruned_tree(). */
+static void tag_off_leaves_except(struct taxon *node, struct taxon *keep)
+	{
+	if(node->daughter != NULL)
+		{
+		struct taxon *child = node->daughter;
+		while(child != NULL) { tag_off_leaves_except(child, keep); child = child->next_sibling; }
+		}
+	else
+		{
+		node->spr = (node == keep) ? TRUE : FALSE;
+		}
+	}
+
+/* make_taxon() (tree_ops.c) defaults ->spr to FALSE (it's scratch space for
+ * an unrelated purpose elsewhere); Stage 2 needs it to default to "keep"
+ * (TRUE) across the whole gene tree before any collapse decisions run. */
+static void init_keep_flags(struct taxon *position)
+	{
+	while(position != NULL)
+		{
+		position->spr = TRUE;
+		if(position->daughter != NULL) init_keep_flags(position->daughter);
+		position = position->next_sibling;
+		}
+	}
+
+/* ->spr-based counterpart to shrink_tree() (tree_ops.c) -- collapses away
+ * internal nodes with fewer than 2 surviving (spr==TRUE) daughters. Unlike
+ * shrink_tree(), does not attempt to merge branch lengths on collapse
+ * (none of examples/tutorial_multicopy.ph's fixtures have any; a real
+ * dataset with branch lengths would want that added here before this is
+ * relied on for scoring, not just for the decision log). */
+static int fragment_shrink(struct taxon *position)
+	{
+	int count = 0, tot;
+
+	while(position != NULL)
+		{
+		if(position->daughter != NULL)
+			{
+			tot = fragment_shrink(position->daughter);
+			position->spr = (tot >= 2);
+			count += (tot < 2) ? tot : 1;
+			}
+		else
+			{
+			if(position->spr) count++;
+			}
+		position = position->next_sibling;
+		}
+	return(count);
+	}
+
+/* ->spr-based counterpart to print_pruned_tree() (tree_ops.c), always
+ * emitting ->fullname (the per-paralog-copy original label) rather than a
+ * numeric id. */
+static int fragment_print(struct taxon *position, int count, char *buf)
+	{
+	while(position != NULL)
+		{
+		if(position->daughter != NULL)
+			{
+			if(position->spr)
+				{
+				if(count > 0) strcat(buf, ",");
+				strcat(buf, "(");
+				count++;
+				fragment_print(position->daughter, 0, buf);
+				strcat(buf, ")");
+				}
+			else
+				{
+				count = fragment_print(position->daughter, count, buf);
+				}
+			}
+		else
+			{
+			if(position->spr)
+				{
+				if(count > 0) strcat(buf, ",");
+				strcat(buf, position->fullname);
+				count++;
+				}
+			}
+		position = position->next_sibling;
+		}
+	return(count);
+	}
+
+static void process_fragment_root(struct taxon *root, int treenum, float dupsupport, int minfragtaxa, int minfragspecies, FILE *fragfile, FILE *infofile, int *fragcount);
+
+/* decompose_walk(): the per-node cut/collapse/merge decision procedure
+ * (NOTES.md §5 Stage 2, steps 3-4).  Processes exactly one node (recursing
+ * into its daughter chain as needed) -- never node's own next_sibling,
+ * which is the caller's concern.
+ *
+ * Side effects only: marks leaves tag=FALSE where a clade is being
+ * collapsed to a single representative or pruned-and-merged, and (for
+ * genuine cut points) recursively spins each child off as its own
+ * independent fragment via process_fragment_root(), then marks the whole
+ * cut node's subtree tag=FALSE so it disappears from the *current*
+ * fragment's own eventual print (it has already been written out
+ * separately). */
+static void decompose_walk(struct taxon *node, int treenum, float dupsupport, int minfragtaxa, int minfragspecies, FILE *fragfile, FILE *infofile, int *fragcount)
+	{
+	int is_dup, species_count, i, nchildren, npass;
+	int *presence;
+	struct taxon *child, *children[64];
+	int child_leafcount[64], child_speccount[64];
+	struct taxon *rep;
+
+	if(node == NULL || node->daughter == NULL) return; /* leaf: nothing to decide */
+
+	is_dup = (node->loss == 2);
+
+	if(!(is_dup && node_well_supported(node, dupsupport)))
+		{
+		/* Ordinary node: not a duplication, or a duplication call we don't
+		 * trust enough to act on -- keep it, recurse through it. */
+		child = node->daughter;
+		while(child != NULL)
+			{
+			decompose_walk(child, treenum, dupsupport, minfragtaxa, minfragspecies, fragfile, infofile, fragcount);
+			child = child->next_sibling;
+			}
+		return;
+		}
+
+	/* Pure in-paralog check: every leaf under this duplication maps to one species. */
+	presence = calloc(number_of_taxa, sizeof(int));
+	species_count = 0;
+	{
+	int leafcount = 0;
+	collect_clade_stats(node, presence, &leafcount);
+	for(i=0; i<number_of_taxa; i++) if(presence[i]) species_count++;
+	}
+	free(presence);
+
+	if(species_count <= 1)
+		{
+		rep = pick_representative(node);
+		tag_off_leaves_except(node, rep);
+		if(infofile != NULL && rep != NULL)
+			fprintf(infofile, "Tree # %d [ %s ]: collapsed pure in-paralog clade at a duplication node -> kept %s\n", treenum, tree_names[treenum], rep->fullname);
+		return;
+		}
+
+	/* Gather children (usually 2; capped generously for safety against
+	 * unresolved polytomies). */
+	nchildren = 0;
+	child = node->daughter;
+	while(child != NULL && nchildren < 64) { children[nchildren++] = child; child = child->next_sibling; }
+
+	npass = 0;
+	for(i=0; i<nchildren; i++)
+		{
+		int *pres = calloc(number_of_taxa, sizeof(int));
+		int lc = 0, sc = 0, k;
+		collect_clade_stats(children[i], pres, &lc);
+		for(k=0; k<number_of_taxa; k++) if(pres[k]) sc++;
+		free(pres);
+		child_leafcount[i] = lc;
+		child_speccount[i] = sc;
+		if(lc >= minfragtaxa && sc >= minfragspecies) npass++;
+		}
+
+	if(npass == nchildren)
+		{
+		/* Both/all sides informative and cross-species: cut. */
+		if(infofile != NULL)
+			fprintf(infofile, "Tree # %d [ %s ]: cut at duplication node -> %d new fragment(s)\n", treenum, tree_names[treenum], nchildren);
+		for(i=0; i<nchildren; i++)
+			{
+			/* children[i] is still linked to its sibling(s) under `node` via
+			 * ->next_sibling -- fragment_shrink()/fragment_print() both walk
+			 * that chain (same convention as shrink_tree()/print_pruned_tree()),
+			 * so calling process_fragment_root() on children[i] as-is would
+			 * silently pull its sibling's content into the same fragment too.
+			 * Temporarily sever the link (restoring it right after) so each
+			 * child is processed/printed as its own independent fragment root
+			 * -- mirroring the "extra wrapper root" trick already used above
+			 * for best_mapping, for exactly the same reason. Found by direct
+			 * testing against tutorial_multicopy.ph tree 6/7 (NOTES.md). */
+			struct taxon *saved_next = children[i]->next_sibling;
+			children[i]->next_sibling = NULL;
+			process_fragment_root(children[i], treenum, dupsupport, minfragtaxa, minfragspecies, fragfile, infofile, fragcount);
+			children[i]->next_sibling = saved_next;
+			}
+		tag_off_leaves_except(node, NULL); /* remove the whole clade from the current fragment -- already spun off above */
+		return;
+		}
+
+	if(npass == 0)
+		{
+		/* Both/all sides fail the informativeness floor: collapse the whole clade. */
+		rep = pick_representative(node);
+		tag_off_leaves_except(node, rep);
+		if(infofile != NULL && rep != NULL)
+			fprintf(infofile, "Tree # %d [ %s ]: collapsed clade at duplication node (all children below minfragtaxa=%d/minfragspecies=%d) -> kept %s\n", treenum, tree_names[treenum], minfragtaxa, minfragspecies, rep->fullname);
+		return;
+		}
+
+	/* Mixed: prune the failing side(s) down to a representative tip and
+	 * merge back in; keep searching for further duplications in the side(s)
+	 * that passed.
+	 *
+	 * Process the PASSING side(s) first (recursing through decompose_walk,
+	 * which may itself prune/collapse leaves further down), then the
+	 * failing side(s) -- order matters for the collision check just below.
+	 *
+	 * BUG FIXED (found during §9 step 7 end-to-end testing): a
+	 * representative picked from a failing side is being merged, as a
+	 * sibling, into a subtree that -- because `node` is itself a
+	 * duplication node -- is by definition the failing side's OUT-PARALOG.
+	 * If the representative's species also survives somewhere in the
+	 * passing side (e.g. the passing side already kept its own copy of
+	 * that same species, or a nested duplication further down keeps one),
+	 * merging silently re-introduces the very multicopy-ness Stage 2 exists
+	 * to remove -- confirmed by direct testing against
+	 * examples/tutorial_multicopy.ph tree 7 (0-indexed) with the default
+	 * floor and `selection=random`: on some (not all -- representative-
+	 * dependent, hence the nondeterminism that surfaced this) random seeds,
+	 * the surviving fragment for tree 7 ended up containing BOTH `Human.a`
+	 * and `Human.b`, i.e. a fragment that was supposed to be single-copy by
+	 * construction was still multicopy end-to-end (reproduced with
+	 * `exe examples/tutorial_multicopy.ph autodecompose=yes`, "number of
+	 * multicopy trees" was 1 instead of 0 on the affected run). Fix: after
+	 * the passing side(s) are fully resolved, check whether the failing
+	 * side's chosen representative's species is already present among the
+	 * passing side's *surviving* (->spr==TRUE) leaves; if so, drop the
+	 * representative too (tag off the whole failing clade with no
+	 * survivor) instead of merging a same-species duplicate in. This is
+	 * conservative (loses a little more information on the rare collision
+	 * case) rather than ever emitting a fragment with duplicate species,
+	 * which would defeat the entire point of decomposegenetrees. */
+	for(i=0; i<nchildren; i++)
+		{
+		if(child_leafcount[i] >= minfragtaxa && child_speccount[i] >= minfragspecies)
+			decompose_walk(children[i], treenum, dupsupport, minfragtaxa, minfragspecies, fragfile, infofile, fragcount);
+		}
+	{
+	int *kept_species = calloc(number_of_taxa, sizeof(int));
+	for(i=0; i<nchildren; i++)
+		if(child_leafcount[i] >= minfragtaxa && child_speccount[i] >= minfragspecies)
+			collect_kept_species(children[i], kept_species);
+
+	for(i=0; i<nchildren; i++)
+		{
+		if(child_leafcount[i] < minfragtaxa || child_speccount[i] < minfragspecies)
+			{
+			rep = pick_representative(children[i]);
+			if(rep != NULL && rep->name >= 0 && rep->name < number_of_taxa && kept_species[rep->name])
+				{
+				tag_off_leaves_except(children[i], NULL);
+				if(infofile != NULL)
+					fprintf(infofile, "Tree # %d [ %s ]: dropped uninformative sibling clade under duplication node (representative %s's species already kept on the other side -- merging would re-introduce a duplicate)\n", treenum, tree_names[treenum], rep->fullname);
+				}
+			else
+				{
+				tag_off_leaves_except(children[i], rep);
+				if(infofile != NULL && rep != NULL)
+					fprintf(infofile, "Tree # %d [ %s ]: pruned uninformative sibling clade under duplication node (< minfragtaxa=%d/minfragspecies=%d) -> kept %s, merged into sibling\n", treenum, tree_names[treenum], minfragtaxa, minfragspecies, rep->fullname);
+				}
+			}
+		}
+	free(kept_species);
+	}
+	}
+
+/* process_fragment_root(): finish deciding cuts/collapses within `root`
+ * (via decompose_walk), then shrink away whatever got tagged off and, if
+ * what remains meets minfragtaxa, write it to fragfile as one ortholog
+ * subtree.  Recurses (via decompose_walk -> process_fragment_root for
+ * genuine cut points) before this root's own print, so nested cuts are
+ * written first/independently and never duplicated in this root's output. */
+static void process_fragment_root(struct taxon *root, int treenum, float dupsupport, int minfragtaxa, int minfragspecies, FILE *fragfile, FILE *infofile, int *fragcount)
+	{
+	char *fragtree;
+	int leafcount;
+
+	decompose_walk(root, treenum, dupsupport, minfragtaxa, minfragspecies, fragfile, infofile, fragcount);
+
+	enforce_single_copy(root, treenum, infofile);
+
+	fragment_shrink(root);
+
+	/* NOTE: root->spr here is NOT a "did anything survive" flag -- per
+	 * fragment_shrink()'s shrink_tree()-mirroring convention, it means "did
+	 * >=2 branches survive under root" (a real bifurcation, vs. collapsing
+	 * to a single pass-through branch). At an ordinary internal node, a
+	 * spr==FALSE single-surviving-branch case is meant to be absorbed
+	 * transparently into that node's *parent* (fragment_print()'s "else"
+	 * branch recurses through without wrapping when spr==FALSE, exactly
+	 * mirroring print_pruned_tree()'s collapse-single-child handling). But
+	 * `root` here has no parent to absorb into -- it's the top of this
+	 * fragment. Using root->spr as an early-exit guard therefore silently
+	 * dropped a genuinely surviving one-branch fragment (found by testing:
+	 * a cut where only the reroot-outgroup side of the top wrapper survives
+	 * -- tutorial_multicopy.ph tree 6/7 both hit this). count_kept_leaves()
+	 * is the correct "did anything survive" test regardless of root->spr's
+	 * collapse/no-collapse distinction; fragment_print() already handles
+	 * printing correctly either way (wraps if spr==TRUE, transparently
+	 * passes through if spr==FALSE). */
+	fragtree = malloc(TREE_LENGTH*sizeof(char));
+	fragtree[0] = '\0';
+	leafcount = 0;
+	count_kept_leaves(root, &leafcount);
+	if(leafcount == 0) { free(fragtree); return; } /* truly nothing survived under root */
+	fragment_print(root, 0, fragtree);
+
+	if(leafcount >= minfragtaxa)
+		{
+		char *wrapped = malloc(TREE_LENGTH*sizeof(char));
+		wrapped[0] = '\0';
+		if(leafcount > 1) { strcpy(wrapped, "("); strcat(wrapped, fragtree); strcat(wrapped, ")"); }
+		else strcpy(wrapped, fragtree);
+		strcat(wrapped, ";");
+		if(fragfile != NULL)
+			{
+			(*fragcount)++;
+			/* BUG FIXED (found during §9 step 7 documentation prep): unlike
+			 * the Stage-1-passthrough naming a few hundred lines down (which
+			 * falls back to "tree%d_frag1" when tree_names[treenum] is
+			 * empty -- true of every line in examples/tutorial_multicopy.ph,
+			 * none of which carry an explicit Newick tree name), this
+			 * Stage-2 cut-fragment naming used tree_names[treenum]
+			 * unconditionally, producing cosmetically confusing fragment
+			 * names like "_frag1"/"_frag2" (leading underscore, no tree
+			 * number) whenever the source tree had no name -- confirmed via
+			 * `decomposegenetrees minfragtaxa=2 minfragspecies=1` against
+			 * that fixture, where tree 6/7's cut fragments came out named
+			 * "_frag1"/"_frag2"/"_frag3" instead of "tree6_frag1" etc. Not a
+			 * correctness bug (weights/content were still right, and names
+			 * only have to be unique per §5, which they still were --
+			 * distinguished by fragindex/position in the file), but
+			 * inconsistent with Stage 1's own fallback and confusing enough
+			 * in <filename>_info.txt / the tutorial's worked example to fix
+			 * here rather than merely note. */
+			if(tree_names[treenum][0] != '\0')
+				fprintf(fragfile, "%s[%s_frag%d]\n", wrapped, tree_names[treenum], *fragcount);
+			else
+				fprintf(fragfile, "%s[tree%d_frag%d]\n", wrapped, treenum, *fragcount);
+			}
+		free(wrapped);
+		}
+	else if(infofile != NULL)
+		{
+		fprintf(infofile, "Tree # %d [ %s ]: dropped a %d-leaf fragment (below minfragtaxa=%d)\n", treenum, tree_names[treenum], leafcount, minfragtaxa);
+		}
+
+	free(fragtree);
+	}
+
+/* decompose_gene_tree_stage2(): entry point.  Finds the gene-tree rooting
+ * that minimises duplication count against `guide_tree_str` (reusing the
+ * rerooting pattern from get_recon_score(), duplication count only -- no
+ * losses, per NOTES.md §5 step 1), tags duplications via
+ * label_gene_tree()/reconstruct_map() (unmodified), then walks the result
+ * with decompose_walk()/process_fragment_root() to write out the surviving
+ * ortholog-subtree fragments.
+ *
+ * guide_tree_str : raw Newick guide tree (e.g. from resolve_guide_tree()).
+ * fragfile       : receives one Newick fragment per line (may be NULL to
+ *                  suppress writing, e.g. for a dry-run/count-only call).
+ * infofile       : receives a decision log (may be NULL).
+ * Returns the number of fragments written. */
+int decompose_gene_tree_stage2(int treenum, char *guide_tree_str, float dupsupport, int minfragtaxa, int minfragspecies, FILE *fragfile, FILE *infofile)
+	{
+	struct taxon *species_tree = NULL, *gene_tree = NULL, *copy = NULL, *best_mapping = NULL, *position = NULL;
+	char *temptree = malloc(TREE_LENGTH*sizeof(char));
+	int taxaorder = 0, nrootings, j, xnum, best_dups = -1, fragcount = 0, i;
+	int *presence;
+
+	/* Build the species (guide) tree, with the same "extra wrapper root"
+	 * reconstruct() uses (reconcile.c, species_source==1/3 branch) so
+	 * get_min_node()'s LCA numbering has a defined outgroup above the
+	 * top-level split. */
+	strcpy(temptree, guide_tree_str);
+	temp_top = NULL;
+	{ int _to = 0; tree_build(1, temptree, species_tree, TRUE, -1, &_to); }
+	species_tree = temp_top;
+	temp_top = make_taxon();
+	temp_top->daughter = species_tree;
+	species_tree->parent = temp_top;
+	species_tree = temp_top;
+	temp_top = NULL;
+	number_tree1(species_tree, number_of_taxa);
+
+	/* Build the gene tree, unrooted, so every possible rooting can be tried. */
+	strcpy(temptree, fundamentals[treenum]);
+	unroottree(temptree);
+	returntree(temptree);
+	temp_top = NULL;
+	taxaorder = 0;
+	tree_build(1, temptree, gene_tree, 1, treenum, &taxaorder);
+	gene_tree = temp_top;
+	temp_top = NULL;
+
+	if(presence_of_trichotomies(gene_tree)) gene_tree = do_resolve_tricotomies(gene_tree, species_tree, 1);
+
+	duplicate_tree(gene_tree, NULL);
+	copy = temp_top;
+	temp_top = NULL;
+
+	nrootings = number_tree(gene_tree, 0);
+	presence = malloc(2*number_of_taxa*sizeof(int));
+
+	for(j=0; j<nrootings; j++)
+		{
+		int dups;
+		position = get_branch(gene_tree, j);
+		temp_top = gene_tree;
+		reroot_tree(position);
+		gene_tree = temp_top;
+		temp_top = NULL;
+
+		for(i=0; i<2*number_of_taxa; i++) presence[i] = FALSE;
+		xnum = number_tree1(species_tree, number_of_taxa);
+		xnum--;
+		label_gene_tree(gene_tree, species_tree, presence, xnum);
+		dups = tag_duplications_only(gene_tree);
+
+		if(best_dups == -1 || dups < best_dups)
+			{
+			best_dups = dups;
+			if(best_mapping != NULL) dismantle_tree(best_mapping);
+			best_mapping = gene_tree;
+			gene_tree = NULL;
+			}
+		else
+			{
+			dismantle_tree(gene_tree);
+			gene_tree = NULL;
+			}
+
+		temp_top = NULL;
+		duplicate_tree(copy, NULL);
+		gene_tree = temp_top;
+		temp_top = NULL;
+		number_tree(gene_tree, 0);
+		}
+
+	free(presence);
+	if(copy != NULL) { dismantle_tree(copy); copy = NULL; }
+	if(gene_tree != NULL) { dismantle_tree(gene_tree); gene_tree = NULL; }
+
+	if(best_mapping != NULL)
+		{
+		/* reroot_tree() leaves its result as a *pair* of siblings (the
+		 * rerooted subtree, plus the extracted outgroup as its
+		 * next_sibling) -- this is the same convention tree_map()/
+		 * get_recon_score() rely on when calling label_gene_tree()/
+		 * reconstruct_map() directly on it. But process_fragment_root()
+		 * (and shrink_tree()/print_pruned_tree() underneath it) need a
+		 * single coherent root whose ->daughter is that 2-way split, or
+		 * the outgroup sibling is silently invisible to them and gets
+		 * dropped from every fragment. Wrap it, mirroring the same
+		 * "extra top node" trick reconstruct() uses for the species
+		 * tree (reconcile.c, species_source resolution above). */
+		struct taxon *wrapper = make_taxon();
+		wrapper->daughter = best_mapping;
+		best_mapping->parent = wrapper;
+		init_keep_flags(wrapper);
+		process_fragment_root(wrapper, treenum, dupsupport, minfragtaxa, minfragspecies, fragfile, infofile, &fragcount);
+		dismantle_tree(wrapper);
+		best_mapping = NULL;
+		}
+
+	if(species_tree != NULL) { dismantle_tree(species_tree); species_tree = NULL; }
+	free(temptree);
+
+	return(fragcount);
+	}
+
+/* -----------------------------------------------------------------------
+ * decomposegenetrees Stage 3: weighting and pool-integration prep.
+ * See NOTES_gene_tree_decomposition.md §5 Stage 3 / §9 step 4.
+ *
+ * For every source tree, runs Stage 1 (collapse_monophyly_in_tree()); if
+ * that fully resolves it to single-copy, the collapsed tree becomes one
+ * fragment at weight 1.0.  Otherwise Stage 2 (decompose_gene_tree_stage2())
+ * is run on it, producing k fragments (k>=0) each weighted 1/k.  In both
+ * cases the minfragtaxa/minfragspecies informativeness floor is applied --
+ * for the Stage 1 case directly here (reusing collapse_monophyly_in_tree()'s
+ * own out_presence counts, not print_pruned_tree()'s return value, which is
+ * a top-level-sibling count, not a total leaf count -- see
+ * process_fragment_root()'s comment above for why that distinction matters);
+ * for the Stage 2 case the floor is already enforced by
+ * process_fragment_root()/decompose_walk() internally, so this function
+ * does not re-check those fragments.
+ *
+ * Operates directly on whatever is currently in fundamentals[]/
+ * Total_fund_trees -- Stage 0's restore-pristine swap (autoprunemono
+ * backup/restore) is NOT wired up here; that is step 6's job.
+ *
+ * Returns the total fragment count across all source trees; *out_frags is
+ * set to a malloc'd array of that many struct decompose_fragment (caller
+ * must free with free_decompose_fragments()), or NULL if the total is 0.
+ * ----------------------------------------------------------------------- */
+int decompose_gene_trees_stage3(char *guide_tree_str, float dupsupport, int minfragtaxa, int minfragspecies, FILE *infofile, struct decompose_fragment **out_frags)
+	{
+	int treenum, total = 0, cap = 0;
+	struct decompose_fragment *frags = NULL;
+	char *collapsed_tree = malloc(TREE_LENGTH*sizeof(char));
+	int *presence = malloc(number_of_taxa*sizeof(int));
+
+	for(treenum=0; treenum<Total_fund_trees; treenum++)
+		{
+		int num_commas = 0, still_multicopy = FALSE, k2, ntaxa_present, nleaves;
+
+		collapsed_tree[0] = '\0';
+		collapse_monophyly_in_tree(treenum, infofile, collapsed_tree, &num_commas, &still_multicopy, presence);
+
+		if(!still_multicopy)
+			{
+			/* Stage 1 fully resolved this family: one fragment, weight 1.0. */
+			ntaxa_present = 0; nleaves = 0;
+			for(k2=0; k2<number_of_taxa; k2++)
+				if(presence[k2] > 0) { ntaxa_present++; nleaves += presence[k2]; }
+
+			if(nleaves >= minfragtaxa && ntaxa_present >= minfragspecies)
+				{
+				if(total >= cap) { cap = cap ? cap*2 : 16; frags = realloc(frags, cap*sizeof(struct decompose_fragment)); }
+				frags[total].newick = strdup(collapsed_tree);
+				frags[total].weight = 1.0f;
+				frags[total].source_treenum = treenum;
+				frags[total].fragindex = 1;
+				frags[total].k = 1;
+				if(strcmp(tree_names[treenum], "") != 0)
+					snprintf(frags[total].name, NAME_LENGTH, "%s_frag1", tree_names[treenum]);
+				else
+					snprintf(frags[total].name, NAME_LENGTH, "tree%d_frag1", treenum);
+				total++;
+				}
+			else if(infofile != NULL)
+				{
+				fprintf(infofile, "Tree # %d [ %s ]: Stage 1 passthrough dropped (%d leaves / %d species, below minfragtaxa=%d/minfragspecies=%d)\n",
+					treenum, tree_names[treenum], nleaves, ntaxa_present, minfragtaxa, minfragspecies);
+				}
+			}
+		else
+			{
+			/* Still multicopy after Stage 1: hand off to Stage 2. Its
+			 * fragments (already floor-checked internally) are written to
+			 * a scratch temp file, then read back so each one can get its
+			 * own struct decompose_fragment entry with weight 1/k. */
+			FILE *scratch = tmpfile();
+			int fragcount;
+
+			if(scratch == NULL)
+				{
+				printf2("Error: could not open scratch file in decompose_gene_trees_stage3\n");
+				continue;
+				}
+
+			fragcount = decompose_gene_tree_stage2(treenum, guide_tree_str, dupsupport, minfragtaxa, minfragspecies, scratch, infofile);
+
+			if(fragcount > 0)
+				{
+				char *line = malloc(TREE_LENGTH*sizeof(char));
+				int idx = 0;
+				rewind(scratch);
+				while(fgets(line, TREE_LENGTH, scratch) != NULL)
+					{
+					char *bracket_open, *bracket_close, *nl;
+					nl = strchr(line, '\n');
+					if(nl != NULL) *nl = '\0';
+					bracket_open = strrchr(line, '[');
+					bracket_close = strrchr(line, ']');
+					if(bracket_open == NULL || bracket_close == NULL || bracket_close < bracket_open) continue;
+
+					idx++;
+					if(total >= cap) { cap = cap ? cap*2 : 16; frags = realloc(frags, cap*sizeof(struct decompose_fragment)); }
+					*bracket_open = '\0';
+					frags[total].newick = strdup(line);
+					frags[total].weight = 1.0f / (float)fragcount;
+					frags[total].source_treenum = treenum;
+					frags[total].fragindex = idx;
+					frags[total].k = fragcount;
+					*bracket_close = '\0';
+					snprintf(frags[total].name, NAME_LENGTH, "%s", bracket_open+1);
+					total++;
+					}
+				free(line);
+				}
+
+			fclose(scratch);
+			}
+		}
+
+	free(collapsed_tree);
+	free(presence);
+
+	*out_frags = frags;
+	return(total);
+	}
+
+/* build_decompose_output_text(): renders `frags` (as produced by
+ * decompose_gene_trees_stage3()) into the exact "[weight](tree);[name]"
+ * bracket-annotated text block main.c's Phylip tree-file reader already
+ * understands (main.c execute_command(), ~line 3110-3180 -- parses a
+ * leading "[...]" as a per-tree weight via atof(), and a "[...]" immediately
+ * following the tree's ';' as its name). Per the documented quirk that a
+ * leading "[...]" before the very first tree in a file is discarded as a
+ * comment rather than read as a weight, fragments with weight == 1.0 are
+ * written first (their weight is what a discarded bracket would default to
+ * anyway) so the file is correct even if it is later `exe`'d directly.
+ * Returns a malloc'd, NUL-terminated buffer the caller must free(). */
+char *build_decompose_output_text(struct decompose_fragment *frags, int n)
+	{
+	int i, *order, oi = 0;
+	size_t cap = 16;
+	char *buf, *line;
+
+	for(i=0; i<n; i++) cap += strlen(frags[i].newick) + strlen(frags[i].name) + 64;
+	buf = malloc(cap);
+	buf[0] = '\0';
+	line = malloc(TREE_LENGTH + 256);
+	order = malloc((n>0?n:1)*sizeof(int));
+
+	for(i=0; i<n; i++) if(frags[i].weight == 1.0f) order[oi++] = i;
+	for(i=0; i<n; i++) if(frags[i].weight != 1.0f) order[oi++] = i;
+
+	for(i=0; i<n; i++)
+		{
+		int fi = order[i];
+		snprintf(line, TREE_LENGTH + 256, "[%.6f]%s[%s]\n", frags[fi].weight, frags[fi].newick, frags[fi].name);
+		strcat(buf, line);
+		}
+
+	free(order);
+	free(line);
+	return(buf);
+	}
+
+void free_decompose_fragments(struct decompose_fragment *frags, int n)
+	{
+	int i;
+	if(frags == NULL) return;
+	for(i=0; i<n; i++) if(frags[i].newick != NULL) free(frags[i].newick);
+	free(frags);
+	}
+
+/* -----------------------------------------------------------------------
+ * decompose_gene_trees_cmd(): CLI wiring for the "decomposegenetrees"
+ * command (NOTES_gene_tree_decomposition.md §3, §9 step 5). Parses options,
+ * resolves the guide tree (resolve_guide_tree()), runs Stage 1-3
+ * (decompose_gene_trees_stage3()), renders the fragment list
+ * (build_decompose_output_text()), and writes it to <filename> plus a
+ * decision log to <filename>_info.txt.
+ *
+ * Per §6.1, this standalone command is non-destructive: it never touches
+ * fundamentals[]/Total_fund_trees/presence_of_taxa[][], it only writes the
+ * two output files, and it prints an "exe <filename>" hint so the user can
+ * explicitly adopt the result -- mirroring prune_monophylies()'s existing
+ * "written to the file" messaging, plus the extra adoption hint that
+ * prune_monophylies() does not need (its output is drop-in replacement
+ * trees at the same count, so users may not always want to reload it
+ * immediately; decomposegenetrees changes the tree count outright, so the
+ * hint is more important here).
+ * ----------------------------------------------------------------------- */
+void decompose_gene_trees_cmd(void)
+	{
+	int j, num_frags = 0;
+	float dupsupport = 0.5f;
+	int minfragtaxa = 4, minfragspecies = 4;
+	char speciestree_opt[10000];
+	char filename2[10000], filename3[10000];
+	char guide_tree[TREE_LENGTH];
+	char error_msg[2000];
+	struct decompose_fragment *frags = NULL;
+	FILE *df_outfile = NULL;
+	char *outtext = NULL;
+
+	select_longest = FALSE;
+	speciestree_opt[0] = '\0';
+	strcpy(filename2, "decomposedtrees.txt");
+	strcpy(filename3, "decomposedtrees.txt_info.txt");
+
+	for(j=0; j<num_commands; j++)
+		{
+		if(strcmp(parsed_command[j], "speciestree") == 0)
+			strcpy(speciestree_opt, parsed_command[j+1]);
+		if(strcmp(parsed_command[j], "dupsupport") == 0)
+			dupsupport = atof(parsed_command[j+1]);
+		if(strcmp(parsed_command[j], "minfragtaxa") == 0)
+			minfragtaxa = atoi(parsed_command[j+1]);
+		if(strcmp(parsed_command[j], "minfragspecies") == 0)
+			minfragspecies = atoi(parsed_command[j+1]);
+		if(strcmp(parsed_command[j], "selection") == 0)
+			{
+			if(strcmp(parsed_command[j+1], "length") == 0) select_longest = TRUE;
+			}
+		if(strcmp(parsed_command[j], "filename") == 0)
+			{
+			strcpy(filename2, parsed_command[j+1]);
+			strcpy(filename3, filename2);
+			strcat(filename3, "_info.txt");
+			}
+		}
+
+	if(resolve_guide_tree(speciestree_opt, guide_tree, error_msg) == FALSE)
+		{
+		printf2("%s\n", error_msg);
+		return;
+		}
+
+	tempoutfile = fopen(filename3, "w");
+	if(tempoutfile == NULL)
+		{
+		printf2("Error: could not open '%s' for writing\n", filename3);
+		return;
+		}
+
+	fprintf(tempoutfile, "decomposegenetrees decision log\n");
+	fprintf(tempoutfile, "speciestree=%s dupsupport=%.4f minfragtaxa=%d minfragspecies=%d selection=%s\n",
+		(strlen(speciestree_opt) > 0 ? speciestree_opt : "(resolved automatically)"),
+		dupsupport, minfragtaxa, minfragspecies, (select_longest == TRUE ? "length" : "random"));
+	fprintf(tempoutfile, "Note: the first fragment written to \"%s\" is always a weight==1.0\n"
+		"fragment (if one exists) so that the load-time bracket-weight parser, which\n"
+		"discards any \"[...]\" before the very first tree in a file as a comment,\n"
+		"never silently drops a real weight. This only matters if literally every\n"
+		"surviving fragment needed a non-1.0 weight (no naturally weight-1 fragment\n"
+		"existed anywhere in the output).\n\n", filename2);
+
+	num_frags = decompose_gene_trees_stage3(guide_tree, dupsupport, minfragtaxa, minfragspecies, tempoutfile, &frags);
+
+	if(num_frags > 0)
+		{
+		outtext = build_decompose_output_text(frags, num_frags);
+		df_outfile = fopen(filename2, "w");
+		if(df_outfile == NULL)
+			{
+			printf2("Error: could not open '%s' for writing\n", filename2);
+			}
+		else
+			{
+			fprintf(df_outfile, "%s", outtext);
+			fclose(df_outfile);
+			}
+		free(outtext);
+		}
+	else
+		{
+		printf2("Warning: 0 fragments survived decomposition (minfragtaxa=%d/minfragspecies=%d may be too strict for this data) -- \"%s\" was not written\n",
+			minfragtaxa, minfragspecies, filename2);
+		}
+
+	printf2("\nDecomposition finished. %d fragment%s written to the file \"%s\"\n", num_frags, (num_frags == 1 ? "" : "s"), filename2);
+	printf2("Information on the decisions made for each source tree written to the file \"%s\"\n", filename3);
+	if(num_frags > 0)
+		printf2("This command is non-destructive: the source trees in memory are unchanged.\n\tTo adopt the decomposed fragments, run: exe %s\n", filename2);
+
+	fclose(tempoutfile);
+	free_decompose_fragments(frags, num_frags);
 	}
 
 void isittagged(struct taxon * position)
@@ -1518,6 +2721,48 @@ void reconstruct(int print_settings)  /* Carry out gene-tree reconciliation of s
 		printf2("(Using original unpruned trees for reconstruct)\n");
 		}
 
+	/* If autodecompose is active, temporarily reload the pristine
+	 * pre-decomposition dataset (NOTES_gene_tree_decomposition.md sec 6.3)
+	 * in place of the live (decomposed) pool for the duration of this call,
+	 * then reload the decomposed fragments back afterward. Unlike
+	 * autoprunemono's element-by-element swap above, the tree count itself
+	 * differs (one family -> k fragments) and per-tree bookkeeping arrays
+	 * like fulltaxanames[] are indexed/sized for whichever dataset is
+	 * CURRENTLY loaded -- a raw pointer-swap of fundamentals[]/tree_names[]/
+	 * Total_fund_trees (tried first, see the comment on
+	 * decompose_use_pristine_for_reconstruct() in main.c) segfaulted for
+	 * exactly that reason. Going through a real execute_command() reload
+	 * (like sec 6.2 already does for the initial decomposition) sidesteps
+	 * it: every derived structure is freshly, correctly rebuilt for
+	 * whichever dataset is loaded at the time. Without this, reconstruct
+	 * would reconcile already-decomposed single-copy fragments against the
+	 * species tree and silently report near-zero duplications/losses --
+	 * wrong, not just imprecise. */
+	int decompose_swapped = FALSE;
+	int saved_trees_in_memory = trees_in_memory;
+	if(decompose_active)
+		{
+		decompose_swapped = decompose_use_pristine_for_reconstruct();
+		if(decompose_swapped)
+			{
+			/* execute_command()'s per-load teardown unconditionally zeroes
+			 * trees_in_memory (it does NOT free/reallocate retained_supers[]
+			 * itself, so the candidate species tree text a prior 'nj'/'hs'
+			 * left there is still intact) -- restore the counter so
+			 * species_source resolution just below still sees whatever
+			 * supertree the user already had in memory before this reload. */
+			trees_in_memory = saved_trees_in_memory;
+			printf2("(Using original pre-decomposition gene trees for reconstruct)\n");
+			}
+		else
+			{
+			printf2("Error: could not switch to the pristine pre-decomposition gene trees for reconstruct -- aborting to avoid reconciling against already-decomposed fragments\n");
+			free(temptree1); free(temptree2); free(tmp1); free(temptree);
+			count_now = FALSE;
+			return;
+			}
+		}
+
 	if(printfiles)
 		{
 		strcpy(reconfilename, inputfilename);
@@ -2081,6 +3326,16 @@ void reconstruct(int print_settings)  /* Carry out gene-tree reconciliation of s
 			}
 		free(label_results);
 		label_results = NULL;
+		}
+
+	/* Reload the decomposed dataset back in (undoes the pristine reload
+	 * above) so other commands (hs, etc.) continue to see the decomposed
+	 * fragments, before the autoprunemono per-index swap-back below (which
+	 * relies on Total_fund_trees matching the live, decomposed count). */
+	if(decompose_swapped)
+		{
+		decompose_restore_after_reconstruct();
+		trees_in_memory = saved_trees_in_memory;   /* see comment at the swap-in site above */
 		}
 
 	/* Swap original trees back so other commands (hs, etc.) continue to use pruned versions */
