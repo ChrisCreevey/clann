@@ -1090,6 +1090,127 @@ void compute_raw_rf_dists(float *dists_out)
     free(pruned_nwk);
     }
 
+/* -----------------------------------------------------------------------
+ * compute_taxon_conflict: per-taxon conflict weight from MISSING source-tree
+ * bipartitions (bipartition-level, not whole-tree).
+ *
+ * For each source tree that the current supertree (tree_top) does not perfectly
+ * display (sourcetree_scores[i] > 0), enumerate that source tree's splits and,
+ * for every split ABSENT from the induced supertree, add the source tree's
+ * residual score to the taxa on the SMALLER side of the missing split. Only the
+ * taxa actually involved in unsatisfied splits accrue weight — this pinpoints
+ * the few genuinely-misplaced taxa rather than flagging every taxon in a
+ * conflicting source tree.
+ *
+ * Requires: rf_precompute_fund_biparts() done, sourcetree_scores[] populated for
+ * the current tree_top (call a compare_trees_*() first), tree_top = supertree.
+ * Source trees carry integer taxon-id leaf labels, so membership is read
+ * directly. Fills conflict_w[0..number_of_taxa-1]; returns count of nonzero.
+ * ----------------------------------------------------------------------- */
+int compute_taxon_conflict(float *conflict_w)
+    {
+    int i, j, cnt = 0, d;
+    int maxdepth = 2 * number_of_taxa + 8;
+    char     *pruned_nwk = malloc(TREE_LENGTH * sizeof(char));
+    char     *tmp        = malloc(TREE_LENGTH * sizeof(char));
+    uint64_t *super_bp   = malloc((number_of_taxa + 1) * sizeof(uint64_t));
+    int      *tree_taxa  = malloc((number_of_taxa + 1) * sizeof(int));
+    int     **memstack   = malloc(maxdepth * sizeof(int *));
+    int      *memcount   = malloc(maxdepth * sizeof(int));
+
+    for(j = 0; j < number_of_taxa; j++) conflict_w[j] = 0.0f;
+    if(!pruned_nwk || !tmp || !super_bp || !tree_taxa || !memstack || !memcount)
+        goto ctc_cleanup;
+    for(d = 0; d < maxdepth; d++) memstack[d] = malloc((number_of_taxa + 1) * sizeof(int));
+
+    for(i = 0; i < Total_fund_trees; i++)
+        {
+        if(!sourcetreetag[i]) continue;
+        float resid = sourcetree_scores[i];
+        if(resid <= 1e-6f) continue;   /* source tree already displayed — no conflict */
+
+        int ntaxa_i = 0; uint64_t total_hash = 0;
+        for(j = 0; j < number_of_taxa; j++)
+            if(presence_of_taxa[i][j]) { tree_taxa[ntaxa_i++] = j; total_hash ^= taxon_hash_vals[j]; }
+        if(ntaxa_i < 4) continue;
+
+        /* Supertree bipartitions induced on this source tree's taxa. */
+        prune_tree(tree_top, i);
+        shrink_tree(tree_top);
+        pruned_nwk[0] = '\0';
+        if(print_pruned_tree(tree_top, 0, pruned_nwk, FALSE, 0) > 1)
+            { tmp[0] = '\0'; strcpy(tmp, "("); strcat(tmp, pruned_nwk); strcat(tmp, ")"); strcpy(pruned_nwk, tmp); }
+        strcat(pruned_nwk, ";");
+        while(unroottree(pruned_nwk));
+        int super_cnt = collect_biparts_newick(pruned_nwk, total_hash, super_bp);
+        reset_tree(tree_top);
+
+        /* Walk the source tree (integer labels), enumerating splits with membership. */
+        const char *nwk = fundamentals[i];
+        int p = 0; d = 0; memcount[0] = 0;
+        while(nwk[p] && nwk[p] != ';')
+            {
+            char c = nwk[p];
+            if(c == '(')
+                { d++; if(d >= maxdepth) break; memcount[d] = 0; p++; }
+            else if(c == ')')
+                {
+                int mc = memcount[d], k;
+                uint64_t child_h = 0;
+                for(k = 0; k < mc; k++) child_h ^= taxon_hash_vals[ memstack[d][k] ];
+                uint64_t comp = total_hash ^ child_h;
+                uint64_t bh   = (child_h < comp) ? child_h : comp;
+                int other = ntaxa_i - mc;
+                int minside = (mc < other) ? mc : other;
+                if(bh != 0 && minside >= 2)   /* nontrivial split */
+                    {
+                    int found = 0, s;
+                    for(s = 0; s < super_cnt; s++) if(super_bp[s] == bh) { found = 1; break; }
+                    if(!found)   /* split present in source tree but MISSING from supertree */
+                        {
+                        if(mc <= other)                    /* members are the smaller side */
+                            for(k = 0; k < mc; k++) conflict_w[ memstack[d][k] ] += resid;
+                        else                               /* complement is the smaller side */
+                            for(k = 0; k < ntaxa_i; k++)
+                                {
+                                int id = tree_taxa[k], inmem = 0, q;
+                                for(q = 0; q < mc; q++) if(memstack[d][q] == id) { inmem = 1; break; }
+                                if(!inmem) conflict_w[id] += resid;
+                                }
+                        }
+                    }
+                /* Pop: fold this subtree's members into the parent level. */
+                if(d > 0)
+                    { int par = d - 1, k2;
+                      for(k2 = 0; k2 < mc; k2++)
+                          if(memcount[par] < number_of_taxa) memstack[par][memcount[par]++] = memstack[d][k2]; }
+                d--; if(d < 0) d = 0;
+                p++;
+                while(nwk[p] && nwk[p] != '(' && nwk[p] != ')' && nwk[p] != ',' && nwk[p] != ';') p++;
+                }
+            else if(c == ',') p++;
+            else if(c == ':') { while(nwk[p] && nwk[p] != ',' && nwk[p] != ')' && nwk[p] != ';') p++; }
+            else
+                {  /* integer taxon-id leaf */
+                char num[64]; int nj = 0;
+                while(nwk[p] && nwk[p] != '(' && nwk[p] != ')' && nwk[p] != ',' && nwk[p] != ':') num[nj++] = nwk[p++];
+                num[nj] = '\0';
+                int id = atoi(num);
+                if(id >= 0 && id < number_of_taxa && memcount[d] < number_of_taxa)
+                    memstack[d][memcount[d]++] = id;
+                }
+            }
+        }
+
+    for(j = 0; j < number_of_taxa; j++) if(conflict_w[j] > 0.0f) cnt++;
+    for(d = 0; d < maxdepth; d++) free(memstack[d]);
+
+ctc_cleanup:
+    free(memcount); free(memstack); free(tree_taxa);
+    free(super_bp); free(tmp); free(pruned_nwk);
+    return cnt;
+    }
+
 float compare_trees_rf(int spr)
     {
     int i, j;

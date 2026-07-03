@@ -296,6 +296,10 @@ int    hs_max_plateau      = -1;   /* shared: max consecutive lateral plateau mo
 int    hs_max_plateau_is_auto = 1; /* 1=auto-scale to 2*N at search start; 0=user set an explicit value */
 int    hs_ils_kicks        = 10;   /* shared: iterated-local-search kicks without improvement before a rep stops (0=ILS disabled) */
 int    hs_ils_strength     = 3;    /* shared: number of random SPR moves applied per ILS perturbation kick */
+int    hs_ils_guided       = 0;    /* shared: 1=direct ILS kicks at conflicted taxa; 0=uniform-random kicks.
+                                    * Default off: on a deceptive RF landscape, targeting the kick at the
+                                    * locally-conflicted taxa did not beat random kicks (65% vs 62%, p=0.68);
+                                    * kept as opt-in ('ilsguided yes') and for the conflict diagnostic. */
 double hs_exhaustive_limit = 1000000.0; /* shared: for user hs, auto-route to exhaustive alltrees when tree space <= this (0=never) */
 
 /****** OpenMP thread-private state: one independent copy per thread in parallel regions ******/
@@ -4024,6 +4028,15 @@ void heuristic_search(int user, int print, int sample, int nreps)
 				error = TRUE;
 				}
 			}
+		if(strcmp(parsed_command[i], "ilsguided") == 0)
+			{
+			if(strcmp(parsed_command[i+1], "yes") == 0)
+				hs_ils_guided = 1;
+			else if(strcmp(parsed_command[i+1], "no") == 0)
+				hs_ils_guided = 0;
+			else
+				{ printf2("Error: ilsguided must be 'yes' or 'no'\n"); error = TRUE; }
+			}
 		if(strcmp(parsed_command[i], "strategy") == 0)
 			{
 			if(strcmp(parsed_command[i+1], "first") == 0)
@@ -4298,8 +4311,9 @@ void heuristic_search(int user, int print, int sample, int nreps)
                 else
                     printf2("\tPlateau (equal-score) lateral moves (plateau) = disabled\n");
                 if(hs_ils_kicks > 0)
-                    printf2("\tIterated local search (ils) = on (%d kicks w/o improvement; strength=%d random SPRs)\n",
-                            hs_ils_kicks, hs_ils_strength);
+                    printf2("\tIterated local search (ils) = on (%d kicks w/o improvement; strength=%d SPRs; %s)\n",
+                            hs_ils_kicks, hs_ils_strength,
+                            hs_ils_guided ? "guided at conflicted taxa" : "uniform-random");
                 else
                     printf2("\tIterated local search (ils) = disabled\n");
 #ifdef _OPENMP
@@ -5524,13 +5538,62 @@ void heuristic_search(int user, int print, int sample, int nreps)
 
 
 
-/* hs_random_spr_perturb: apply `nmoves` random SPR moves to in_nwk, writing the
- * result to out_nwk. Used by the iterated-local-search (ILS) escape to kick a
- * converged local optimum into a nearby but different basin. Pure string-native
+/* hs_taxon_id: map a leaf label to its taxon id (0..number_of_taxa-1), or -1. */
+static int hs_taxon_id(const char *name)
+    {
+    int j;
+    if(!name) return -1;
+    for(j = 0; j < number_of_taxa; j++)
+        if(taxa_names[j] && strcmp(taxa_names[j], name) == 0) return j;
+    return -1;
+    }
+
+/* hs_compute_conflict_weights: for the supertree best_nwk, fill
+ * conflict_w[0..number_of_taxa-1] with each taxon's conflict weight and return
+ * the number of taxa with nonzero conflict. Builds tree_top from best_nwk,
+ * scores it (populating the per-source-tree residuals sourcetree_scores[]), then
+ * calls compute_taxon_conflict() to distribute each unsatisfied source tree's
+ * residual to the taxa on the smaller side of its MISSING splits — i.e. only the
+ * genuinely-misplaced taxa, not every taxon in a conflicting tree. Only
+ * meaningful for the distance/bipartition criteria (dfit/sfit/qfit/rf/ml).
+ * Leaves tree_top NULL on return. */
+static int hs_compute_conflict_weights(const char *best_nwk, float *conflict_w)
+    {
+    int i, cnt = 0;
+
+    if(tree_top != NULL) { dismantle_tree(tree_top); tree_top = NULL; }
+    temp_top = NULL;
+    { int _to = 0; tree_build(1, (char *)best_nwk, NULL, TRUE, -1, &_to); }
+    tree_top = temp_top; temp_top = NULL;
+    if(tree_top == NULL) { int j; for(j = 0; j < number_of_taxa; j++) conflict_w[j] = 0.0f; return 0; }
+
+    for(i = 0; i < Total_fund_trees; i++) sourcetree_scores[i] = -1;
+    if(criterion == 0)      compare_trees(FALSE);
+    else if(criterion == 2) compare_trees_sfit(FALSE);
+    else if(criterion == 3) compare_trees_qfit(FALSE);
+    else if(criterion == 6) compare_trees_rf(FALSE);
+    else if(criterion == 7) compare_trees_ml(FALSE);
+
+    cnt = compute_taxon_conflict(conflict_w);
+
+    dismantle_tree(tree_top); tree_top = NULL;
+    return cnt;
+    }
+
+/* hs_spr_perturb: apply `nmoves` SPR moves to in_nwk, writing the result to
+ * out_nwk. Used by the iterated-local-search (ILS) escape to kick a converged
+ * local optimum into a nearby but different basin. Pure string-native
  * operations via spr_tree.c (no clann pointer surgery). All taxa are preserved
  * (SPR = prune + regraft the same subtree), so the taxon count is unchanged.
+ *
+ * conflict_w == NULL: the prune edge is chosen uniformly at random (blind kick).
+ * conflict_w != NULL: the prune edge is chosen by weighted sampling among the
+ *   leaf edges of conflicted taxa (weight > 0), so the kick preferentially
+ *   relocates the taxa most involved in unsatisfied source trees — a directed
+ *   escape aimed at the actual conflict rather than a blind one. The graft
+ *   position is random in both cases; the following local search re-optimises.
  * Thread-safe: uses rand_r(&thread_seed) and only stack/heap-local state. */
-static void hs_random_spr_perturb(const char *in_nwk, char *out_nwk, int nmoves)
+static void hs_spr_perturb(const char *in_nwk, char *out_nwk, int nmoves, const float *conflict_w)
     {
     char *cur = malloc(TREE_LENGTH * sizeof(char));
     char *sub = malloc(TREE_LENGTH * sizeof(char));
@@ -5548,7 +5611,34 @@ static void hs_random_spr_perturb(const char *in_nwk, char *out_nwk, int nmoves)
         if(edges) spr_get_edges(t, edges, &ne);
         if(!edges || ne < 2) { free(edges); spr_free(t); break; }
 
-        int pe = (int)(rand_r(&thread_seed) % (unsigned)ne);  /* random prune edge */
+        int pe = -1;
+        if(conflict_w != NULL)
+            {
+            /* Weighted sample over the leaf edges of conflicted taxa. */
+            double total = 0.0;
+            int e;
+            for(e = 0; e < ne; e++)
+                {
+                struct spr_node *nd = edges[e];
+                if(nd->first_child == NULL && nd->label)
+                    { int id = hs_taxon_id(nd->label);
+                      if(id >= 0 && conflict_w[id] > 0.0f) total += conflict_w[id]; }
+                }
+            if(total > 0.0)
+                {
+                double r = (rand_r(&thread_seed) / (double)RAND_MAX) * total, acc = 0.0;
+                for(e = 0; e < ne; e++)
+                    {
+                    struct spr_node *nd = edges[e];
+                    if(nd->first_child == NULL && nd->label)
+                        { int id = hs_taxon_id(nd->label);
+                          if(id >= 0 && conflict_w[id] > 0.0f)
+                              { acc += conflict_w[id]; if(acc >= r) { pe = e; break; } } }
+                    }
+                }
+            }
+        if(pe < 0) pe = (int)(rand_r(&thread_seed) % (unsigned)ne);  /* random (fallback or blind) */
+
         if(spr_bisect(t, edges[pe], sub, rem, TREE_LENGTH) != 0)
             { free(edges); spr_free(t); continue; }
 
@@ -5708,16 +5798,29 @@ int do_search(char *tree, int user, int print, int maxswaps, FILE *outfile, int 
 				{
 				char *ils_best     = malloc(TREE_LENGTH * sizeof(char));
 				char *ils_perturbed = malloc(TREE_LENGTH * sizeof(char));
-				if(ils_best && ils_perturbed && retained_supers[0][0] != '\0')
+				/* Guided ILS applies to the distance/bipartition criteria whose
+				 * per-source-tree residuals map to per-taxon conflict. */
+				int    guided = hs_ils_guided &&
+				                (criterion == 0 || criterion == 2 || criterion == 3 ||
+				                 criterion == 6 || criterion == 7);
+				float *conflict_w = guided ? malloc(number_of_taxa * sizeof(float)) : NULL;
+				int    n_conflict = 0;
+				if(ils_best && ils_perturbed && (!guided || conflict_w) &&
+				   retained_supers[0][0] != '\0')
 					{
 					float ils_best_score  = scores_retained_supers[0];
 					int   kicks_no_improve = 0;
 					strcpy(ils_best, retained_supers[0]);
+					/* Per-taxon conflict signal for the current best (guided only). */
+					if(guided)
+						n_conflict = hs_compute_conflict_weights(ils_best, conflict_w);
 					while(kicks_no_improve < hs_ils_kicks && !user_break && !rep_abandon
 					      && tried_regrafts < maxswaps)
 						{
-						/* Perturb the best-known topology. */
-						hs_random_spr_perturb(ils_best, ils_perturbed, hs_ils_strength);
+						/* Perturb: directed at conflicted taxa when guided and any
+						 * conflict remains, else a uniform-random kick. */
+						hs_spr_perturb(ils_best, ils_perturbed, hs_ils_strength,
+						               (guided && n_conflict > 0) ? conflict_w : NULL);
 
 						/* Rebuild tree_top from the perturbed topology and reset the
 						 * per-descent references so the local search climbs from here. */
@@ -5739,6 +5842,10 @@ int do_search(char *tree, int user, int print, int maxswaps, FILE *outfile, int 
 							ils_best_score = scores_retained_supers[0];
 							strcpy(ils_best, retained_supers[0]);
 							kicks_no_improve = 0;   /* improved — reset the kick budget */
+							/* Recompute conflict for the new best so subsequent kicks
+							 * aim at whatever conflict remains. */
+							if(guided)
+								n_conflict = hs_compute_conflict_weights(ils_best, conflict_w);
 							}
 						else
 							kicks_no_improve++;     /* no improvement from this kick */
@@ -5746,6 +5853,7 @@ int do_search(char *tree, int user, int print, int maxswaps, FILE *outfile, int 
 					}
 				free(ils_best);
 				free(ils_perturbed);
+				free(conflict_w);
 				}
 
             swaps = tried_regrafts;

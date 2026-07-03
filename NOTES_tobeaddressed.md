@@ -73,3 +73,72 @@ paired/deterministic testing of search changes impossible (had to fall back to
 statistical comparison over many runs).
 
 ---
+
+## 3. Search-time scoring is slow on large trees (incremental cache is dead)
+
+**Discovered:** 2026-07-03 (building a large test dataset for the ILS evaluation)
+
+**Symptom:** A single heuristic-search replicate on a 40-taxon dataset (30
+source trees) takes ~30 s; a 26-taxon dataset ~2–6 s. The cost scales steeply
+with taxon count, making large real datasets slow.
+
+**Cause / background:** `evaluate_candidate`/`probe_candidate` were changed
+(this session) to score every criterion with the full-recompute path
+(`compare_trees_*(FALSE)`), because the cached path (`TRUE`) returned scores
+inconsistent with the authoritative recompute. That fixed correctness but
+removed all incremental-scoring benefit: every candidate re-scores **all**
+source trees from scratch, even though a single SPR/TBR move only changes the
+induced topology of the few source trees whose taxa span the moved subtree.
+
+The cache was *meant* to exploit this: `compare_trees_ml`/`_rf`/etc. skip
+re-scoring source tree `i` when the SPR move didn't touch its taxa, gated by
+`presenceof_SPRtaxa[]`. But the string-native SPR/TBR driver (`spr_new3`/
+`tbr_new2`) never sets `presenceof_SPRtaxa[]` (it rebuilds `tree_top` from
+Newick per candidate), so the cache either mis-fired (wrong scores — the bug we
+fixed) or, if made to fire, would be unsound.
+
+**Proper fix (future):** make incremental scoring correct *and* fast — after
+producing a candidate, mark which taxa moved (set `presenceof_SPRtaxa[]` from
+the prune/graft in `spr_new3`/`tbr_new2`) so `compare_trees_*` can soundly reuse
+cached per-source-tree scores for untouched trees, then re-enable the `TRUE`
+path. Alternatively, keep a per-source-tree cache keyed on the induced
+topology hash. Either restores the O(moved) instead of O(all) scaling.
+
+**Where to look:** `compare_trees_ml`/`compare_trees_rf`/`compare_trees_sfit`/
+`compare_trees_qfit` in `scoring.c` (the `spr && here1||here2` reuse branch and
+`presenceof_SPRtaxa[]`); `spr_new3`/`tbr_new2` and `evaluate_candidate`/
+`probe_candidate` in `treecompare2.c` (where the move is applied and scored).
+
+**Impact:** Correctness is fine now, but large-tree searches are much slower
+than they could be. This also limited how hard a dataset we could use when
+evaluating ILS (very hard datasets became too slow to run many replicates).
+
+---
+
+## 4. Poor parallel scaling of the multi-replicate heuristic search
+
+**Discovered:** 2026-07-03 (while comparing ILS vs multi-rep under parallelism)
+
+**Symptom:** `hs nreps=16` on a 16-core machine gave `real 53.5s` vs
+`user 227s` — an effective speed-up of only ~4.2x, not ~16x. Most of the
+machine sits idle even though 16 replicates are dispatched to 16 threads.
+
+**Likely cause:** load imbalance across replicates. Replicates that converge
+quickly finish early and their thread goes idle, while a few long-running
+replicates (bad starting trees, many swaps to converge) dominate the wall time.
+With a static `#pragma omp for` schedule over `nreps` this leaves cores unused.
+
+**Where to look:** the OpenMP parallel region over the replicate loop in
+`heuristic_search()` (`treecompare2.c`) — the `#pragma omp` schedule clause and
+how replicates are assigned to threads. Options: `schedule(dynamic,1)` so idle
+threads pick up new replicates; or decouple replicate count from thread count
+and keep a work queue of "starts to optimise" that any idle thread drains; or,
+if `nreps < nthreads`, split idle threads onto independent searches. Also
+consider that ILS replicates have very different lengths, worsening imbalance.
+
+**Impact:** This is arguably a *bigger practical lever than any search-strategy
+change*: recovering the lost ~12x of a 16-core machine would dwarf the marginal
+differences between ILS and extra replicates. Worth fixing before investing
+further in which search variant is nominally "best per core".
+
+---
