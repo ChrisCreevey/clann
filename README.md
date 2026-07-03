@@ -38,6 +38,12 @@ Either or both of these publications should be cited if you use Clann in publish
 
 For a list of papers that have cited Clann in their work see the [Clann google scholar page](https://scholar.google.co.uk/citations?view_op=view_citation&hl=en&citation_for_view=7JkjEd4AAAAJ:UeHWp8X0CEIC)
 
+
+
+# What's new in v5.1
+
+- **Decompose gene trees** - Decomposes multi-copy gene family trees into maximal single-copy-ish ortholog subtrees, by collapsing in-paralogs and cutting at well-supported duplication nodes against a guide (species) tree. Duplication nodes are determined using the built-in gene-tree/species-tree reconciliation algoirithm.
+
 # What's new in v5
 
 - **ML supertree criterion** — maximum likelihood criterion based on Steel & Rodrigo (2008), scoring candidate supertrees via the sum of exponential-decay likelihoods over RF distances to source trees. Supports Bryant & Steel (2008) normalising constant correction (`normcorrect`), including an exact subset-enumeration method (`normcorrect=exact`) for small trees.
@@ -200,6 +206,21 @@ Autoprunemono: pruned monophyletic same-species clades in 47 multicopy trees.
 - **Promoted trees** (single-copy after pruning): join `hs`, `nj`, `alltrees`
 - **Still-multicopy trees** (genuine deep paralogs): remain in the multicopy pool for `reconstruct`
 - `reconstruct` always uses the **original unpruned trees** — no information is discarded
+
+### Automatic decomposing of multi copy gene trees into single-copy-ish orthologs (decomposegenetrees/autodecompose)
+
+Decomposes multi-copy gene family trees into maximal single-copy-ish ortholog subtrees, by collapsing in-paralogs and cutting at well-supported duplication nodes against a guide (species) tree. Uses the built in **reconstruct** algorithim to determine duplication nodes using a species tree/ gene tree reconciliation approach. Non-destructive: only writes the two output files below; run "exe <filename>" afterwards to adopt the decomposed fragments as the new source-tree pool. **autodecompose** provides a route to run this automatically when a gene tree file is first read in, building a **nj** super tree from existing single-copy gene trees or using an in memory super tree or a user-provided guide tree.
+
+
+
+```
+clann> exe mydata.ph autodecompose=yes
+
+autodecompose: committed 7 fragments decomposed from 8 original gene tree families.
+Decision log written to "autodecomposed_fragments.txt_info.txt"
+(Original pristine gene trees preserved in memory for 'reconstruct'.)
+To restore the original gene trees, run: exe tutorial_multicopy.pht.
+```
 
 ### Gene-tree reconciliation with multicopy families (reconstruct)
 
