@@ -1,6 +1,6 @@
 # Clann User Manual
 
-**Version 5.0.0**
+**Version 5.1.0**
 Copyright (C) 2003–2026 Chris Creevey <chris.creevey@gmail.com>
 http://www.creeveylab.org
 
