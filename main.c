@@ -77,6 +77,9 @@ static const char *opts_hs[] = {
     "scan", "scanmin=", "scanmax=", "escan", "eta=", "etamax=", "fixbeta=",
     "visitedtrees=", "clusterlandscape=", "clusteroutput=",
     "clusterthreshold=", "clusterorderby=",
+    /* search-strategy options */
+    "vns=", "ils=", "ilsstrength=", "ilsguided=", "plateau=", "maxplateau=",
+    "maxexhaustive=", "smoothsearch=", "maxskips=", "droprep=", "maxswaps=",
     NULL
 };
 static const char *opts_boot[] = {
@@ -133,7 +136,7 @@ static const char *vals_mlscale[]   = { "lnl", "raw", NULL };
 static const char *vals_missing[]   = { "4point", "ultrametric", "none", NULL };
 static const char *vals_start[]     = { "memory", "random", NULL };
 static const char *vals_swap[]      = { "spr", "tbr", "nni", NULL };
-static const char *vals_strategy[]  = { "best", "random", NULL };
+static const char *vals_strategy[]  = { "first", "best", NULL };
 static const char *vals_yesno[]     = { "yes", "no", NULL };
 static const char *vals_output[]    = { "matrix", "vector", NULL };
 static const char *vals_size[]      = { "equalto", "lessthan", "greaterthan", NULL };
@@ -161,6 +164,10 @@ static const opt_vals_t opt_val_map[] = {
     { "output",       vals_output       },
     { "size",         vals_size         },
     { "status",       vals_status       },
+    { "vns",          vals_yesno        },
+    { "plateau",      vals_yesno        },
+    { "ilsguided",    vals_yesno        },
+    { "smoothsearch", vals_yesno        },
     { "clusterlandscape", vals_yesno    },
     { "clusterorderby",   vals_orderby  },
     { NULL, NULL }
@@ -1715,6 +1722,18 @@ void print_commands(int num)
             printf2("\n\tnthreads\t<integer number>\t\t*%-3d (OpenMP threads; default=all CPUs)", omp_get_num_procs());
 #endif
             printf2("\n\tmaxskips\t<integer number>\t\t*auto=N³ (stop replicate after this many consecutive already-visited moves; 0=disabled)");
+
+            printf2("\n\n\tSearch-strategy options:");
+            printf2("\n\tvns\t\tyes | no\t\t\t*yes  (Variable Neighborhood Descent: escalate NNI->SPR->TBR; the reliable default)");
+            printf2("\n\tils\t\t<integer | 0>\t\t\t*10   (Iterated Local Search: kicks w/o improvement before a replicate stops; 0=off)");
+            printf2("\n\tilsstrength\t<integer >=1>\t\t\t*3    (random SPR moves per ILS kick; grows adaptively when stuck)");
+            printf2("\n\tilsguided\tyes | no\t\t\t*no   (aim ILS kicks at conflicted taxa; opt-in, no measured benefit)");
+            printf2("\n\tplateau\t\tyes | no\t\t\t*yes  (allow equal-score sideways moves across flat regions)");
+            printf2("\n\tmaxplateau\t<integer | 0>\t\t\t*auto=2N (cap on consecutive sideways moves; 0=disabled)");
+            printf2("\n\tstrategy\tfirst | best\t\t\t*first (take first improving move, or best in the neighbourhood)");
+            printf2("\n\tmaxexhaustive\t<number | 0>\t\t\t*1,000,000 (auto-run guaranteed exhaustive search when tree space <= this; 0=never)");
+            if(criterion == 7)
+                printf2("\n\tsmoothsearch\tyes | no\t\t\t*no   (ML only: transfer-distance search surrogate; opt-in)");
 #ifdef _OPENMP
             if(hs_progress_interval == 0)
                 printf2("\n\tprogress\t<integer seconds | 0>\t\t0 (report every improvement)");
