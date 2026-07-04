@@ -303,6 +303,8 @@ int    hs_ils_guided       = 0;    /* shared: 1=direct ILS kicks at conflicted t
 double hs_exhaustive_limit = 1000000.0; /* shared: for user hs, auto-route to exhaustive alltrees when tree space <= this (0=never) */
 int    ml_smooth_search    = 0;    /* shared: 1=guide the ML search with the transfer-distance surrogate (smoother landscape); final scoring stays true ML */
 int    hs_vns              = 0;    /* shared: 1=Variable Neighborhood Descent local search (escalate NNI->SPR->TBR, reset on improvement); 0=single-operator SPR/TBR+NNI */
+int    hs_vns_is_auto      = 1;    /* 1=auto-enable VNS for large trees (>=VNS_AUTO_TAXA); 0=user set vns= explicitly */
+int    hs_vns_auto_taxa    = 25;   /* auto-enable VNS at/above this effective taxon count (below: random restarts win per-FLOP; above: VNS wins) */
 
 /****** OpenMP thread-private state: one independent copy per thread in parallel regions ******/
 #ifdef _OPENMP
@@ -3594,6 +3596,7 @@ void heuristic_search(int user, int print, int sample, int nreps)
     int i=0, j=0, k=0, l=0, swaps = 0, keep = 0, nbest = 0, start = 2, error = FALSE, numswaps = 1000000, different=TRUE, do_histogram = FALSE, here = FALSE, **taxa_comp = NULL, bins = 20, found = FALSE, missing_method = 1, random_num, numspectries = 2, numgenetries = 2, nthreads = 1;
     hs_maxskips_is_auto = 1;   /* reset: auto-scale N² unless user sets maxskips= this call */
     hs_max_plateau_is_auto = 1;/* reset: auto-scale plateau budget unless user sets maxplateau= this call */
+    hs_vns_is_auto      = 1;   /* reset: auto-enable VNS for large trees unless user sets vns= this call */
     char *tree = NULL, c = '\0', *best_tree = NULL, *temptree = NULL, **starths = NULL, userfilename[10000], useroutfile[10000], histogramfile_name[10000];
     char *memory_start_tree = NULL;  /* saved copy of retained_supers[0] for start=memory (captured at parse time, before the retained_supers reset) */
     FILE *userfile = NULL, *outfile = NULL, *paupfile = NULL, *histogram_file = NULL;
@@ -4056,6 +4059,7 @@ void heuristic_search(int user, int print, int sample, int nreps)
 				hs_vns = 0;
 			else
 				{ printf2("Error: vns must be 'yes' or 'no'\n"); error = TRUE; }
+			hs_vns_is_auto = 0;   /* explicit setting — don't auto-decide by tree size */
 			}
 		if(strcmp(parsed_command[i], "strategy") == 0)
 			{
@@ -4261,6 +4265,16 @@ void heuristic_search(int user, int print, int sample, int nreps)
         if(hs_max_plateau_is_auto)
             hs_max_plateau = 2 * number_of_taxa;
 
+        /* Auto-enable Variable Neighborhood Descent for large trees. On small /
+         * moderate problems random restarts saturate quickly and win per unit
+         * compute, so VNS's escalation overhead is not worth it; on large ones
+         * restarts do NOT saturate and VNS's much higher per-replicate success
+         * wins decisively per-FLOP (measured crossover between ~20 and ~30
+         * effective taxa; also far better worst-case reliability). Tunable via
+         * 'vns yes|no'. */
+        if(hs_vns_is_auto)
+            hs_vns = (number_of_taxa >= hs_vns_auto_taxa);
+
         /* Initialise global landscape map if visitedtrees= was specified */
         if(g_landscape_file[0])
             g_landscape_map = lm_create(8192);
@@ -4336,9 +4350,13 @@ void heuristic_search(int user, int print, int sample, int nreps)
                             hs_ils_guided ? "guided at conflicted taxa" : "uniform-random");
                 else
                     printf2("\tIterated local search (ils) = disabled\n");
-                printf2("\tLocal search = %s\n",
-                        hs_vns ? "Variable Neighborhood Descent (NNI->SPR->TBR escalation)"
-                               : (method == 3 ? "TBR + NNI" : method == 2 ? "SPR + NNI" : "NNI"));
+                if(hs_vns)
+                    printf2("\tLocal search = Variable Neighborhood Descent (NNI->SPR->TBR escalation)%s\n",
+                            hs_vns_is_auto ? " [auto: large tree]" : "");
+                else
+                    printf2("\tLocal search = %s%s\n",
+                            (method == 3 ? "TBR + NNI" : method == 2 ? "SPR + NNI" : "NNI"),
+                            hs_vns_is_auto ? " (VNS auto-off: small/moderate tree)" : "");
                 if(criterion == 7)
                     printf2("\tSearch surrogate (smoothsearch) = %s\n",
                             ml_smooth_search ? "transfer-distance (smoothed); reported as true ML"
