@@ -5889,6 +5889,21 @@ static void hs_vnd(int maxswaps, int numspectries, int numgenetries, char *best_
             op++;                                                          /* escalate */
         }
 
+    /* Sync with the global retained best. The swap operators update
+     * retained_supers[0]/scores_retained_supers[0] as they find improvements,
+     * but the VND-local best_score/sprscore can lag behind (best_score only
+     * tracks candidates re-scored via hs_score_objective, not every improving
+     * tree the operators retain). Adopt the retained best so the per-rep report
+     * and the ILS perturbation use the true best found. Mirrors the sync in
+     * hs_spr_tbr_nni(); without it the per-rep "converged" line prints a stale,
+     * worse-than-actual score even though the final result is correct. */
+    if(scores_retained_supers[0] >= 0.0f && retained_supers[0][0] != '\0')
+        {
+        strcpy(best_nwk, retained_supers[0]);
+        if(sprscore < 0.0f || scores_retained_supers[0] < sprscore)
+            sprscore = scores_retained_supers[0];
+        }
+
     /* leave tree_top built from the VND optimum */
     if(tree_top != NULL) { dismantle_tree(tree_top); tree_top = NULL; }
     temp_top = NULL;
