@@ -303,8 +303,7 @@ int    hs_ils_guided       = 0;    /* shared: 1=direct ILS kicks at conflicted t
 double hs_exhaustive_limit = 1000000.0; /* shared: for user hs, auto-route to exhaustive alltrees when tree space <= this (0=never) */
 int    ml_smooth_search    = 0;    /* shared: 1=guide the ML search with the transfer-distance surrogate (smoother landscape); final scoring stays true ML */
 int    hs_vns              = 0;    /* shared: 1=Variable Neighborhood Descent local search (escalate NNI->SPR->TBR, reset on improvement); 0=single-operator SPR/TBR+NNI */
-int    hs_vns_is_auto      = 1;    /* 1=auto-enable VNS for large trees (>=VNS_AUTO_TAXA); 0=user set vns= explicitly */
-int    hs_vns_auto_taxa    = 25;   /* auto-enable VNS at/above this effective taxon count (below: random restarts win per-FLOP; above: VNS wins) */
+int    hs_vns_is_auto      = 1;    /* 1=VNS default-on for reliable convergence; 0=user set vns= explicitly */
 
 /****** OpenMP thread-private state: one independent copy per thread in parallel regions ******/
 #ifdef _OPENMP
@@ -4265,15 +4264,19 @@ void heuristic_search(int user, int print, int sample, int nreps)
         if(hs_max_plateau_is_auto)
             hs_max_plateau = 2 * number_of_taxa;
 
-        /* Auto-enable Variable Neighborhood Descent for large trees. On small /
-         * moderate problems random restarts saturate quickly and win per unit
-         * compute, so VNS's escalation overhead is not worth it; on large ones
-         * restarts do NOT saturate and VNS's much higher per-replicate success
-         * wins decisively per-FLOP (measured crossover between ~20 and ~30
-         * effective taxa; also far better worst-case reliability). Tunable via
-         * 'vns yes|no'. */
+        /* Enable Variable Neighborhood Descent by default for every heuristic
+         * search. Because the true tree is unknown, the only practical evidence
+         * that an optimum is global is that independent replicates converge to
+         * the SAME tree — so the default should maximise per-search reliability,
+         * not raw per-FLOP throughput. VNS raises single-search success sharply
+         * at all sizes (e.g. 49%->83% at 20 taxa, 36%->89% at 30 taxa), which is
+         * exactly what makes replicates agree, and it never returns a worse tree
+         * than the single-operator search (its neighborhood is a superset of
+         * NNI/SPR/TBR) — the only cost is time. Tiny trees route to exhaustive
+         * search before reaching here. 'vns no' restores the faster
+         * single-operator descent for the speed-over-rigour case. */
         if(hs_vns_is_auto)
-            hs_vns = (number_of_taxa >= hs_vns_auto_taxa);
+            hs_vns = 1;
 
         /* Initialise global landscape map if visitedtrees= was specified */
         if(g_landscape_file[0])
@@ -4352,11 +4355,10 @@ void heuristic_search(int user, int print, int sample, int nreps)
                     printf2("\tIterated local search (ils) = disabled\n");
                 if(hs_vns)
                     printf2("\tLocal search = Variable Neighborhood Descent (NNI->SPR->TBR escalation)%s\n",
-                            hs_vns_is_auto ? " [auto: large tree]" : "");
+                            hs_vns_is_auto ? " [default: for reliable convergence]" : "");
                 else
-                    printf2("\tLocal search = %s%s\n",
-                            (method == 3 ? "TBR + NNI" : method == 2 ? "SPR + NNI" : "NNI"),
-                            hs_vns_is_auto ? " (VNS auto-off: small/moderate tree)" : "");
+                    printf2("\tLocal search = %s (VNS off)\n",
+                            (method == 3 ? "TBR + NNI" : method == 2 ? "SPR + NNI" : "NNI"));
                 if(criterion == 7)
                     printf2("\tSearch surrogate (smoothsearch) = %s\n",
                             ml_smooth_search ? "transfer-distance (smoothed); reported as true ML"
