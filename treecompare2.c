@@ -3321,14 +3321,14 @@ static int hs_same_topology(char *t1, char *t2)
             k=0;
             while(t1[i]!='(' && t1[i]!=')' && t1[i]!=',' && t1[i]!=';')
                 { name[k]=t1[i]; i++; k++; }
-            name[k]=' ';
+            name[k]='\0';
             intname=assign_taxa_name(name, FALSE);
-            name[0]=' '; totext(intname, name);
+            name[0]='\0'; totext(intname, name);
             k=0;
-            while(name[k]!=' ') { tree1[j]=name[k]; j++; k++; }
+            while(name[k]!='\0') { tree1[j]=name[k]; j++; k++; }
             }
         }
-    tree1[j]=';'; tree1[j+1]=' ';
+    tree1[j]=';'; tree1[j+1]='\0';
 
     /* Convert t2 taxon names to integers -> tree2 */
     i=0; j=0;
@@ -3341,14 +3341,14 @@ static int hs_same_topology(char *t1, char *t2)
             k=0;
             while(t2[i]!='(' && t2[i]!=')' && t2[i]!=',' && t2[i]!=';')
                 { name[k]=t2[i]; i++; k++; }
-            name[k]=' ';
+            name[k]='\0';
             intname=assign_taxa_name(name, FALSE);
-            name[0]=' '; totext(intname, name);
+            name[0]='\0'; totext(intname, name);
             k=0;
-            while(name[k]!=' ') { tree2[j]=name[k]; j++; k++; }
+            while(name[k]!='\0') { tree2[j]=name[k]; j++; k++; }
             }
         }
-    tree2[j]=';'; tree2[j+1]=' ';
+    tree2[j]=';'; tree2[j+1]='\0';
 
     /* Initialise score matrices and compute path metrics */
     for(j=0; j<number_of_taxa; j++)
