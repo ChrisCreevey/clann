@@ -1718,17 +1718,73 @@ void print_tree_labels(struct taxon *position, int **results, int treenum, struc
 		}
 	}
 
-void label_gene_tree(struct taxon * gene_position, struct taxon * species_top, int *presence, int xnum)
+/* --- incremental LCA mapping for label_gene_tree ------------------------------
+ * number_tree1() numbers the species tree post-order, so every node's tag is
+ * smaller than its parent's and leaf tags are [0,N), internal [N,2N-2]. That
+ * lets us map a gene node to its species-tree node incrementally: it is the LCA
+ * of its children's mapped nodes, and (because tags increase toward the root)
+ * that LCA's tag is exactly what get_min_node() returned -- computed by walking
+ * up the smaller tag via a parent-tag table instead of an O(species) scan. */
+static int *g_species_partag = NULL;   /* parent tag of each species-tree node, indexed by its tag */
+static int *g_species_depth  = NULL;   /* depth of each species-tree node, indexed by its tag */
+static int  g_species_partag_n = 0;
+
+static void build_partag_rec(struct taxon *node, int parent_tag, int depth)
+	{
+	for(; node != NULL; node = node->next_sibling)
+		{
+		if(node->tag >= 0 && node->tag < g_species_partag_n)
+			{ g_species_partag[node->tag] = parent_tag; g_species_depth[node->tag] = depth; }
+		if(node->daughter != NULL) build_partag_rec(node->daughter, node->tag, depth+1);
+		}
+	}
+
+/* build parent-tag + depth tables for the (already number_tree1-numbered) species tree */
+static void build_species_partag(struct taxon *species_top)
+	{
+	int need = 2*number_of_taxa + 1, i;
+	if(g_species_partag_n < need)
+		{
+		g_species_partag = realloc(g_species_partag, need*sizeof(int));
+		g_species_depth  = realloc(g_species_depth,  need*sizeof(int));
+		if(!g_species_partag || !g_species_depth) memory_error(97);
+		g_species_partag_n = need;
+		}
+	for(i = 0; i < g_species_partag_n; i++) { g_species_partag[i] = -1; g_species_depth[i] = -1; }
+	build_partag_rec(species_top, -1, 0);   /* root's parent = -1 (never dereferenced) */
+	}
+
+/* LCA of two species-tree node tags via depth: lift the deeper node to the other's
+ * depth, then lift both together until they meet. The species tree is unrooted --
+ * its top level is a sibling forest with no single root node -- so two tags in
+ * different top-level components have no common ancestor node; get_min_node()
+ * returns the sentinel `root` (its initial xnum) in that case, so we do too. */
+static int species_lca_tag(int a, int b, int root)
+	{
+	if(a < 0) return b;
+	if(b < 0) return a;
+	while(g_species_depth[a] > g_species_depth[b]) a = g_species_partag[a];
+	while(g_species_depth[b] > g_species_depth[a]) b = g_species_partag[b];
+	while(a != b)
+		{
+		if(g_species_partag[a] < 0 || g_species_partag[b] < 0) return root;  /* meet only at the implicit root */
+		a = g_species_partag[a];
+		b = g_species_partag[b];
+		}
+	return a;
+	}
+
+static void label_gene_tree_rec(struct taxon * gene_position, struct taxon * species_top, int *presence, int xnum)
 	{
 	struct taxon * position = gene_position, *tmp = NULL;
 	int i =0, j=0, latest = -1;
 /*	printf2("in Label_gene_tree\n");*/
 	while(position != NULL)
 		{
-		if(position->daughter != NULL) 
+		if(position->daughter != NULL)
 			{
 	/*		printf2("daughter\n"); */
-			label_gene_tree(position->daughter, species_top, presence, xnum);
+			label_gene_tree_rec(position->daughter, species_top, presence, xnum);
 			for(i=0; i<2*number_of_taxa; i++) presence[i] = FALSE;
 			tmp = position->daughter;
 			j=0;
@@ -1750,18 +1806,35 @@ void label_gene_tree(struct taxon * gene_position, struct taxon * species_top, i
 				}
 			if(j>1)
 				{
-				for(i=0; i<2*number_of_taxa; i++) presence[i] = FALSE;
-				descend(position->daughter, presence);
-				position->tag = get_min_node(species_top, presence, xnum);
+				/* map to the LCA of the children's mapped species-tree nodes;
+				 * its tag equals what get_min_node() returned, in O(depth). */
+				int lca_tag = -1;
+				tmp = position->daughter;
+				while(tmp != NULL)
+					{
+					int ctag = (tmp->name != -1) ? tmp->name : tmp->tag;
+					lca_tag = (lca_tag < 0) ? ctag : species_lca_tag(lca_tag, ctag, xnum);
+					tmp = tmp->next_sibling;
+					}
+				position->tag = lca_tag;
 				}
 			else
 				position->tag = latest;
-				
+
 			}
 		else
 			position->tag = position->name;
 		position = position->next_sibling;
 		}
+	}
+
+/* Public entry: build the species parent-tag table once (per top-level call, not
+ * per recursion), then run the recursive labeller. Same signature/behaviour as
+ * before; internal mapping is now O(gene + species) instead of O(gene*species). */
+void label_gene_tree(struct taxon * gene_position, struct taxon * species_top, int *presence, int xnum)
+	{
+	build_species_partag(species_top);
+	label_gene_tree_rec(gene_position, species_top, presence, xnum);
 	}
 
 void descend(struct taxon * position, int *presence)
