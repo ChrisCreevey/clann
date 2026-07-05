@@ -1947,31 +1947,39 @@ int isit_onetoone(struct taxon *position, int onetoone)  /* This will return 0 i
 	return(onetoone);
 	}
 
+/* gmn_count: single bottom-up pass replacing the per-node subtree re-traversal
+ * (subtree_id) that made get_min_node quadratic. Returns the number of present
+ * leaves under `node` using subtree_id's own leaf rule (name != -1 is a leaf and
+ * is not descended through); for every internal node whose subtree holds ALL
+ * present leaves it folds that node's tag into *minnum. */
+static int gmn_count(struct taxon *node, const int *presence, int total, int *minnum)
+	{
+	int cnt = 0;
+	struct taxon *c;
+	if(node->name != -1)   /* leaf (same rule subtree_id() uses) */
+		{
+		if(node->name >= 0 && node->name < number_of_taxa && presence[node->name]) cnt = 1;
+		return cnt;
+		}
+	for(c = node->daughter; c != NULL; c = c->next_sibling)
+		cnt += gmn_count(c, presence, total, minnum);
+	if(node->daughter != NULL && cnt == total && node->tag < *minnum) *minnum = node->tag;
+	return cnt;
+	}
+
+/* get_min_node: minimum species-tree node tag whose subtree contains ALL the
+ * present (leaf) taxa -- the LCA-and-ancestors min tag used by reconciliation
+ * (label_gene_tree), the recon criterion and autodecompose. Identical value to
+ * the original subtree_id-based version, computed in O(species) not O(species^2). */
 int get_min_node(struct taxon * position, int *presence, int num)
 	{
-	struct taxon * start = position;
-	int *tmp, i, ans;
-	
-	tmp = malloc(number_of_taxa*sizeof(int));
-	
-	while(position != NULL)
-		{
-		if(position->daughter != NULL)
-			{
-			num = get_min_node(position->daughter, presence, num);
-			for(i=0; i<number_of_taxa; i++) tmp[i] = presence[i];
-			subtree_id(position->daughter, tmp);
-			ans = TRUE;
-			for(i=0; i<number_of_taxa; i++)
-				{
-				if(tmp[i] == TRUE) ans = FALSE;
-				}
-			if(ans == TRUE && position->tag < num) num = position->tag;
-			}
-		position = position->next_sibling;
-		}
-	free(tmp);
-	return(num);
+	int total = 0, i, result;
+	struct taxon *p;
+	for(i = 0; i < number_of_taxa; i++) if(presence[i]) total++;
+	result = num;
+	for(p = position; p != NULL; p = p->next_sibling)
+		gmn_count(p, presence, total, &result);
+	return(result);
 	}
 
 void find(struct taxon * position)
