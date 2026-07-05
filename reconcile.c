@@ -927,6 +927,11 @@ static void process_fragment_root(struct taxon *root, int treenum, float dupsupp
  *                  suppress writing, e.g. for a dry-run/count-only call).
  * infofile       : receives a decision log (may be NULL).
  * Returns the number of fragments written. */
+/* defined later in this file; used here to hoist the species-tree preprocessing
+ * out of the per-rooting loops (the species tree is invariant across rootings). */
+static void build_species_partag(struct taxon *species_top);
+static void label_gene_tree_rec(struct taxon *gene_position, struct taxon *species_top, int *presence, int xnum);
+
 int decompose_gene_tree_stage2(int treenum, char *guide_tree_str, float dupsupport, int minfragtaxa, int minfragspecies, FILE *fragfile, FILE *infofile)
 	{
 	struct taxon *species_tree = NULL, *gene_tree = NULL, *copy = NULL, *best_mapping = NULL, *position = NULL;
@@ -968,6 +973,12 @@ int decompose_gene_tree_stage2(int treenum, char *guide_tree_str, float dupsuppo
 	nrootings = number_tree(gene_tree, 0);
 	presence = malloc(2*number_of_taxa*sizeof(int));
 
+	/* Species tree is invariant across rootings: number it and build the LCA
+	 * parent-tag table once here instead of every loop iteration. */
+	xnum = number_tree1(species_tree, number_of_taxa);
+	xnum--;
+	build_species_partag(species_tree);
+
 	for(j=0; j<nrootings; j++)
 		{
 		int dups;
@@ -977,10 +988,7 @@ int decompose_gene_tree_stage2(int treenum, char *guide_tree_str, float dupsuppo
 		gene_tree = temp_top;
 		temp_top = NULL;
 
-		for(i=0; i<2*number_of_taxa; i++) presence[i] = FALSE;
-		xnum = number_tree1(species_tree, number_of_taxa);
-		xnum--;
-		label_gene_tree(gene_tree, species_tree, presence, xnum);
+		label_gene_tree_rec(gene_tree, species_tree, presence, xnum);
 		dups = tag_duplications_only(gene_tree);
 
 		if(best_dups == -1 || dups < best_dups)
