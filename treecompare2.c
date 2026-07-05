@@ -1582,6 +1582,7 @@ void bootstrap_search(void)
         
         bootfile = fopen(filename, "w");
         /********* initalise the array to store the arrays *********/
+        ensure_fund_scores_alloc();   /* fund_scores not allocated at load; this command snapshots it */
         stored_num_comparisons = malloc(Total_fund_trees*sizeof(int));
         if(!stored_num_comparisons) memory_error(60);
         for(i=0; i<Total_fund_trees; i++) stored_num_comparisons[i] = number_of_comparisons[i];
@@ -3468,18 +3469,23 @@ static void ensure_stored_source_trees(void)
 	for(i = 0; i < Total_fund_trees; i++)
 		stored_num_comparisons[i] = number_of_comparisons[i];
 
-	stored_fund_scores = malloc(Total_fund_trees * sizeof(int **));
-	if(!stored_fund_scores) memory_error(38);
-	for(i = 0; i < Total_fund_trees; i++)
+	/* fund_scores is only allocated for the distance-fit criterion; under other
+	 * criteria it is NULL and there is nothing to snapshot (leave stored NULL). */
+	if(fund_scores != NULL)
 		{
-		stored_fund_scores[i] = malloc(number_of_taxa * sizeof(int *));
-		if(!stored_fund_scores[i]) memory_error(39);
-		for(j = 0; j < number_of_taxa; j++)
+		stored_fund_scores = malloc(Total_fund_trees * sizeof(int **));
+		if(!stored_fund_scores) memory_error(38);
+		for(i = 0; i < Total_fund_trees; i++)
 			{
-			stored_fund_scores[i][j] = malloc(number_of_taxa * sizeof(int));
-			if(!stored_fund_scores[i][j]) memory_error(40);
-			for(k = 0; k < number_of_taxa; k++)
-				stored_fund_scores[i][j][k] = fund_scores[i][j][k];
+			stored_fund_scores[i] = malloc(number_of_taxa * sizeof(int *));
+			if(!stored_fund_scores[i]) memory_error(39);
+			for(j = 0; j < number_of_taxa; j++)
+				{
+				stored_fund_scores[i][j] = malloc(number_of_taxa * sizeof(int));
+				if(!stored_fund_scores[i][j]) memory_error(40);
+				for(k = 0; k < number_of_taxa; k++)
+					stored_fund_scores[i][j][k] = fund_scores[i][j][k];
+				}
 			}
 		}
 
@@ -3534,8 +3540,9 @@ static int build_bootstrap_nj(char *out_tree, int missing_method)
 			for(k = 0; k < number_of_taxa; k++)
 				{
 				presence_of_taxa[j][k] = stored_presence_of_taxa[r][k];
-				for(l = 0; l < number_of_taxa; l++)
-					fund_scores[j][k][l] = stored_fund_scores[r][k][l];
+				if(fund_scores != NULL)
+					for(l = 0; l < number_of_taxa; l++)
+						fund_scores[j][k][l] = stored_fund_scores[r][k][l];
 				}
 			}
 
@@ -3564,8 +3571,9 @@ static int build_bootstrap_nj(char *out_tree, int missing_method)
 				for(k = 0; k < number_of_taxa; k++)
 					{
 					presence_of_taxa[j][k] = stored_presence_of_taxa[j][k];
-					for(l = 0; l < number_of_taxa; l++)
-						fund_scores[j][k][l] = stored_fund_scores[j][k][l];
+					if(fund_scores != NULL)
+						for(l = 0; l < number_of_taxa; l++)
+							fund_scores[j][k][l] = stored_fund_scores[j][k][l];
 					}
 				}
 			return TRUE;
@@ -6731,7 +6739,7 @@ void yaptp_search(void)
         
             yaptpfile = fopen(filename, "w");
             /********* initalise the array to store the arrays *********/
-            
+            ensure_fund_scores_alloc();   /* fund_scores not allocated at load; this command snapshots it */
             stored_fund_scores = malloc(Total_fund_trees*sizeof(int**));
             if(stored_fund_scores == NULL) memory_error(38);
                 
@@ -9834,7 +9842,7 @@ void generatetrees(void)
 		if(data != 1)
 			{
 			/** create somewhere to store the source trees during the operation **/
-			
+			ensure_fund_scores_alloc();   /* fund_scores not allocated at load; this command snapshots it */
 			stored_fund_scores = malloc(Total_fund_trees*sizeof(int**));
 			if(stored_fund_scores == NULL) memory_error(38);
 				
@@ -10735,7 +10743,7 @@ void spr_dist(void)
 			/** create somewhere to store the source trees during the operation **/
 		tmp[0] = '\0';
 		ideal[0] = '\0';
-		
+		ensure_fund_scores_alloc();   /* fund_scores not allocated at load; this command snapshots it */
 		stored_fund_scores = malloc(Total_fund_trees*sizeof(int**));
 		if(stored_fund_scores == NULL) memory_error(38);
 			

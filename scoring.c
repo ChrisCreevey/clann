@@ -428,11 +428,40 @@ static double quartet_intersect_score_w(const uint64_t *a, int na,
     return q_agree;
     }
 
+/* ensure_fund_scores_alloc: lazily allocate the fund_scores path-distance
+ * matrices (int[Total_fund_trees][N][N], zeroed). This array is O(trees*taxa^2)
+ * and is only ever read by the distance-fit criterion (compare_trees), so it is
+ * no longer allocated at load time. It is allocated on demand by the operations
+ * that need it (dfit scoring via cal_fund_scores, and the boot/yaptp/
+ * generatetrees/spr_dist snapshot bookkeeping). For large tree sets run under
+ * the ML/RF/etc. criteria this avoids the whole array (e.g. ~110 GB for 121k
+ * trees x 477 taxa). Idempotent: a no-op if already allocated. */
+void ensure_fund_scores_alloc(void)
+    {
+    int i, j, k;
+    if(fund_scores != NULL) return;
+    fund_scores = malloc(Total_fund_trees * sizeof(int **));
+    if(fund_scores == NULL) memory_error(35);
+    for(i = 0; i < Total_fund_trees; i++)
+        {
+        fund_scores[i] = malloc(number_of_taxa * sizeof(int *));
+        if(fund_scores[i] == NULL) memory_error(36);
+        for(j = 0; j < number_of_taxa; j++)
+            {
+            fund_scores[i][j] = malloc(number_of_taxa * sizeof(int));
+            if(fund_scores[i][j] == NULL) memory_error(37);
+            for(k = 0; k < number_of_taxa; k++)
+                fund_scores[i][j][k] = 0;
+            }
+        }
+    }
+
 void cal_fund_scores(int printfundscores)
     {
     int i =0, j=0, k=0;
     FILE *dists = NULL;
-        
+
+	ensure_fund_scores_alloc();   /* fund_scores is not allocated at load; allocate on first dfit use */
 	calculated_fund_scores = TRUE;
     if(printfundscores)
             {

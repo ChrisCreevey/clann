@@ -39,6 +39,7 @@ extern int bsweight;
 /* -----------------------------------------------------------------------
  * Distance and path-metric scoring
  * ----------------------------------------------------------------------- */
+void  ensure_fund_scores_alloc(void);
 void  cal_fund_scores(int printfundscores);
 void  pathmetric(char *string, int **scores);
 void  pathmetric_internals(char *string, struct taxon *species_tree, int **scores);

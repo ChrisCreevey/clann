@@ -99,6 +99,7 @@ void  print_named_tree(struct taxon *position, char *tree);
 void  print_fullnamed_tree(struct taxon *position, char *tree, int fundtreenum);
 void  reallocate_retained_supers(void);
 void  execute_command(char *filename, int do_all);
+void  ensure_fund_scores_alloc(void);
 void  cal_fund_scores(int printfundscores);
 
 /* -----------------------------------------------------------------------

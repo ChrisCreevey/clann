@@ -3795,27 +3795,14 @@ void execute_command(char *commandline, int do_all)
 		sourcetree_scores = malloc(Total_fund_trees*sizeof(float));
 		for(i=0; i<Total_fund_trees; i++) sourcetree_scores[i] = -1;
 
-        fund_scores = malloc(Total_fund_trees*sizeof(int**));
-        if(fund_scores == NULL) memory_error(35);
-            
-        for(i=0; i<Total_fund_trees; i++)
-            {
-            fund_scores[i] = malloc((number_of_taxa)*sizeof(int*));
-            if(fund_scores[i] == NULL) memory_error(36);
-            else
-                {
-                for(j=0; j<(number_of_taxa); j++)
-                    {
-                    fund_scores[i][j] = malloc((number_of_taxa)*sizeof(int));
-                    if(fund_scores[i][j] == NULL) memory_error(37);
-                    else
-                        {
-                        for(k=0; k<(number_of_taxa); k++)
-                            fund_scores[i][j][k] = 0;
-                        }
-                    }
-                }
-            }
+        /* fund_scores (int[Total_fund_trees][N][N] path-distance matrices) is
+         * O(trees * taxa^2) and only the distance-fit criterion ever reads it.
+         * It is no longer allocated here; cal_fund_scores() allocates it lazily
+         * the first time a dfit scoring pass needs it. For large tree sets under
+         * the ML/RF/etc. criteria this avoids a very large unused allocation
+         * (e.g. ~110 GB for 121k trees x 477 taxa). Leaving it NULL is safe: all
+         * fund_scores snapshot/restore paths are guarded by fund_scores != NULL. */
+        fund_scores = NULL;
 
 		calculated_fund_scores = FALSE;
 
