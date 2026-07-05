@@ -1777,50 +1777,25 @@ static int species_lca_tag(int a, int b, int root)
 static void label_gene_tree_rec(struct taxon * gene_position, struct taxon * species_top, int *presence, int xnum)
 	{
 	struct taxon * position = gene_position, *tmp = NULL;
-	int i =0, j=0, latest = -1;
-/*	printf2("in Label_gene_tree\n");*/
+	(void)presence;   /* no longer needed for the mapping (kept for signature compatibility) */
 	while(position != NULL)
 		{
 		if(position->daughter != NULL)
 			{
-	/*		printf2("daughter\n"); */
+			int lca_tag = -1;
 			label_gene_tree_rec(position->daughter, species_top, presence, xnum);
-			for(i=0; i<2*number_of_taxa; i++) presence[i] = FALSE;
+			/* Map this node to the LCA of its children's mapped species-tree nodes.
+			 * Folding over ALL children also covers the single-species case (the LCA
+			 * of equal tags is that tag), so the old per-node presence reset and the
+			 * distinct-child count are no longer needed -- O(depth), not O(species). */
 			tmp = position->daughter;
-			j=0;
 			while(tmp != NULL)
 				{
-				if(tmp->name != -1)
-					{
-					if(presence[tmp->name] == FALSE) j++;
-					presence[tmp->name] = TRUE;
-					latest = tmp->name;
-					}
-				else
-					{
-					if(presence[tmp->tag] == FALSE) j++;
-					presence[tmp->tag] = TRUE;
-					latest = tmp->tag;
-					}
+				int ctag = (tmp->name != -1) ? tmp->name : tmp->tag;
+				lca_tag = (lca_tag < 0) ? ctag : species_lca_tag(lca_tag, ctag, xnum);
 				tmp = tmp->next_sibling;
 				}
-			if(j>1)
-				{
-				/* map to the LCA of the children's mapped species-tree nodes;
-				 * its tag equals what get_min_node() returned, in O(depth). */
-				int lca_tag = -1;
-				tmp = position->daughter;
-				while(tmp != NULL)
-					{
-					int ctag = (tmp->name != -1) ? tmp->name : tmp->tag;
-					lca_tag = (lca_tag < 0) ? ctag : species_lca_tag(lca_tag, ctag, xnum);
-					tmp = tmp->next_sibling;
-					}
-				position->tag = lca_tag;
-				}
-			else
-				position->tag = latest;
-
+			position->tag = lca_tag;
 			}
 		else
 			position->tag = position->name;
