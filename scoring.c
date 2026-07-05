@@ -506,13 +506,20 @@ void cal_fund_scores(int printfundscores)
     if(dists != NULL) fclose(dists);
     }
 
-void pathmetric(char *string, int **scores)
+void pathmetric(char *string_in, int **scores)
     {
-    int i=0, j=0, charactercount = -1, **closeP = NULL, variable = 0; 
+    int i=0, j=0, charactercount = -1, **closeP = NULL, variable = 0;
     char number[30];
+    char *string;
 
+    /* Work on a private copy: unroottree() below rewrites the string in place,
+     * and callers pass fundamentals[i] directly. Mutating the shared source-tree
+     * strings made fund_scores non-idempotent (a re-computation after the strings
+     * had been touched produced different distances). */
+    string = malloc((strlen(string_in) + 10) * sizeof(char));
+    if(!string) memory_error(35);
+    strcpy(string, string_in);
 
-     
     /* The array characters is used to keep track, for each taxa, the open and closed brackets that has followed each */
     closeP = malloc((number_of_taxa)*(sizeof(int*)));
     for(i=0; i<number_of_taxa; i++)
@@ -596,6 +603,7 @@ void pathmetric(char *string, int **scores)
         free(closeP[i]);
     free(closeP);
     closeP = NULL;
+    free(string);
     }
 
 void pathmetric_internals(char *string, struct taxon * species_tree, int **scores)

@@ -4244,6 +4244,13 @@ void set_parameters(void)
                     }
                 }
             }
+        /* Leaving the distance-fit criterion: release the large O(trees*taxa^2)
+         * fund_scores / stored_* arrays so they do not stay resident for the
+         * rest of the session. No-op if they were never allocated; a later dfit
+         * run re-creates them lazily. */
+        if(strcmp(parsed_command[i], "criterion") == 0 && criterion != 0)
+            free_fund_scores_arrays();
+
         if(strcmp(parsed_command[i], "seed") == 0)
         	{
         	isdigit=TRUE;

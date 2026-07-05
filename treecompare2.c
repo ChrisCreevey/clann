@@ -2092,10 +2092,10 @@ void bootstrap_search(void)
 			free(bootstrap_results);
 			free(score_of_bootstraps);
 			}
-        free(stored_funds);
-        free(stored_presence_of_taxa);
-        free(stored_fund_scores);
-        free(stored_num_comparisons);
+        free(stored_funds);                stored_funds = NULL;
+        free(stored_presence_of_taxa);     stored_presence_of_taxa = NULL;
+        free(stored_fund_scores);          stored_fund_scores = NULL;
+        free(stored_num_comparisons);      stored_num_comparisons = NULL;
         free(taxa_present);
         }
     }
@@ -3450,6 +3450,58 @@ static void hs_merge_results(char ***par_retained, float **par_scores, int *par_
     }
 #endif /* _OPENMP */
 
+
+/* free_fund_scores_arrays: release fund_scores and its stored_* snapshot set
+ * (all O(trees*taxa^2)). Only the distance-fit criterion uses these; once
+ * allocated they otherwise stay resident for the whole session (fund_scores is
+ * never freed except on re-exe/quit, and the hs starting-tree path allocates
+ * the stored snapshot but never frees it). This is called when the criterion is
+ * switched away from dfit so the memory is reclaimed. Everything is guarded and
+ * NULLed; a later dfit run re-creates fund_scores lazily and ensure_stored_
+ * source_trees() rebuilds the snapshot. The stored_* set is freed as a whole to
+ * keep ensure_stored_source_trees()'s "already populated" check consistent. */
+void free_fund_scores_arrays(void)
+    {
+    int i, j;
+    if(fund_scores != NULL)
+        {
+        for(i = 0; i < Total_fund_trees; i++)
+            {
+            for(j = 0; j < number_of_taxa; j++) free(fund_scores[i][j]);
+            free(fund_scores[i]);
+            }
+        free(fund_scores);
+        fund_scores = NULL;
+        }
+    if(stored_fund_scores != NULL)
+        {
+        for(i = 0; i < Total_fund_trees; i++)
+            {
+            for(j = 0; j < number_of_taxa; j++) free(stored_fund_scores[i][j]);
+            free(stored_fund_scores[i]);
+            }
+        free(stored_fund_scores);
+        stored_fund_scores = NULL;
+        }
+    if(stored_funds != NULL)
+        {
+        for(i = 0; i < Total_fund_trees; i++) free(stored_funds[i]);
+        free(stored_funds);
+        stored_funds = NULL;
+        }
+    if(stored_presence_of_taxa != NULL)
+        {
+        for(i = 0; i < Total_fund_trees; i++) free(stored_presence_of_taxa[i]);
+        free(stored_presence_of_taxa);
+        stored_presence_of_taxa = NULL;
+        }
+    if(stored_num_comparisons != NULL)
+        {
+        free(stored_num_comparisons);
+        stored_num_comparisons = NULL;
+        }
+    calculated_fund_scores = FALSE;
+    }
 
 /* =======================================================================
  * ensure_stored_source_trees: populate stored_* snapshot arrays from the
@@ -6904,9 +6956,9 @@ void yaptp_search(void)
                     }
                 free(stored_fund_scores[i]);
                 }
-            free(stored_funds);
-            free(stored_presence_of_taxa);
-            free(stored_fund_scores);
+            free(stored_funds);                stored_funds = NULL;
+            free(stored_presence_of_taxa);     stored_presence_of_taxa = NULL;
+            free(stored_fund_scores);          stored_fund_scores = NULL;
             }
         }
     free(best_tree);
@@ -10101,9 +10153,9 @@ void generatetrees(void)
 					}
 				free(stored_fund_scores[i]);
 				}
-			free(stored_funds);
-			free(stored_presence_of_taxa);
-			free(stored_fund_scores);
+			free(stored_funds);                stored_funds = NULL;
+			free(stored_presence_of_taxa);     stored_presence_of_taxa = NULL;
+			free(stored_fund_scores);          stored_fund_scores = NULL;
 
 
 
@@ -11036,9 +11088,9 @@ void spr_dist(void)
 				}
 			free(stored_fund_scores[i]);
 			}
-		free(stored_funds);
-		free(stored_presence_of_taxa);
-		free(stored_fund_scores);
+		free(stored_funds);                stored_funds = NULL;
+		free(stored_presence_of_taxa);     stored_presence_of_taxa = NULL;
+		free(stored_fund_scores);          stored_fund_scores = NULL;
 		for(i=0; i<number_of_taxa; i++)
 			free(scores_changed[i]);
 		
