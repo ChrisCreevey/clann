@@ -2285,6 +2285,7 @@ static void autoprunemono_apply(void)
 	int *taxa_fate = NULL;
 	char *temptree = malloc(TREE_LENGTH * sizeof(char));
 	char *pruned_tree = NULL, *tmp = NULL;
+	size_t apm_bufsz = TREE_LENGTH;   /* current size of temptree/pruned_tree/tmp; grown per tree below */
 
 	if(!temptree) { printf2("Error: out of memory for autoprunemono\n"); return; }
 
@@ -2316,11 +2317,30 @@ static void autoprunemono_apply(void)
 		if(!multicopy) continue;
 		n_multicopy++;
 
+		/* Grow the working buffers to fit THIS tree. returntree_fullnames() below
+		 * expands numeric ids to (longer) full names into temptree, so the buffer
+		 * must hold the full-name form -- which for large gene-family trees exceeds
+		 * a fixed TREE_LENGTH. pruned_tree/tmp hold the (smaller) numeric pruned
+		 * tree, so the same size is a safe upper bound. Buffers only grow. */
+		{
+		size_t need = returntree_fullname_buflen(fundamentals[i], i) + 128;
+		if(need < (size_t)TREE_LENGTH) need = TREE_LENGTH;
+		if(need > apm_bufsz)
+			{
+			char *nt;
+			nt = realloc(temptree, need);    if(!nt) goto apm_oom; temptree = nt;
+			nt = realloc(pruned_tree, need); if(!nt) goto apm_oom; pruned_tree = nt;
+			nt = realloc(tmp, need);         if(!nt) goto apm_oom; tmp = nt;
+			apm_bufsz = need;
+			}
+		}
+
 		/* Dismantle any tree already in memory */
 		if(tree_top != NULL) { dismantle_tree(tree_top); tree_top = NULL; }
 		temp_top = NULL;
 
-		/* Build tree from stored representation using full names */
+		/* Build tree from stored representation using full names (temptree/
+		 * pruned_tree/tmp already grown to fit this tree just above). */
 		temptree[0] = '\0';
 		strcpy(temptree, fundamentals[i]);
 		returntree_fullnames(temptree, i);
@@ -2420,6 +2440,14 @@ static void autoprunemono_apply(void)
 		if(n_pruned > 0)
 			printf2("  Original (unpruned) trees stored for reconstruct.\n");
 		}
+	return;
+
+apm_oom:
+	printf2("Error: out of memory for autoprunemono\n");
+	if(tree_top != NULL) { dismantle_tree(tree_top); tree_top = NULL; }
+	free(temptree);
+	free(pruned_tree);
+	free(tmp);
 	}
 
 /* -----------------------------------------------------------------------
@@ -2659,6 +2687,7 @@ static void compute_autoweights_clan(const char *clanfile, int mode)
 
         /* Build source tree into tree_top */
         temptree[0] = '\0';
+        ensure_fullname_bufsize(&temptree, i);
         strcpy(temptree, fundamentals[i]);
         returntree_fullnames(temptree, i);
         basic_tree_build(1, temptree, tree_top, TRUE);
@@ -3101,7 +3130,13 @@ static void autodecompose_apply(void)
         }
     for(i=0; i<Total_fund_trees; i++)
         {
-        char *fullname_text = malloc(TREE_LENGTH * sizeof(char));
+        /* Size the buffer to THIS tree's full-name form: returntree_fullnames()
+         * expands numeric ids to (longer) full names, which for large gene-family
+         * trees exceeds a fixed TREE_LENGTH. */
+        size_t need = returntree_fullname_buflen(fundamentals[i], i);
+        if(need < strlen(fundamentals[i]) + 1) need = strlen(fundamentals[i]) + 1;
+        if(need < (size_t)TREE_LENGTH) need = TREE_LENGTH;
+        char *fullname_text = malloc(need * sizeof(char));
         if(fullname_text == NULL)
             {
             printf2("Error: out of memory for autodecompose snapshot -- aborted\n");

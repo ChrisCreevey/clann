@@ -1192,6 +1192,7 @@ void showtrees(int savet)
 			        temp_top = NULL;
 			        taxaorder=0;
 			        temptree[0] = '\0';
+			        ensure_fullname_bufsize(&temptree, j);
 			        strcpy(temptree, fundamentals[j]);
 					returntree_fullnames(temptree, j);
 			        basic_tree_build(1, temptree, tree_top, TRUE);
@@ -1221,6 +1222,7 @@ void showtrees(int savet)
 				if(display)
 					{
 					temptree[0] = '\0';
+					ensure_fullname_bufsize(&temptree, j);
 					strcpy(temptree, fundamentals[j]);
 					returntree_fullnames(temptree, j);
 
@@ -1763,10 +1765,61 @@ void returntree(char *temptree) /* returns the tree with the names of the taxa i
 
 	}
 
+/* returntree_fullname_buflen: number of bytes returntree_fullnames() will write
+ * for tree treenum's numeric form `numeric` (including the trailing ';' and '\0').
+ * The full-name form replaces each numeric taxon id with its (longer) full name,
+ * so it can be much larger than the numeric string -- for the biggest trees in a
+ * gene-family set it exceeds a fixed TREE_LENGTH buffer. Callers use this to size
+ * the output buffer per tree instead of assuming TREE_LENGTH. Mirrors the parse
+ * in returntree_fullnames() exactly so taxaorder tracks the same fulltaxanames
+ * entries and never reads out of bounds. */
+size_t returntree_fullname_buflen(const char *numeric, int treenum)
+	{
+	size_t k = 0;
+	int j = 0, taxaorder = 0;
+	while(numeric[j] != ';' && numeric[j] != '\0')
+		{
+		if(numeric[j] == ')')
+			{
+			k++; j++;
+			while(numeric[j] != '(' && numeric[j] != ')' && numeric[j] != ',' && numeric[j] != ';' && numeric[j] != ':' && numeric[j] != '\0') { k++; j++; }
+			}
+		else if(numeric[j] == '(' || numeric[j] == ',')
+			{ k++; j++; }
+		else if(numeric[j] == ':')
+			{
+			while(numeric[j] != '(' && numeric[j] != ')' && numeric[j] != ',' && numeric[j] != ';' && numeric[j] != '\0') { k++; j++; }
+			}
+		else
+			{
+			while(numeric[j] != '(' && numeric[j] != ')' && numeric[j] != ',' && numeric[j] != ';' && numeric[j] != ':' && numeric[j] != '\0') j++;
+			k += strlen(fulltaxanames[treenum][taxaorder]);
+			taxaorder++;
+			}
+		}
+	return k + 2;   /* ';' and terminating '\0' */
+	}
+
+/* ensure_fullname_bufsize: (re)size the malloc'd buffer *buf so it can hold tree
+ * treenum's full-name form, before the usual
+ * strcpy(*buf, fundamentals[treenum]); returntree_fullnames(*buf, treenum).
+ * returntree_fullnames() expands numeric ids to (longer) full names, which for
+ * large gene-family trees exceeds a fixed TREE_LENGTH. No caller-side size
+ * bookkeeping needed: realloc to the same size class is a cheap no-op. Never
+ * sizes below TREE_LENGTH. */
+void ensure_fullname_bufsize(char **buf, int treenum)
+	{
+	size_t need = returntree_fullname_buflen(fundamentals[treenum], treenum);
+	if(need < strlen(fundamentals[treenum]) + 1) need = strlen(fundamentals[treenum]) + 1;
+	if(need < (size_t)TREE_LENGTH) need = TREE_LENGTH;
+	char *nb = realloc(*buf, need);
+	if(nb) *buf = nb;
+	}
+
 void returntree_fullnames(char *temptree, int treenum) /* returns the tree with the names of the taxa included */
 	{
 	char string_num[10];
-	char *string = malloc(TREE_LENGTH * sizeof(char));
+	char *string = malloc((strlen(temptree) + 1) * sizeof(char));   /* holds the numeric input; size to it, not a fixed TREE_LENGTH */
 	int i=0, j=0, k=0, l=0, num, taxaorder=0;
 
 	if(!string) { printf2("Error: out of memory in returntree_fullnames\n"); return; }
@@ -2194,6 +2247,7 @@ static int save_pre_dt_snapshot(void)
 		pre_dt_names[i]   = strdup(tree_names[i] ? tree_names[i] : "");
 		/* Convert numeric fundamentals[i] back to full taxon names */
 		temptree[0] = '\0';
+		ensure_fullname_bufsize(&temptree, i);
 		strcpy(temptree, fundamentals[i]);
 		returntree_fullnames(temptree, i);
 		pre_dt_trees[i] = strdup(temptree);
@@ -2365,6 +2419,7 @@ void exclude_taxa(int do_all)
 				if(l>= min_taxa)
 					{
 					num_left++;
+					ensure_fullname_bufsize(&temptree, i);
 					strcpy(temptree, fundamentals[i]);
 					returntree_fullnames(temptree, i);
 					/*printf("%s\n", temptree); */

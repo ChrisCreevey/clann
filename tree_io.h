@@ -121,6 +121,8 @@ void     include(int do_all);
 void     exclude_taxa(int do_all);
 void     restoretaxa(int do_all);
 void     returntree(char *temptree);
+size_t   returntree_fullname_buflen(const char *numeric, int treenum);
+void     ensure_fullname_bufsize(char **buf, int treenum);
 void     returntree_fullnames(char *temptree, int treenum);
 
 /* restoretaxa availability flag (set by exclude_taxa, cleared by restoretaxa) */
