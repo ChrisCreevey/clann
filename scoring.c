@@ -770,15 +770,24 @@ void calculate_withins(struct taxon *position, int **within, int *presence)
 		}
 	}
 
-void weighted_pathmetric(char *string, float **scores, int fund_num)
+void weighted_pathmetric(char *string_in, float **scores, int fund_num)
     {
-    int i=0, j=0, k=0, charactercount = -1, variable = 0, node_number = -1, open = 0; 
+    int i=0, j=0, k=0, charactercount = -1, variable = 0, node_number = -1, open = 0;
     char number[30];
     float *taxa_weights = NULL, *node_weights = NULL,  **closeP = NULL;
+    char *string;
 
-     
+    /* Work on a private copy: unroottree() below rewrites the string in place,
+     * and average_consensus() passes fundamentals[i] directly. Mutating the shared
+     * source-tree strings would leave them in a different (unrooted) state, so a
+     * repeated average_consensus() pass could produce a different NJ starting tree.
+     * Matches the same fix in pathmetric(). */
+    string = malloc((strlen(string_in) + 10) * sizeof(char));
+    if(!string) memory_error(90);
+    strcpy(string, string_in);
+
     /* The array characters is used to keep track, for each taxa, the open and closed brackets that has followed each */
-    
+
 	closeP = malloc((number_of_taxa)*(sizeof(float*)));
     if(!closeP) memory_error(90);
     for(i=0; i<number_of_taxa; i++)
@@ -921,6 +930,7 @@ void weighted_pathmetric(char *string, float **scores, int fund_num)
     closeP = NULL;
 	free(taxa_weights);
 	free(node_weights);
+	free(string);
 
     }
 

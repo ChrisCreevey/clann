@@ -37,7 +37,13 @@ int average_consensus(int nrep, int missing_method, char * useroutfile, FILE *pa
 		taxa_comp[i] = malloc(number_of_taxa*sizeof(int));
 		if(!taxa_comp[i]) printf2("out of memory'n");
 		for(j=0; j<number_of_taxa; j++)
+			{
 			taxa_comp[i][j] = FALSE;
+			weighted_scores[i][j] = 0;   /* reset: weighted_pathmetric accumulates (+=), and this
+			                                matrix is only zeroed once at load, so without this a
+			                                second average_consensus() call would add on top of the
+			                                previous (already averaged) values and drift. */
+			}
 		}
 	for(i=0; i<Total_fund_trees; i++)
 		{
