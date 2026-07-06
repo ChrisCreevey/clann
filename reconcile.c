@@ -1531,10 +1531,16 @@ float tree_map_prepared(struct taxon * gene_top, struct taxon * species_top, int
 	label_gene_tree_rec(gene_top, species_top, NULL, xnum);
 	/* duplications: a node whose id equals one of its daughters' ids */
 	num_dups = reconstruct_map(gene_top, species_top);
-	/* add the missing lineages, then count losses */
-	add_losses(gene_top, species_top);
-	join_losses(gene_top);
-	num_losses = count_losses(gene_top);
+	/* Losses are the expensive part (add_losses reconstructs the missing
+	 * species subtrees). When loss_weight is 0 (duplications-only scoring, e.g.
+	 * the fast exploration phase of a two-phase recon search) they contribute
+	 * nothing to the score, so skip the whole loss computation. */
+	if(loss_weight != 0.0)
+		{
+		add_losses(gene_top, species_top);
+		join_losses(gene_top);
+		num_losses = count_losses(gene_top);
+		}
 
 	if(print)fprintf(distributionreconfile, "%d\t%d\n", num_dups, num_losses);
 	return((dup_weight*(float)num_dups)+(loss_weight*(float)num_losses));
