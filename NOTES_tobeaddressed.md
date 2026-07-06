@@ -142,3 +142,73 @@ differences between ILS and extra replicates. Worth fixing before investing
 further in which search variant is nominally "best per core".
 
 ---
+
+## 5. Decompose paralog-representative selection is non-deterministic
+
+**Discovered:** 2026-07-06 (while validating the linear-time reconciliation)
+
+**Symptom:** Running `autodecompose=yes` on a multicopy dataset twice with the
+**same binary and same input** produces different fragment files. The
+difference is *which* paralog copy is kept as a species' representative in a
+multicopy tree — e.g. `tree1_frag1` comes out as
+`...5693.XP_817042.1...` on one run and `...5693.XP_821347.1...` (or
+`5691.EAN80177`) on the next. It even shifts a few per-tree fragment *counts*
+(observed 538 vs 536 total fragment tags between two runs of the committed
+binary on the same 80-tree input). The decomposition *structure* (which
+`[treeN_fragM]` tags exist) is stable modulo those few shifts; the leaf labels
+within a fragment are what vary.
+
+**How found:** Comparing linear-DP vs pre-linear decompose output looked like a
+regression until two runs of the *same* pre-linear binary were diffed and
+showed the identical variation — so it is pre-existing, not from the linear DP.
+
+**Where to look:** the multicopy paralog-pruning / representative-choice logic
+in the decompose path — `decompose_walk` and the "keep one copy per species"
+selection in `reconcile.c` (the duplication-node collapse that picks a `rep`),
+and `prune.c`. Suspect iteration/pointer-order dependence or an unseeded
+`rand()` (see issue #2 — the global-`rand()` seeding problem could be the same
+root cause). Determine whether representative choice should be made
+deterministic (e.g. lexicographically smallest name, or longest sequence) so
+runs are reproducible.
+
+**Impact:** Decomposition (and any supertree built from it) is not reproducible
+run-to-run. Blocks byte-for-byte regression testing of the decompose path and
+surprises users who expect identical output from identical input.
+
+---
+
+## 6. Post-decompose SIGILL/segfault drawing very large trees
+
+**Discovered:** 2026-07-06 (running the 121k-tree / 477-taxon set end-to-end)
+
+**Symptom:** On the big gene-tree file (`/Users/chriscreevey/Downloads/2759_trees.ph`,
+~296 MB, 121,501 trees) with `autodecompose=yes autoprunemono=yes; set
+criterion=ml; hs`, the run reaches and passes the decomposition
+("Single-copy filter: using 813 single-copy trees...") and then dies with
+`illegal hardware instruction` (exit 132) or a segfault (exit 139), sometimes
+exiting 1 with empty output — while **drawing a very large ASCII tree** in the
+post-decompose output/supertree-search phase. Non-deterministic across runs.
+
+**How found:** Chasing whether the linear DP caused it — the committed
+pre-linear binary reaches the *same* post-decompose drawing phase and churns
+there just as long (>7 min) before dying, with none of the linear-DP code
+involved. So it is pre-existing and unrelated to the decompose change; it is
+simply reached now because decomposition itself got fast.
+
+**Ruled out:** out-of-range gene-tree tags (a bounds guard in the linear DP
+never fired); stack overflow (`ulimit -s 65500` did not help). ASan is
+unavailable for gcc on macOS, which hampered pinpointing.
+
+**Where to look:** the ASCII tree-drawing / tree-reload path and its fixed-size
+`char` buffers (`TREE_LENGTH`-class), the same family as the overflow fixes made
+earlier this session (the `returntree`/`print_*_tree` buffers). A ~2 MB Newick
+tree very likely overruns a `TREE_LENGTH` (or similar) buffer during
+drawing/printing, tripping the fortified `__chk_fail_overflow` (SIGILL) or
+corrupting the heap (SIGSEGV). Size the relevant buffers from the actual tree
+string length (as done for the autoprune buffers) rather than a fixed constant.
+
+**Impact:** The large-scale ML `hs` workflow the user wants cannot complete on
+the full dataset, even though the memory and decompose-speed problems around it
+are now solved.
+
+---
