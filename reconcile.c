@@ -2460,7 +2460,9 @@ float get_recon_score(char *giventree, int numspectries, int numgenetries)
 			}
 		if(numgenetries == -1)
 			{
-			dospecrand = FALSE;
+			dogenerand = FALSE;   /* was dospecrand (copy-paste bug): numgenerootings=all
+			                       * must disable GENE-rooting randomisation so the r-loop
+			                       * scans all i gene rootings, not one random one */
 			numgenetries = 1;
 			}
 			
