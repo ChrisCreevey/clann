@@ -1913,6 +1913,17 @@ void print_tree_labels(struct taxon *position, int **results, int treenum, struc
 static int *g_species_partag = NULL;   /* parent tag of each species-tree node, indexed by its tag */
 static int *g_species_depth  = NULL;   /* depth of each species-tree node, indexed by its tag */
 static int  g_species_partag_n = 0;
+/* These species parent/depth tables are rebuilt by build_species_partag() on
+ * every label_gene_tree()/reconciliation call. The heuristic search scores
+ * candidates in parallel (one replicate per thread), and the recon criterion
+ * runs the reconciliation -- so without per-thread copies, concurrent
+ * build_species_partag() calls realloc/overwrite the same arrays and corrupt
+ * the heap (observed: SIGSEGV in `set criterion=recon; hs` with >1 thread).
+ * threadprivate gives each thread its own table, matching how the other
+ * reconciliation/search globals are handled (globals.h). */
+#ifdef _OPENMP
+#pragma omp threadprivate(g_species_partag, g_species_depth, g_species_partag_n)
+#endif
 
 static void build_partag_rec(struct taxon *node, int parent_tag, int depth)
 	{
