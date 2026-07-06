@@ -1516,36 +1516,35 @@ void isittagged(struct taxon * position)
 		}
 	}
 
-float tree_map(struct taxon * gene_top, struct taxon * species_top, int print)
+/* Core of tree_map() with the species-tree preprocessing already done by the
+ * caller: the species tree must already be number_tree1-numbered (xnum is its
+ * top tag) and build_species_partag() must have run. This is the part that is
+ * invariant across all gene-tree rootings of a fixed species-tree rooting, so
+ * hoisting it out of the per-rooting loop avoids re-numbering + re-tabling the
+ * species tree O(rootings) times. label_gene_tree_rec() ignores its presence
+ * argument, so we pass NULL. */
+float tree_map_prepared(struct taxon * gene_top, struct taxon * species_top, int xnum, int print)
 	{
-	int xnum =0, *presence = NULL, i, j, num_dups = 0, num_losses = 0, best = 0;
-	char *temptree = NULL, reconfilename[100], *treetmp = NULL;
+	int num_dups = 0, num_losses = 0;
 
-	treetmp = malloc(TREE_LENGTH*sizeof(int));
-	treetmp[0] = '\0';
-	
-	presence = malloc(2*number_of_taxa*sizeof(int));
-	for(i=0; i<2*number_of_taxa; i++)
-		presence[i] = FALSE;
-	
-	/** 1) Label all internal and external taxa on the species tree ****/
-
-	xnum = number_tree1(species_top, number_of_taxa);
-	xnum--;
-	
-	/****2) label all the gene tree nodes (and taxa) with their equivalent on the species tree **/
-	label_gene_tree(gene_top, species_top, presence, xnum);
-	/*** 3) From the bottom-up, Identify those duplications at positions where the id of a pointer taxon is that same as any of its daughters **/
+	/* label the gene tree against the (already-numbered) species tree */
+	label_gene_tree_rec(gene_top, species_top, NULL, xnum);
+	/* duplications: a node whose id equals one of its daughters' ids */
 	num_dups = reconstruct_map(gene_top, species_top);
-	/**** 4) we need to add the bits of the trees that are missing ****/
+	/* add the missing lineages, then count losses */
 	add_losses(gene_top, species_top);
 	join_losses(gene_top);
 	num_losses = count_losses(gene_top);
-	free(presence);
-	free(treetmp);
 
 	if(print)fprintf(distributionreconfile, "%d\t%d\n", num_dups, num_losses);
 	return((dup_weight*(float)num_dups)+(loss_weight*(float)num_losses));
+	}
+
+float tree_map(struct taxon * gene_top, struct taxon * species_top, int print)
+	{
+	int xnum = number_tree1(species_top, number_of_taxa) - 1;
+	build_species_partag(species_top);
+	return tree_map_prepared(gene_top, species_top, xnum, print);
 	}
 
 void resolve_tricotomies(struct taxon *position, struct taxon *species_tree)
@@ -2424,7 +2423,7 @@ void mapunknowns()
 float get_recon_score(char *giventree, int numspectries, int numgenetries)
 	{
 	struct taxon *position = NULL, *species_tree = NULL, *gene_tree = NULL, *best_mapping = NULL, *copy = NULL, *temp_top1 = NULL, *temp_top2 = NULL, *spec_copy = NULL;
-	int i, j, k, l, m, q, r, spec_start=0, spec_end, gene_start, gene_end, num_species_internal = 0, error = FALSE, num_species_roots = 0, basescore = 1, rand1=0, rand2=0, dospecrand = 1, dogenerand=1, taxaorder=0;
+	int i, j, k, l, m, q, r, spec_start=0, spec_end, gene_start, gene_end, num_species_internal = 0, error = FALSE, num_species_roots = 0, basescore = 1, rand1=0, rand2=0, dospecrand = 1, dogenerand=1, taxaorder=0, sp_xnum=0;
 	float *overall_placements = NULL, biggest = -1, total, best_total = -1, sum_of_totals = 0, rooting_score = -1;
 	char *temptree, *temptree1 = malloc(TREE_LENGTH * sizeof(char));
 	if(!temptree1) { printf2("Error: out of memory in get_recon_score\n"); return -1; }
@@ -2494,6 +2493,13 @@ float get_recon_score(char *giventree, int numspectries, int numgenetries)
 				species_tree = temp_top;
 				temp_top = NULL;
 
+				/* Species-tree preprocessing (numbering + parent/depth tables) is
+				 * invariant across all gene trees and all gene-tree rootings of this
+				 * species rooting -- do it once here and reuse via tree_map_prepared()
+				 * instead of repeating it inside every tree_map() call below. */
+				sp_xnum = number_tree1(species_tree, number_of_taxa) - 1;
+				build_species_partag(species_tree);
+
 				for(l=0; l<Total_fund_trees; l++)  /* for every gene tree */
 					{
 					temp_top1 = NULL;
@@ -2551,7 +2557,7 @@ float get_recon_score(char *giventree, int numspectries, int numgenetries)
 							reroot_tree(position);
 							gene_tree = temp_top;
 							temp_top = NULL;
-							total = tree_map(gene_tree, species_tree,0);
+							total = tree_map_prepared(gene_tree, species_tree, sp_xnum, 0);
 							if(total < best_total || best_total == -1)
 								{
 								best_total = total;
