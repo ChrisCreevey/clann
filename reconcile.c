@@ -930,13 +930,203 @@ static void process_fragment_root(struct taxon *root, int treenum, float dupsupp
 /* defined later in this file; used here to hoist the species-tree preprocessing
  * out of the per-rooting loops (the species tree is invariant across rootings). */
 static void build_species_partag(struct taxon *species_top);
+static int  species_lca_tag(int a, int b, int root);
 static void label_gene_tree_rec(struct taxon *gene_position, struct taxon *species_top, int *presence, int xnum);
+
+/* =====================================================================
+ * Linear-time all-rootings duplication reconciliation (step 1: binary).
+ *
+ * The current loop reroots the gene tree to every branch and re-labels +
+ * re-counts duplications from scratch -- O(gene^2). Instead, compute for every
+ * directed edge (a->b) the LCA-map of the species on b's side (M[a->b]) with two
+ * passes over one fixed rooting (mdown = below a node, mup = above it). A gene
+ * node w, given a parent p, maps to M[p->w] and is a duplication iff some child
+ * edge M[w->c] equals it -- exactly tag_duplications_only()'s test. Rooting to
+ * make node j the outgroup splits edge {j, parent(j)} with a new root R; its
+ * duplication count is R + the two sides, all read off the fixed maps.
+ *
+ * This first version still sums each rooting in O(gene) (so O(gene^2) overall),
+ * purely to VERIFY the map formula against the existing loop; the O(gene)
+ * reroot-DP replaces the per-rooting sum once the counts are confirmed. Indexed
+ * by number_tree() tag so it lines up with get_branch()/the loop's j. Binary
+ * gene trees only for now (recursion; polytomies handled in step 2). */
+static struct taxon **g_lr_node  = NULL;   /* node by tag */
+static int  *g_lr_par   = NULL;            /* struct-parent tag, -1 at root */
+static int  *g_lr_mdown = NULL;            /* LCA of species under node */
+static int  *g_lr_mup   = NULL;            /* LCA of species NOT under node */
+static int   g_lr_cap   = 0;
+
+static int lr_parent_tag(struct taxon *v)
+	{
+	struct taxon *s = v;
+	while(s->prev_sibling != NULL) s = s->prev_sibling;
+	return (s->parent != NULL) ? s->parent->tag : -1;
+	}
+
+static int lr_down(struct taxon *v, int xnum)   /* post-order: fill node,par,mdown; return mdown[v] */
+	{
+	struct taxon *c;
+	int m = -1;
+	g_lr_node[v->tag] = v;
+	g_lr_par[v->tag]  = lr_parent_tag(v);
+	if(v->daughter == NULL) { g_lr_mdown[v->tag] = v->name; return v->name; }
+	for(c = v->daughter; c != NULL; c = c->next_sibling)
+		{
+		int cm = lr_down(c, xnum);
+		m = (m < 0) ? cm : species_lca_tag(m, cm, xnum);
+		}
+	g_lr_mdown[v->tag] = m;
+	return m;
+	}
+
+static void lr_up(struct taxon *u, int xnum)   /* pre-order: mup[c] = LCA(mup[u], mdown of u's other children) */
+	{
+	struct taxon *c, *c2;
+	for(c = u->daughter; c != NULL; c = c->next_sibling)
+		{
+		int m = g_lr_mup[u->tag];
+		for(c2 = u->daughter; c2 != NULL; c2 = c2->next_sibling)
+			{
+			if(c2 == c) continue;
+			m = (m < 0) ? g_lr_mdown[c2->tag] : species_lca_tag(m, g_lr_mdown[c2->tag], xnum);
+			}
+		g_lr_mup[c->tag] = m;
+		}
+	for(c = u->daughter; c != NULL; c = c->next_sibling) lr_up(c, xnum);
+	}
+
+/* Duplications in the subtree of node w whose parent (in this rooting) is `par`
+ * and whose own map is Mw. Children = w's neighbours (struct children + struct
+ * parent) other than `par`; each child edge's map is read off mdown/mup. */
+/* The unrooted gene tree's top is a sibling forest (an implicit trifurcation
+ * centre with no explicit node). We model that centre as a virtual node VC=n,
+ * whose neighbours are the top-level siblings; VC's own parent is -1. */
+static int  g_lr_vc = -1;         /* virtual centre tag = n */
+static int *g_lr_topsibs = NULL;  /* top-level sibling tags (VC's children) */
+static int  g_lr_ntop = 0;
+
+static int lr_dupsum(int w, int par, int Mw)
+	{
+	int is_dup = 0, total, i;
+	struct taxon *c;
+	if(w == g_lr_vc)   /* virtual centre: neighbours are the top-level siblings */
+		{
+		for(i = 0; i < g_lr_ntop; i++)
+			if(g_lr_topsibs[i] != par && g_lr_mdown[g_lr_topsibs[i]] == Mw) is_dup = 1;
+		total = is_dup;
+		for(i = 0; i < g_lr_ntop; i++)
+			if(g_lr_topsibs[i] != par) total += lr_dupsum(g_lr_topsibs[i], g_lr_vc, g_lr_mdown[g_lr_topsibs[i]]);
+		return total;
+		}
+	{
+	struct taxon *node = g_lr_node[w];
+	int pp = g_lr_par[w];   /* logical parent: struct parent, or VC for a top sibling */
+	for(c = node->daughter; c != NULL; c = c->next_sibling)
+		if(c->tag != par && g_lr_mdown[c->tag] == Mw) is_dup = 1;
+	if(pp != -1 && pp != par && g_lr_mup[w] == Mw) is_dup = 1;
+	total = is_dup;
+	for(c = node->daughter; c != NULL; c = c->next_sibling)
+		if(c->tag != par) total += lr_dupsum(c->tag, w, g_lr_mdown[c->tag]);
+	if(pp != -1 && pp != par) total += lr_dupsum(pp, w, g_lr_mup[w]);
+	return total;
+	}
+	}
+
+/* Is node v a duplication when its parent-neighbour is p? (v's map is M[p->v];
+ * v is a duplication iff some other neighbour edge M[v->c] equals it.) O(deg). */
+static int lr_dupstat(int v, int p)
+	{
+	int Mv, dup = 0, i, pp;
+	struct taxon *c;
+	if(v == g_lr_vc)
+		{
+		Mv = g_lr_mup[p];   /* M[p->VC], p a top sibling */
+		for(i = 0; i < g_lr_ntop; i++)
+			if(g_lr_topsibs[i] != p && g_lr_mdown[g_lr_topsibs[i]] == Mv) dup = 1;
+		return dup;
+		}
+	pp = g_lr_par[v];
+	Mv = (p == pp) ? g_lr_mdown[v] : g_lr_mup[p];   /* M[p->v]: p is logical parent, else a struct child */
+	for(c = g_lr_node[v]->daughter; c != NULL; c = c->next_sibling)
+		if(c->tag != p && g_lr_mdown[c->tag] == Mv) dup = 1;
+	if(pp != -1 && pp != p && g_lr_mup[v] == Mv) dup = 1;
+	return dup;
+	}
+
+/* Propagate rooting counts down the VC-rooted tree: moving the root from edge
+ * {par(v),v} to {v,c} crosses v, flipping only v's parent, so the count changes
+ * by dupstat(v,c) - dupstat(v,par(v)). O(gene) over the whole tree. */
+static int *g_lr_out = NULL;
+static void lr_dp_down(int v, int o_v)
+	{
+	struct taxon *c;
+	int dv_par = lr_dupstat(v, g_lr_par[v]);
+	for(c = g_lr_node[v]->daughter; c != NULL; c = c->next_sibling)
+		{
+		int o_c = o_v - dv_par + lr_dupstat(v, c->tag);
+		g_lr_out[c->tag] = o_c;
+		lr_dp_down(c->tag, o_c);
+		}
+	}
+
+/* Fill out[j] = duplication count when rooting to make node-j the outgroup. */
+static void lr_root_counts(struct taxon *gene_top, int n, int xnum, int *out)
+	{
+	int i, k, cap = n + 1;
+	struct taxon *s;
+	if(g_lr_cap < cap)
+		{
+		g_lr_node    = realloc(g_lr_node,    cap*sizeof(struct taxon*));
+		g_lr_par     = realloc(g_lr_par,     cap*sizeof(int));
+		g_lr_mdown   = realloc(g_lr_mdown,   cap*sizeof(int));
+		g_lr_mup     = realloc(g_lr_mup,     cap*sizeof(int));
+		g_lr_topsibs = realloc(g_lr_topsibs, cap*sizeof(int));
+		g_lr_cap = cap;
+		}
+	g_lr_vc = n;
+	/* gather + descend each top-level sibling; their logical parent is VC */
+	g_lr_ntop = 0;
+	for(s = gene_top; s != NULL; s = s->next_sibling)
+		{ g_lr_topsibs[g_lr_ntop++] = s->tag; lr_down(s, xnum); }
+	for(i = 0; i < g_lr_ntop; i++) g_lr_par[g_lr_topsibs[i]] = g_lr_vc;
+	g_lr_node[g_lr_vc] = NULL; g_lr_par[g_lr_vc] = -1;
+	/* VC's down-map = LCA over all top siblings; nothing above VC */
+	{ int m = -1; for(i = 0; i < g_lr_ntop; i++) m = (m < 0) ? g_lr_mdown[g_lr_topsibs[i]] : species_lca_tag(m, g_lr_mdown[g_lr_topsibs[i]], xnum); g_lr_mdown[g_lr_vc] = m; }
+	g_lr_mup[g_lr_vc] = -1;
+	/* each top sibling's up-map = LCA of the OTHER siblings */
+	for(i = 0; i < g_lr_ntop; i++)
+		{
+		int m = -1;
+		for(k = 0; k < g_lr_ntop; k++) { if(k == i) continue; m = (m < 0) ? g_lr_mdown[g_lr_topsibs[k]] : species_lca_tag(m, g_lr_mdown[g_lr_topsibs[k]], xnum); }
+		g_lr_mup[g_lr_topsibs[i]] = m;
+		}
+	for(i = 0; i < g_lr_ntop; i++) lr_up(g_lr_node[g_lr_topsibs[i]], xnum);
+	/* O(gene) reroot DP. Seed one rooting (edge {VC, s0}) directly, then walk the
+	 * rooting space: moving the root across a node flips only that node's parent,
+	 * so each new count is the previous +/- one duplication status. reroot_tree()
+	 * materialises the trifurcation centre as the root (VC models it), so there is
+	 * no extra root node -- verified against the existing loop (0 mismatches). */
+	g_lr_out = out;
+	{
+	int s0 = g_lr_topsibs[0];
+	int seed = lr_dupsum(s0, g_lr_vc, g_lr_mdown[s0]) + lr_dupsum(g_lr_vc, s0, g_lr_mup[s0]);
+	int dvc0 = lr_dupstat(g_lr_vc, s0);
+	for(i = 0; i < g_lr_ntop; i++)
+		{
+		int sib = g_lr_topsibs[i];
+		int o = (i == 0) ? seed : seed - dvc0 + lr_dupstat(g_lr_vc, sib);   /* cross VC from s0 */
+		out[sib] = o;
+		lr_dp_down(sib, o);
+		}
+	}
+	}
+
 
 int decompose_gene_tree_stage2(int treenum, char *guide_tree_str, float dupsupport, int minfragtaxa, int minfragspecies, FILE *fragfile, FILE *infofile)
 	{
-	struct taxon *species_tree = NULL, *gene_tree = NULL, *copy = NULL, *best_mapping = NULL, *position = NULL;
+	struct taxon *species_tree = NULL, *gene_tree = NULL, *best_mapping = NULL, *position = NULL;
 	char *temptree = malloc(TREE_LENGTH*sizeof(char));
-	int taxaorder = 0, nrootings, j, xnum, best_dups = -1, fragcount = 0, i;
+	int taxaorder = 0, nrootings, j, xnum, best_dups = -1, fragcount = 0;
 	int *presence;
 
 	/* Build the species (guide) tree, with the same "extra wrapper root"
@@ -966,10 +1156,6 @@ int decompose_gene_tree_stage2(int treenum, char *guide_tree_str, float dupsuppo
 
 	if(presence_of_trichotomies(gene_tree)) gene_tree = do_resolve_tricotomies(gene_tree, species_tree, 1);
 
-	duplicate_tree(gene_tree, NULL);
-	copy = temp_top;
-	temp_top = NULL;
-
 	nrootings = number_tree(gene_tree, 0);
 	presence = malloc(2*number_of_taxa*sizeof(int));
 
@@ -979,40 +1165,30 @@ int decompose_gene_tree_stage2(int treenum, char *guide_tree_str, float dupsuppo
 	xnum--;
 	build_species_partag(species_tree);
 
-	for(j=0; j<nrootings; j++)
-		{
-		int dups;
-		position = get_branch(gene_tree, j);
-		temp_top = gene_tree;
-		reroot_tree(position);
-		gene_tree = temp_top;
-		temp_top = NULL;
+	/* Linear-time optimal rooting: compute the duplication count of every rooting
+	 * in O(gene), then pick the first branch (in number_tree order) achieving the
+	 * minimum -- the same tie-break the old reroot-every-branch loop used -- and
+	 * reroot once to it. Replaces the O(gene^2) search. */
+	{
+	int *dupc = malloc(nrootings*sizeof(int));
+	int best_j = 0;
+	lr_root_counts(gene_tree, nrootings, xnum, dupc);
+	for(j = 0; j < nrootings; j++)
+		if(best_dups == -1 || dupc[j] < best_dups) { best_dups = dupc[j]; best_j = j; }
+	free(dupc);
 
-		label_gene_tree_rec(gene_tree, species_tree, presence, xnum);
-		dups = tag_duplications_only(gene_tree);
-
-		if(best_dups == -1 || dups < best_dups)
-			{
-			best_dups = dups;
-			if(best_mapping != NULL) dismantle_tree(best_mapping);
-			best_mapping = gene_tree;
-			gene_tree = NULL;
-			}
-		else
-			{
-			dismantle_tree(gene_tree);
-			gene_tree = NULL;
-			}
-
-		temp_top = NULL;
-		duplicate_tree(copy, NULL);
-		gene_tree = temp_top;
-		temp_top = NULL;
-		number_tree(gene_tree, 0);
-		}
+	position = get_branch(gene_tree, best_j);
+	temp_top = gene_tree;
+	reroot_tree(position);
+	gene_tree = temp_top;
+	temp_top = NULL;
+	label_gene_tree_rec(gene_tree, species_tree, presence, xnum);
+	tag_duplications_only(gene_tree);   /* set loss=2 tags used by decompose_walk */
+	best_mapping = gene_tree;
+	gene_tree = NULL;
+	}
 
 	free(presence);
-	if(copy != NULL) { dismantle_tree(copy); copy = NULL; }
 	if(gene_tree != NULL) { dismantle_tree(gene_tree); gene_tree = NULL; }
 
 	if(best_mapping != NULL)
