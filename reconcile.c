@@ -2426,10 +2426,22 @@ void mapunknowns()
 	free(overall_placements);
 	}
 
+/* Duplication count at the current gene-tree rooting, WITHOUT the (expensive)
+ * loss reconstruction -- the cheap Pass-1 scan for min-duplication-restricted
+ * gene rooting. label_gene_tree_rec() maps the (already-numbered) species tree;
+ * tag_duplications_only() counts duplications with exactly reconstruct_map()'s
+ * test but without structurally mutating the tree. */
+static int recon_dups_only(struct taxon *gene_top, struct taxon *species_top, int xnum)
+	{
+	label_gene_tree_rec(gene_top, species_top, NULL, xnum);
+	return tag_duplications_only(gene_top);
+	}
+
 float get_recon_score(char *giventree, int numspectries, int numgenetries)
 	{
 	struct taxon *position = NULL, *species_tree = NULL, *gene_tree = NULL, *best_mapping = NULL, *copy = NULL, *temp_top1 = NULL, *temp_top2 = NULL, *spec_copy = NULL;
 	int i, j, k, l, m, q, r, spec_start=0, spec_end, gene_start, gene_end, num_species_internal = 0, error = FALSE, num_species_roots = 0, basescore = 1, rand1=0, rand2=0, dospecrand = 1, dogenerand=1, taxaorder=0, sp_xnum=0;
+	int mindup_mode = FALSE, *dupc = NULL, mind = -1;
 	float *overall_placements = NULL, biggest = -1, total, best_total = -1, sum_of_totals = 0, rooting_score = -1;
 	char *temptree, *temptree1 = malloc(TREE_LENGTH * sizeof(char));
 	if(!temptree1) { printf2("Error: out of memory in get_recon_score\n"); return -1; }
@@ -2468,6 +2480,12 @@ float get_recon_score(char *giventree, int numspectries, int numgenetries)
 			dogenerand = FALSE;   /* was dospecrand (copy-paste bug): numgenerootings=all
 			                       * must disable GENE-rooting randomisation so the r-loop
 			                       * scans all i gene rootings, not one random one */
+			numgenetries = 1;
+			}
+		if(numgenetries == -2)   /* minimum-duplication-restricted gene rooting */
+			{
+			mindup_mode = TRUE;
+			dogenerand = FALSE;
 			numgenetries = 1;
 			}
 			
@@ -2533,6 +2551,27 @@ float get_recon_score(char *giventree, int numspectries, int numgenetries)
 					temp_top2 = NULL;
 					i = number_tree(gene_tree, 0);
 					best_total = -1;
+					/* min-duplication-restricted rooting: Pass 1 -- duplication count
+					 * at every rooting (cheap, no add_losses); find the minimum. The
+					 * scoring loop below then evaluates full dup+losses only at the
+					 * min-duplication rootings (Pass 2 via the dupc[] skip filter). */
+					if(mindup_mode)
+						{
+						int jj, dtmp;
+						dupc = malloc(i*sizeof(int));
+						mind = -1;
+						for(jj=0; jj<i; jj++)
+							{
+							position = get_branch(gene_tree, jj);
+							temp_top = gene_tree; reroot_tree(position); gene_tree = temp_top; temp_top = NULL;
+							dtmp = recon_dups_only(gene_tree, species_tree, sp_xnum);
+							dupc[jj] = dtmp;
+							if(mind == -1 || dtmp < mind) mind = dtmp;
+							dismantle_tree(gene_tree); gene_tree = NULL;
+							temp_top = NULL; duplicate_tree(copy, NULL); gene_tree = temp_top; temp_top = NULL;
+							number_tree(gene_tree, 0);
+							}
+						}
 					for(r=0; r<numgenetries; r++)
 						{
 						if(dogenerand > 0)
@@ -2555,8 +2594,10 @@ float get_recon_score(char *giventree, int numspectries, int numgenetries)
 						rand2 = (int)fmod(rand(), i);
 						#endif
 					/*	for(j=0; j<i; j++)  */ /* For every rooting of the genetree */
-						for(j=gene_start; j<gene_end; j++)   
+						for(j=gene_start; j<gene_end; j++)
 							{
+							/* Pass 2: only evaluate full dup+losses at min-duplication rootings */
+							if(mindup_mode && dupc[j] != mind) continue;
 							position = get_branch(gene_tree, j);
 							temp_top = gene_tree;
 							/*printf("2\n"); */
@@ -2605,6 +2646,7 @@ float get_recon_score(char *giventree, int numspectries, int numgenetries)
 						dismantle_tree(best_mapping);
 						best_mapping = NULL;
 						}
+					if(dupc != NULL) { free(dupc); dupc = NULL; }
 					sum_of_totals+=best_total;
 					}
 				if(sum_of_totals < rooting_score || rooting_score == -1)

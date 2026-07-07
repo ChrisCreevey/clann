@@ -3729,6 +3729,8 @@ void heuristic_search(int user, int print, int sample, int nreps)
 			{
 			if(strcmp(parsed_command[i+1], "all") == 0)
 				numgenetries=-1;
+			else if(strcmp(parsed_command[i+1], "mindup") == 0)
+				numgenetries=-2;   /* min-duplication-restricted gene rooting (linear-DP-guided) */
 			else
 				{
 				numgenetries = toint(parsed_command[i+1]);
