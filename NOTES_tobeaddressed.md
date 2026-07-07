@@ -9,7 +9,16 @@ enough context (files, symptoms, how it was found) to pick it up cold.
 
 ---
 
-## 1. `start=<file>` heuristic search does not actually search
+## 1. `start=<file>` heuristic search does not actually search  — ✅ RESOLVED 2026-07-07
+
+**Resolution:** It *did* search, but only once — the `start==1` branch in
+`heuristic_search()` called `do_search()` a single time per tree in the file and
+ignored `nreps`, so a single hill-climb got trapped in a local optimum (unlike
+`start=random`/`nj`, which do `nreps` restarts). Fixed by wrapping that
+`do_search()` in an `nreps` loop (commit "start=<file> ... honour nreps").
+Verified: from a poor start, `nreps=1` → 20 (local opt), `nreps=10` → 17 (true
+opt). Original report retained below for context.
+
 
 **Discovered:** 2026-07-03 (while building fixed-start test cases for ILS)
 
