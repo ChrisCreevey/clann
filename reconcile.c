@@ -3290,10 +3290,9 @@ void reconstruct(int print_settings)  /* Carry out gene-tree reconciliation of s
 			temp_top = spec_work;
 			reroot_tree(sr_br);
 			}
-			/* Wrap rerooted tree */
-			spec_rr = make_taxon();
-			spec_rr->daughter = temp_top;
-			if(temp_top) temp_top->parent = spec_rr;
+			/* use the rerooted species tree directly (no extra root wrapper), as
+			 * get_recon_score()/hs does */
+			spec_rr = temp_top;
 			temp_top = NULL;
 			/* Tag nodes for reconciliation */
 			number_tree1(spec_rr, number_of_taxa);
@@ -3308,6 +3307,11 @@ void reconstruct(int print_settings)  /* Carry out gene-tree reconciliation of s
 				tree_build(1, temptree, NULL, FALSE, -1, &gt_to);
 				gt = temp_top;
 				temp_top = NULL;
+				/* Resolve gene-tree polytomies exactly as get_recon_score()/hs and the
+				 * illustration pass (Pass B) below do, so the species-rooting selection
+				 * and the reported total match the hs score (soft min-dup resolution). */
+				if(presence_of_trichotomies(gt))
+					gt = do_resolve_tricotomies(gt, spec_rr, basescore);
 				tree_top = gt;
 				compress_tree1(gt);
 				gt = tree_top;
@@ -3327,16 +3331,17 @@ void reconstruct(int print_settings)  /* Carry out gene-tree reconciliation of s
 						gt_pos = get_branch(gt, jr);
 						temp_top = gt;
 						reroot_tree(gt_pos);
-						gt_root = make_taxon();
-						gt_root->daughter = temp_top;
-						if(temp_top) temp_top->parent = gt_root;
+						gt = temp_top;
 						temp_top = NULL;
 
-						sc = tree_map(gt_root, spec_rr, FALSE);
+						/* score the rerooted gene tree directly (no extra root wrapper),
+						 * matching get_recon_score()/hs; wrapping adds a spurious top-level
+						 * duplication */
+						sc = tree_map(gt, spec_rr, FALSE);
 						if(sc < best_gt || best_gt < 0.0f) best_gt = sc;
 
-						dismantle_tree(gt_root);
-						gt_root = NULL;
+						dismantle_tree(gt);
+						gt = NULL;
 
 						duplicate_tree(gt_copy, NULL);
 						gt = temp_top;
@@ -3483,14 +3488,14 @@ void reconstruct(int print_settings)  /* Carry out gene-tree reconciliation of s
 					temp_top = gene_tree;
 					reroot_tree(position); /* reroot at this position */
 
-					/* add a node at the top of the re-rooted tree */
-					gene_tree = make_taxon();
-					gene_tree->daughter = temp_top;
+					/* use the rerooted tree directly (no extra root wrapper), matching
+						 * get_recon_score()/hs so the illustrated counts equal the hs score */
+						gene_tree = temp_top;
+						temp_top = NULL;
 
-					
-					diff_overall -= malloc_check;
-					total = tree_map(gene_tree, species_tree, printfiles); 
-					diff_overall += malloc_check;
+						diff_overall -= malloc_check;
+						total = tree_map(gene_tree, species_tree->daughter, printfiles);
+						diff_overall += malloc_check;
 					if(total < best_total || best_total == -1)
 						{
 						best_total = total;
@@ -3522,13 +3527,7 @@ void reconstruct(int print_settings)  /* Carry out gene-tree reconciliation of s
 				}
 			else
 				{
-				newbie = make_taxon();
-				newbie->daughter=gene_tree;
-				gene_tree->parent = newbie;
-				gene_tree = newbie;
-				newbie = NULL;
-				
-				total = tree_map(gene_tree, species_tree,printfiles);				
+				total = tree_map(gene_tree, species_tree->daughter, printfiles);				
 				best_total = total;
 				best_mapping = gene_tree;
 				gene_tree = NULL;
