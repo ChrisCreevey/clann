@@ -2442,6 +2442,7 @@ float get_recon_score(char *giventree, int numspectries, int numgenetries)
 	struct taxon *position = NULL, *species_tree = NULL, *gene_tree = NULL, *best_mapping = NULL, *copy = NULL, *temp_top1 = NULL, *temp_top2 = NULL, *spec_copy = NULL;
 	int i, j, k, l, m, q, r, spec_start=0, spec_end, gene_start, gene_end, num_species_internal = 0, error = FALSE, num_species_roots = 0, basescore = 1, rand1=0, rand2=0, dospecrand = 1, dogenerand=1, taxaorder=0, sp_xnum=0;
 	int mindup_mode = FALSE, *dupc = NULL, mind = -1;
+	int spec_mindup_mode = FALSE, *spec_dupc = NULL, min_spec_dups = -1;
 	float *overall_placements = NULL, biggest = -1, total, best_total = -1, sum_of_totals = 0, rooting_score = -1;
 	char *temptree, *temptree1 = malloc(TREE_LENGTH * sizeof(char));
 	if(!temptree1) { printf2("Error: out of memory in get_recon_score\n"); return -1; }
@@ -2475,6 +2476,14 @@ float get_recon_score(char *giventree, int numspectries, int numgenetries)
 			dospecrand = FALSE;
 			numspectries = 1;
 			}
+		if(numspectries == -2)   /* min-duplication-restricted species rooting (implies gene mindup) */
+			{
+			spec_mindup_mode = TRUE;
+			dospecrand = FALSE;
+			numspectries = 1;
+			numgenetries = -2;   /* the cheap species-dup pass needs min-dup gene rooting; the
+			                      * numgenetries==-2 block below sets mindup_mode/dogenerand */
+			}
 		if(numgenetries == -1)
 			{
 			dogenerand = FALSE;   /* was dospecrand (copy-paste bug): numgenerootings=all
@@ -2488,8 +2497,56 @@ float get_recon_score(char *giventree, int numspectries, int numgenetries)
 			dogenerand = FALSE;
 			numgenetries = 1;
 			}
-			
-			
+
+		/* Lever 2: min-duplication-restricted species rooting. Cheap pre-pass --
+		 * for every species-tree rooting, sum over gene trees the minimum
+		 * duplication count (each gene at its min-dup rooting), WITHOUT add_losses.
+		 * The main loop then evaluates the full dup+losses score only at the species
+		 * rootings that achieve the minimum duplication total. */
+		if(spec_mindup_mode)
+			{
+			int mm, ll, jj, gdups, gmind, sdups;
+			spec_dupc = malloc(num_species_roots*sizeof(int));
+			min_spec_dups = -1;
+			for(mm=0; mm<num_species_roots; mm++)
+				{
+				position = get_branch(species_tree, mm);
+				temp_top = species_tree; reroot_tree(position); species_tree = temp_top; temp_top = NULL;
+				sp_xnum = number_tree1(species_tree, number_of_taxa) - 1;
+				build_species_partag(species_tree);
+				sdups = 0;
+				for(ll=0; ll<Total_fund_trees; ll++)
+					{
+					strcpy(temptree, ""); strcpy(temptree, fundamentals[ll]);
+					unroottree(temptree); returntree(temptree);
+					temp_top = NULL; taxaorder = 0;
+					tree_build(1, temptree, gene_tree, 1, ll, &taxaorder);
+					gene_tree = temp_top; temp_top = NULL;
+					if(presence_of_trichotomies(gene_tree)) gene_tree = do_resolve_tricotomies(gene_tree, species_tree, basescore);
+					duplicate_tree(gene_tree, NULL); copy = temp_top; temp_top = NULL;
+					i = number_tree(gene_tree, 0);
+					gmind = -1;
+					for(jj=0; jj<i; jj++)
+						{
+						position = get_branch(gene_tree, jj);
+						temp_top = gene_tree; reroot_tree(position); gene_tree = temp_top; temp_top = NULL;
+						gdups = recon_dups_only(gene_tree, species_tree, sp_xnum);
+						if(gmind == -1 || gdups < gmind) gmind = gdups;
+						dismantle_tree(gene_tree); gene_tree = NULL;
+						temp_top = NULL; duplicate_tree(copy, NULL); gene_tree = temp_top; temp_top = NULL;
+						number_tree(gene_tree, 0);
+						}
+					sdups += gmind;
+					if(gene_tree != NULL) { dismantle_tree(gene_tree); gene_tree = NULL; }
+					if(copy != NULL) { dismantle_tree(copy); copy = NULL; }
+					}
+				spec_dupc[mm] = sdups;
+				if(min_spec_dups == -1 || sdups < min_spec_dups) min_spec_dups = sdups;
+				dismantle_tree(species_tree);
+				temp_top = NULL; duplicate_tree(spec_copy, NULL); species_tree = temp_top; temp_top = NULL;
+				}
+			}
+
 		for(q=0; q<numspectries; q++)
 			{
 			if(dospecrand > 0)
@@ -2507,9 +2564,10 @@ float get_recon_score(char *giventree, int numspectries, int numgenetries)
 				spec_end = num_species_roots;
 				}
 /*		for(m=0; m<num_species_roots; m++) */ /* for every rooting of the species tree */
-			for(m=spec_start; m<spec_end; m++) 
+			for(m=spec_start; m<spec_end; m++)
 				{
-			
+				/* Lever 2 Pass 2: only full-score the min-duplication species rootings */
+				if(spec_mindup_mode && spec_dupc[m] != min_spec_dups) continue;
 				position = get_branch(species_tree, m);
 				temp_top = species_tree;
 				/*printf("1\n");*/
@@ -2672,6 +2730,7 @@ float get_recon_score(char *giventree, int numspectries, int numgenetries)
 		dismantle_tree(species_tree);
 		species_tree = NULL;
 		}
+	if(spec_dupc != NULL) { free(spec_dupc); spec_dupc = NULL; }
 	free(temptree);
 	free(temptree1);
 	return(rooting_score);

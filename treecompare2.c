@@ -3714,6 +3714,8 @@ void heuristic_search(int user, int print, int sample, int nreps)
 			{
 			if(strcmp(parsed_command[i+1], "all") == 0)
 				numspectries=-1;
+			else if(strcmp(parsed_command[i+1], "mindup") == 0)
+				numspectries=-2;   /* min-duplication-restricted species rooting */
 			else
 				{
 				numspectries = toint(parsed_command[i+1]);
@@ -3744,7 +3746,25 @@ void heuristic_search(int user, int print, int sample, int nreps)
 			}
 		}
 
-
+	/* Recon criterion: default rooting = min-duplication-restricted on BOTH the
+	 * gene and species dimensions ("mindup"). The old 2x2 random sampling badly
+	 * overestimates the reconciliation cost and is noisy enough to misrank
+	 * candidates (it settles on trees scoring ~20 when the optimum is 17);
+	 * exhaustive rooting is accurate but O(N)xO(N). mindup restricts scoring to the
+	 * minimum-duplication rootings -- near-exhaustive search quality (finds the true
+	 * optimum) and deterministic, at a fraction of exhaustive cost. Only applied
+	 * when the user has not set the rooting counts explicitly. */
+	if(criterion == 5)
+		{
+		int uspec = FALSE, ugene = FALSE, uq;
+		for(uq = 0; uq < num_commands; uq++)
+			{
+			if(strcmp(parsed_command[uq], "numspeciesrootings") == 0) uspec = TRUE;
+			if(strcmp(parsed_command[uq], "numgenerootings") == 0) ugene = TRUE;
+			}
+		if(!uspec) numspectries = -2;
+		if(!ugene) numgenetries = -2;
+		}
 
     for(i=0; i<num_commands; i++)
         {
@@ -4483,9 +4503,11 @@ void heuristic_search(int user, int print, int sample, int nreps)
 			printf2("\n\tDuplication weight = %f\n\tLosses weight = %f\n", dup_weight, loss_weight);
 			printf2("\tNumber of species tree rootings = ");
 			if(numspectries == -1) printf2("all possible\n");
+				else if(numspectries == -2) printf2("minimum-duplication rootings\n");
 			else printf2("%d\n", numspectries);
 			printf2("\tNumber of gene tree rootings = ");
 			if(numgenetries == -1) printf2("all possible\n");
+				else if(numgenetries == -2) printf2("minimum-duplication rootings\n");
 			else printf2("%d\n", numgenetries);
 				
 			}
