@@ -5468,7 +5468,11 @@ void heuristic_search(int user, int print, int sample, int nreps)
 							}
 					
 						for(i=0; i<Total_fund_trees; i++)sourcetree_scores[i] = -1;
-						swaps+= do_search(tree, TRUE, print, numswaps, outfile, numspectries, numgenetries);
+						{ int _rep; for(_rep = 0; _rep < nreps && !user_break; _rep++)
+							{
+							char *_uroot = malloc(TREE_LENGTH*sizeof(char));
+							if(_uroot) { strcpy(_uroot, tree); swaps += do_search(_uroot, TRUE, print, numswaps, outfile, numspectries, numgenetries); free(_uroot); }
+							} }
 						strcpy(tree, "");
 						c = getc(userfile);
 						while((c == ' ' || c == '\r'  || c == '\n' || c == '[') && !feof(userfile))  /* skip past all the non tree characters */
