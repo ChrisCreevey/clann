@@ -2450,6 +2450,18 @@ float get_recon_score(char *giventree, int numspectries, int numgenetries)
 	int i, j, k, l, m, q, r, spec_start=0, spec_end, gene_start, gene_end, num_species_internal = 0, error = FALSE, num_species_roots = 0, basescore = 1, rand1=0, rand2=0, dospecrand = 1, dogenerand=1, taxaorder=0, sp_xnum=0;
 	int mindup_mode = FALSE, *dupc = NULL, mind = -1;
 	int spec_mindup_mode = FALSE, *spec_dupc = NULL, min_spec_dups = -1;
+	/* Parse-once gene-tree cache. The gene trees (fundamentals[]) are fixed
+	 * across every species rooting and every gene-tree rooting, but the old code
+	 * re-parsed each one from Newick (tree_build) inside every (species-rooting,
+	 * gene-tree) iteration -- the dominant source of the per-candidate node
+	 * allocation the profile flagged. Parse each gene tree exactly once here and
+	 * reuse it. tree_build (Newick tokenisation) is species-tree-independent;
+	 * only do_resolve_tricotomies depends on the species rooting (via LCA
+	 * mapping), and only for gene trees that actually contain a polytomy -- so a
+	 * binary cached tree is used read-only across all rootings, and a polytomous
+	 * one is cloned + re-resolved per rooting (still skipping the re-parse). */
+	struct taxon **gcache = NULL;
+	int *gcache_poly = NULL, *gcache_nroot = NULL;
 	float *overall_placements = NULL, biggest = -1, total, best_total = -1, sum_of_totals = 0, rooting_score = -1;
 	char *temptree, *temptree1 = malloc(TREE_LENGTH * sizeof(char));
 	if(!temptree1) { printf2("Error: out of memory in get_recon_score\n"); return -1; }
@@ -2505,6 +2517,30 @@ float get_recon_score(char *giventree, int numspectries, int numgenetries)
 			numgenetries = 1;
 			}
 
+		/* Build the parse-once gene-tree cache (see declaration above). Each entry
+		 * is the raw unrooted parse; gcache_poly[] records whether it needs
+		 * per-rooting polytomy resolution, and binary trees are numbered here once
+		 * (their numbering is rooting-independent) so the read-only duplication
+		 * passes can run lr_root_counts() on them directly with no per-rooting
+		 * clone/resolve/number/dismantle. */
+		gcache        = malloc(Total_fund_trees * sizeof(struct taxon *));
+		gcache_poly   = malloc(Total_fund_trees * sizeof(int));
+		gcache_nroot  = malloc(Total_fund_trees * sizeof(int));
+		{
+		int gc;
+		for(gc = 0; gc < Total_fund_trees; gc++)
+			{
+			strcpy(temptree, ""); strcpy(temptree, fundamentals[gc]);
+			unroottree(temptree); returntree(temptree);
+			temp_top = NULL; taxaorder = 0;
+			tree_build(1, temptree, gene_tree, 1, gc, &taxaorder);
+			gcache[gc] = temp_top; temp_top = NULL;
+			gcache_poly[gc]  = presence_of_trichotomies(gcache[gc]);
+			gcache_nroot[gc] = gcache_poly[gc] ? 0 : number_tree(gcache[gc], 0);
+			}
+		gene_tree = NULL;
+		}
+
 		/* Lever 2: min-duplication-restricted species rooting. Cheap pre-pass --
 		 * for every species-tree rooting, sum over gene trees the minimum
 		 * duplication count (each gene at its min-dup rooting), WITHOUT add_losses.
@@ -2524,13 +2560,19 @@ float get_recon_score(char *giventree, int numspectries, int numgenetries)
 				sdups = 0;
 				for(ll=0; ll<Total_fund_trees; ll++)
 					{
-					strcpy(temptree, ""); strcpy(temptree, fundamentals[ll]);
-					unroottree(temptree); returntree(temptree);
-					temp_top = NULL; taxaorder = 0;
-					tree_build(1, temptree, gene_tree, 1, ll, &taxaorder);
-					gene_tree = temp_top; temp_top = NULL;
-					if(presence_of_trichotomies(gene_tree)) gene_tree = do_resolve_tricotomies(gene_tree, species_tree, basescore);
-					i = number_tree(gene_tree, 0);
+					struct taxon *gt; int owned;
+					/* Parse-once cache: binary gene trees are used read-only across all
+					 * species rootings (no clone, no per-rooting parse/resolve/number/
+					 * dismantle); polytomous ones are cloned and re-resolved for this
+					 * species rooting (still no re-parse). */
+					if(gcache_poly[ll])
+						{
+						duplicate_tree(gcache[ll], NULL); gt = temp_top; temp_top = NULL;
+						gt = do_resolve_tricotomies(gt, species_tree, basescore);
+						i = number_tree(gt, 0);
+						owned = TRUE;
+						}
+					else { gt = gcache[ll]; i = gcache_nroot[ll]; owned = FALSE; }
 					/* Linear-time all-rootings duplication DP: gmind = the minimum
 					 * duplication count over every gene-tree rooting, in O(gene) from a
 					 * single fixed tree -- replaces the old reroot-to-every-branch scan
@@ -2539,14 +2581,14 @@ float get_recon_score(char *giventree, int numspectries, int numgenetries)
 					 * old scan, 0 mismatches; see NOTES_recon_performance_TODO.md). */
 					{
 					int *gdc = malloc(i*sizeof(int));
-					lr_root_counts(gene_tree, i, sp_xnum, gdc);
+					lr_root_counts(gt, i, sp_xnum, gdc);
 					gmind = -1;
 					for(jj=0; jj<i; jj++)
 						if(gmind == -1 || gdc[jj] < gmind) gmind = gdc[jj];
 					free(gdc);
 					}
 					sdups += gmind;
-					if(gene_tree != NULL) { dismantle_tree(gene_tree); gene_tree = NULL; }
+					if(owned) dismantle_tree(gt);
 					}
 				spec_dupc[mm] = sdups;
 				if(min_spec_dups == -1 || sdups < min_spec_dups) min_spec_dups = sdups;
@@ -2593,22 +2635,18 @@ float get_recon_score(char *giventree, int numspectries, int numgenetries)
 				for(l=0; l<Total_fund_trees; l++)  /* for every gene tree */
 					{
 					temp_top1 = NULL;
-					strcpy(temptree, "");
-					strcpy(temptree, fundamentals[l]);
-					unroottree(temptree);
-					
-					returntree(temptree);
-					/* build the tree in memory */
-					/****** We now need to build the genetree in memory *******/
+					/* Parse-once cache: clone the pre-parsed gene tree instead of
+					 * re-tokenising fundamentals[l] from Newick. Pass 2 mutates the
+					 * gene tree (reconstruct_map/add_losses) and rebuilds from `copy`
+					 * per rooting, so it needs its own working copy either way -- the
+					 * cache just removes the redundant tree_build parse. Polytomous
+					 * trees are still resolved against this species rooting. */
 					temp_top = NULL;
-					taxaorder=0;
-					tree_build(1, temptree, gene_tree, 1, l, &taxaorder);
+					duplicate_tree(gcache[l], NULL);
 					gene_tree = temp_top;
 					temp_top = NULL;
-					strcpy(temptree1, temptree);
 
-					if(presence_of_trichotomies(gene_tree)) gene_tree = do_resolve_tricotomies(gene_tree, species_tree, basescore);	
-				/*	else printf2("no resolving needed\n"); */
+					if(gcache_poly[l]) gene_tree = do_resolve_tricotomies(gene_tree, species_tree, basescore);
 
 
 					duplicate_tree(gene_tree, NULL);
@@ -2739,6 +2777,16 @@ float get_recon_score(char *giventree, int numspectries, int numgenetries)
 		species_tree = NULL;
 		}
 	if(spec_dupc != NULL) { free(spec_dupc); spec_dupc = NULL; }
+	/* tear down the parse-once gene-tree cache */
+	if(gcache != NULL)
+		{
+		int gc;
+		for(gc = 0; gc < Total_fund_trees; gc++)
+			if(gcache[gc] != NULL) dismantle_tree(gcache[gc]);
+		free(gcache); gcache = NULL;
+		}
+	if(gcache_poly  != NULL) { free(gcache_poly);  gcache_poly  = NULL; }
+	if(gcache_nroot != NULL) { free(gcache_nroot); gcache_nroot = NULL; }
 	free(temptree);
 	free(temptree1);
 	return(rooting_score);
