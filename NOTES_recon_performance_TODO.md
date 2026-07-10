@@ -1,9 +1,27 @@
-# TODO: Speed up the recon-criterion search (linear-DP dup scans)
+# DONE: Speed up the recon-criterion search (linear-DP dup scans)
 
-**Status:** open — a focused performance task. The recon search is *correct* and
-already far faster than exhaustive rooting; this is about cutting the remaining
-compute (the machine runs hot during long recon searches). Start a fresh session
-from this brief.
+**Status:** implemented (2026-07-10). Both O(gene²)-with-copies duplication-scan
+loops in `get_recon_score` were replaced with a single `lr_root_counts()`
+linear-DP call each (§2 below). Verified identical to the old scan (0 mismatches
+over 153,218 gene-mindup and 619,665 species-mindup rooting comparisons across
+`tutorial_multicopy`, `tutorial_single`, `tutorial_trees`, `bsweight_demo`),
+correctness targets met (`hs` reaches 17 and `reconstruct` reports 17 on
+`tutorial_multicopy`), and measured wall-clock speedups (5 reps, nthreads=1):
+
+| Dataset | Before | After | Speedup |
+|---|---|---|---|
+| `tutorial_multicopy.ph` (8 trees) | 11.8 s | 3.0 s | ~4.0× |
+| `tutorial_single.ph` (28 trees) | 40.3 s | 7.3 s | ~5.5× |
+
+The larger dataset benefits more, as expected: the species pre-pass amplifier
+drops from O(species × genes × gene²) to O(species × genes × gene).
+
+**Note on reproduction:** the correct command sequence is `set criterion=recon`
+then `hs` — `hs criterion=recon` does *not* parse the criterion (heuristic_search
+reads the global `criterion`, which only `set` updates), so it silently runs as
+DFIT and the recon path (and its single-copy-filter skip) never executes.
+
+The remainder of this brief is retained for context.
 
 ---
 

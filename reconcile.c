@@ -2426,17 +2426,6 @@ void mapunknowns()
 	free(overall_placements);
 	}
 
-/* Duplication count at the current gene-tree rooting, WITHOUT the (expensive)
- * loss reconstruction -- the cheap Pass-1 scan for min-duplication-restricted
- * gene rooting. label_gene_tree_rec() maps the (already-numbered) species tree;
- * tag_duplications_only() counts duplications with exactly reconstruct_map()'s
- * test but without structurally mutating the tree. */
-static int recon_dups_only(struct taxon *gene_top, struct taxon *species_top, int xnum)
-	{
-	label_gene_tree_rec(gene_top, species_top, NULL, xnum);
-	return tag_duplications_only(gene_top);
-	}
-
 float get_recon_score(char *giventree, int numspectries, int numgenetries)
 	{
 	struct taxon *position = NULL, *species_tree = NULL, *gene_tree = NULL, *best_mapping = NULL, *copy = NULL, *temp_top1 = NULL, *temp_top2 = NULL, *spec_copy = NULL;
@@ -2505,7 +2494,7 @@ float get_recon_score(char *giventree, int numspectries, int numgenetries)
 		 * rootings that achieve the minimum duplication total. */
 		if(spec_mindup_mode)
 			{
-			int mm, ll, jj, gdups, gmind, sdups;
+			int mm, ll, jj, gmind, sdups;
 			spec_dupc = malloc(num_species_roots*sizeof(int));
 			min_spec_dups = -1;
 			for(mm=0; mm<num_species_roots; mm++)
@@ -2523,22 +2512,23 @@ float get_recon_score(char *giventree, int numspectries, int numgenetries)
 					tree_build(1, temptree, gene_tree, 1, ll, &taxaorder);
 					gene_tree = temp_top; temp_top = NULL;
 					if(presence_of_trichotomies(gene_tree)) gene_tree = do_resolve_tricotomies(gene_tree, species_tree, basescore);
-					duplicate_tree(gene_tree, NULL); copy = temp_top; temp_top = NULL;
 					i = number_tree(gene_tree, 0);
+					/* Linear-time all-rootings duplication DP: gmind = the minimum
+					 * duplication count over every gene-tree rooting, in O(gene) from a
+					 * single fixed tree -- replaces the old reroot-to-every-branch scan
+					 * (reroot + label/tag duplication count + rebuild-from-copy per rooting). No
+					 * rerooting or per-rooting tree copying (validated identical to the
+					 * old scan, 0 mismatches; see NOTES_recon_performance_TODO.md). */
+					{
+					int *gdc = malloc(i*sizeof(int));
+					lr_root_counts(gene_tree, i, sp_xnum, gdc);
 					gmind = -1;
 					for(jj=0; jj<i; jj++)
-						{
-						position = get_branch(gene_tree, jj);
-						temp_top = gene_tree; reroot_tree(position); gene_tree = temp_top; temp_top = NULL;
-						gdups = recon_dups_only(gene_tree, species_tree, sp_xnum);
-						if(gmind == -1 || gdups < gmind) gmind = gdups;
-						dismantle_tree(gene_tree); gene_tree = NULL;
-						temp_top = NULL; duplicate_tree(copy, NULL); gene_tree = temp_top; temp_top = NULL;
-						number_tree(gene_tree, 0);
-						}
+						if(gmind == -1 || gdc[jj] < gmind) gmind = gdc[jj];
+					free(gdc);
+					}
 					sdups += gmind;
 					if(gene_tree != NULL) { dismantle_tree(gene_tree); gene_tree = NULL; }
-					if(copy != NULL) { dismantle_tree(copy); copy = NULL; }
 					}
 				spec_dupc[mm] = sdups;
 				if(min_spec_dups == -1 || sdups < min_spec_dups) min_spec_dups = sdups;
@@ -2615,20 +2605,20 @@ float get_recon_score(char *giventree, int numspectries, int numgenetries)
 					 * min-duplication rootings (Pass 2 via the dupc[] skip filter). */
 					if(mindup_mode)
 						{
-						int jj, dtmp;
+						int jj;
+						/* Linear-time all-rootings duplication DP: fill dupc[j] = the
+						 * duplication count at gene-tree rooting j, for every rooting, in
+						 * O(gene) from the single fixed tree -- replaces the old
+						 * reroot-to-every-branch scan (reroot + label/tag duplication
+						 * count + rebuild-from-copy per rooting). Pass 2 below then full-scores
+						 * (add_losses) only the min-duplication rootings via the dupc[]
+						 * filter. Validated identical to the old scan, 0 mismatches (see
+						 * NOTES_recon_performance_TODO.md). */
 						dupc = malloc(i*sizeof(int));
+						lr_root_counts(gene_tree, i, sp_xnum, dupc);
 						mind = -1;
 						for(jj=0; jj<i; jj++)
-							{
-							position = get_branch(gene_tree, jj);
-							temp_top = gene_tree; reroot_tree(position); gene_tree = temp_top; temp_top = NULL;
-							dtmp = recon_dups_only(gene_tree, species_tree, sp_xnum);
-							dupc[jj] = dtmp;
-							if(mind == -1 || dtmp < mind) mind = dtmp;
-							dismantle_tree(gene_tree); gene_tree = NULL;
-							temp_top = NULL; duplicate_tree(copy, NULL); gene_tree = temp_top; temp_top = NULL;
-							number_tree(gene_tree, 0);
-							}
+							if(mind == -1 || dupc[jj] < mind) mind = dupc[jj];
 						}
 					for(r=0; r<numgenetries; r++)
 						{
