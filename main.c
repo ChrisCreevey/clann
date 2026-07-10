@@ -80,6 +80,8 @@ static const char *opts_hs[] = {
     /* search-strategy options */
     "vns=", "ils=", "ilsstrength=", "ilsguided=", "plateau=", "maxplateau=",
     "maxexhaustive=", "smoothsearch=", "maxskips=", "droprep=", "maxswaps=",
+    /* recon-criterion options */
+    "duplications=", "losses=", "numspeciesrootings=", "numgenerootings=",
     NULL
 };
 static const char *opts_boot[] = {
@@ -1785,7 +1787,10 @@ void print_commands(int num)
 		if(criterion == 5)
 			{
 			printf2("\n\tduplications\t<value>\t\t\t\t*1.0\n\tlosses\t\t<value>\t\t\t\t*1.0");
-			printf2("\n\tnumspeciesrootings\t<value> | all\t\t*2\n\tnumgenerootings\t\t<value> | all\t\t*2\n");
+			printf2("\n\tnumspeciesrootings\t<value> | all | mindup\t*mindup\n\tnumgenerootings\t\t<value> | all | mindup\t*mindup");
+			printf2("\n\t   rooting used to score reconciliations: mindup = restrict to the minimum-\n"
+			        "\t   duplication rootings (near-exhaustive, deterministic, fast); all = every\n"
+			        "\t   rooting (exhaustive, exact but slow); <n> = n random rootings (fast, noisy)\n");
 			}
 		if(criterion == 7)
 			{
@@ -1832,7 +1837,10 @@ void print_commands(int num)
 			if(criterion == 5)
 				{
 				printf2("\n\tduplications\t<value>\t\t\t\t*1.0\n\tlosses\t\t<value>\t\t\t\t*1.0");
-				printf2("\n\tnumspeciesrootings\t<value> | all\t\t*2\n\tnumgenerootings\t\t<value> | all\t\t*2\n");
+				printf2("\n\tnumspeciesrootings\t<value> | all | mindup\t*mindup\n\tnumgenerootings\t\t<value> | all | mindup\t*mindup");
+			printf2("\n\t   rooting used to score reconciliations: mindup = restrict to the minimum-\n"
+			        "\t   duplication rootings (near-exhaustive, deterministic, fast); all = every\n"
+			        "\t   rooting (exhaustive, exact but slow); <n> = n random rootings (fast, noisy)\n");
 				}
 			if(criterion == 7)
 				{
@@ -1893,7 +1901,10 @@ void print_commands(int num)
 	if(criterion == 5)
 		{
 		printf2("\n\tduplications\t<value>\t\t\t\t*1.0\n\tlosses\t\t<value>\t\t\t\t*1.0");
-		printf2("\n\tnumspeciesrootings\t<value> | all\t\t*2\n\tnumgenerootings\t\t<value> | all\t\t*2\n");
+		printf2("\n\tnumspeciesrootings\t<value> | all | mindup\t*mindup\n\tnumgenerootings\t\t<value> | all | mindup\t*mindup");
+			printf2("\n\t   rooting used to score reconciliations: mindup = restrict to the minimum-\n"
+			        "\t   duplication rootings (near-exhaustive, deterministic, fast); all = every\n"
+			        "\t   rooting (exhaustive, exact but slow); <n> = n random rootings (fast, noisy)\n");
 		}
 
             printf2("\n");

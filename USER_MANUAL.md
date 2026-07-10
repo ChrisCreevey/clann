@@ -404,8 +404,10 @@ These control *how thoroughly* each replicate searches. The defaults favour reli
 |--------|--------|---------|-------------|
 | `duplications` | `<float>` | 1.0 | Cost weight applied to each duplication event. |
 | `losses` | `<float>` | 1.0 | Cost weight applied to each gene loss event. |
-| `numspeciesrootings` | `<integer>`, `all` | 2 | Number of species-tree rootings to trial when computing the reconciliation score. `all` tries every possible rooting (slow but exact). |
-| `numgenerootings` | `<integer>`, `all` | 2 | Number of gene-tree rootings to trial per species-tree rooting. |
+| `numspeciesrootings` | `<integer>`, `all`, `mindup` | `mindup` | How the species-tree rooting is chosen when scoring reconciliations. `mindup` (default) restricts scoring to the minimum-duplication rootings — near-exhaustive accuracy, deterministic, and fast. `all` tries every rooting (exhaustive/exact but slow). `<n>` samples `n` random rootings (fast but noisy — not recommended). |
+| `numgenerootings` | `<integer>`, `all`, `mindup` | `mindup` | Same choices, for the gene-tree rooting trialled per species-tree rooting. Default `mindup`. |
+
+> **Why `mindup` is the default.** Random rooting samples (the old `2×2` default) badly overestimate the reconciliation cost and are noisy enough to misrank candidate supertrees during the search, so it settles on worse trees. Exhaustive rooting (`all`) is accurate but O(N²) in the number of rootings. `mindup` restricts the expensive dup+loss scoring to the *minimum-duplication* rootings (found cheaply with a linear-time algorithm), which are where the optimum almost always lies — giving exhaustive-quality search results deterministically at a fraction of the cost. See [`NOTES_species-gene-tree-reconciliation.md`](NOTES_species-gene-tree-reconciliation.md) for the full rationale.
 
 #### Options for mrp criterion (criterion 1)
 
@@ -1421,11 +1423,8 @@ These criteria require PAUP\* to be installed and accessible on your PATH. Insta
 **Q: How do I reproduce a previous analysis exactly?**
 Use `set seed=<N>` with a fixed integer before running any search command. Record the seed value in your log file (`log status=on`).
 
-**Q: `reconstruct` gives different scores each run.**
-By default, only a small number of gene-tree and species-tree rootings are sampled. Increase `numspeciesrootings` and `numgenerootings` (or set to `all`) for deterministic results:
-```
-reconstruct speciestree=memory numspeciesrootings=all numgenerootings=all
-```
+**Q: Do `hs criterion=recon` and `reconstruct` report the same duplication/loss score for a tree?**
+Yes — they now use the same reconciliation. `reconstruct` always roots exhaustively (every species × gene rooting) and its total equals the `hs` score for the tree the search found. `hs criterion=recon` defaults to `mindup` rooting, which is exact at the optimum, so the score you optimise and the score `reconstruct ... showrecon` illustrates agree. (If you deliberately `reconstruct` a *clearly suboptimal* tree, its exhaustive total may come in slightly below the `mindup` score for that tree — expected, and only for non-optimal trees.) Any small run-to-run variation in `reconstruct` output on multicopy data comes from paralog-representative selection, not rooting.
 
 **Q: How do I run Clann non-interactively on a cluster or in a pipeline?**
 The simplest approach is the direct CLI:
