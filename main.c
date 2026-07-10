@@ -77,6 +77,11 @@ static const char *opts_hs[] = {
     "scan", "scanmin=", "scanmax=", "escan", "eta=", "etamax=", "fixbeta=",
     "visitedtrees=", "clusterlandscape=", "clusteroutput=",
     "clusterthreshold=", "clusterorderby=",
+    /* search-strategy options */
+    "vns=", "ils=", "ilsstrength=", "ilsguided=", "plateau=", "maxplateau=",
+    "maxexhaustive=", "smoothsearch=", "maxskips=", "droprep=", "maxswaps=",
+    /* recon-criterion options */
+    "duplications=", "losses=", "numspeciesrootings=", "numgenerootings=",
     NULL
 };
 static const char *opts_boot[] = {
@@ -133,7 +138,7 @@ static const char *vals_mlscale[]   = { "lnl", "raw", NULL };
 static const char *vals_missing[]   = { "4point", "ultrametric", "none", NULL };
 static const char *vals_start[]     = { "memory", "random", NULL };
 static const char *vals_swap[]      = { "spr", "tbr", "nni", NULL };
-static const char *vals_strategy[]  = { "best", "random", NULL };
+static const char *vals_strategy[]  = { "first", "best", NULL };
 static const char *vals_yesno[]     = { "yes", "no", NULL };
 static const char *vals_output[]    = { "matrix", "vector", NULL };
 static const char *vals_size[]      = { "equalto", "lessthan", "greaterthan", NULL };
@@ -161,6 +166,10 @@ static const opt_vals_t opt_val_map[] = {
     { "output",       vals_output       },
     { "size",         vals_size         },
     { "status",       vals_status       },
+    { "vns",          vals_yesno        },
+    { "plateau",      vals_yesno        },
+    { "ilsguided",    vals_yesno        },
+    { "smoothsearch", vals_yesno        },
     { "clusterlandscape", vals_yesno    },
     { "clusterorderby",   vals_orderby  },
     { NULL, NULL }
@@ -1715,6 +1724,18 @@ void print_commands(int num)
             printf2("\n\tnthreads\t<integer number>\t\t*%-3d (OpenMP threads; default=all CPUs)", omp_get_num_procs());
 #endif
             printf2("\n\tmaxskips\t<integer number>\t\t*auto=N³ (stop replicate after this many consecutive already-visited moves; 0=disabled)");
+
+            printf2("\n\n\tSearch-strategy options:");
+            printf2("\n\tvns\t\tyes | no\t\t\t*yes  (Variable Neighborhood Descent: escalate NNI->SPR->TBR; the reliable default)");
+            printf2("\n\tils\t\t<integer | 0>\t\t\t*10   (Iterated Local Search: kicks w/o improvement before a replicate stops; 0=off)");
+            printf2("\n\tilsstrength\t<integer >=1>\t\t\t*3    (random SPR moves per ILS kick; grows adaptively when stuck)");
+            printf2("\n\tilsguided\tyes | no\t\t\t*no   (aim ILS kicks at conflicted taxa; opt-in, no measured benefit)");
+            printf2("\n\tplateau\t\tyes | no\t\t\t*yes  (allow equal-score sideways moves across flat regions)");
+            printf2("\n\tmaxplateau\t<integer | 0>\t\t\t*auto=2N (cap on consecutive sideways moves; 0=disabled)");
+            printf2("\n\tstrategy\tfirst | best\t\t\t*first (take first improving move, or best in the neighbourhood)");
+            printf2("\n\tmaxexhaustive\t<number | 0>\t\t\t*1,000,000 (auto-run guaranteed exhaustive search when tree space <= this; 0=never)");
+            if(criterion == 7)
+                printf2("\n\tsmoothsearch\tyes | no\t\t\t*no   (ML only: transfer-distance search surrogate; opt-in)");
 #ifdef _OPENMP
             if(hs_progress_interval == 0)
                 printf2("\n\tprogress\t<integer seconds | 0>\t\t0 (report every improvement)");
@@ -1766,7 +1787,10 @@ void print_commands(int num)
 		if(criterion == 5)
 			{
 			printf2("\n\tduplications\t<value>\t\t\t\t*1.0\n\tlosses\t\t<value>\t\t\t\t*1.0");
-			printf2("\n\tnumspeciesrootings\t<value> | all\t\t*2\n\tnumgenerootings\t\t<value> | all\t\t*2\n");
+			printf2("\n\tnumspeciesrootings\t<value> | all | mindup\t*mindup\n\tnumgenerootings\t\t<value> | all | mindup\t*mindup");
+			printf2("\n\t   rooting used to score reconciliations: mindup = restrict to the minimum-\n"
+			        "\t   duplication rootings (near-exhaustive, deterministic, fast); all = every\n"
+			        "\t   rooting (exhaustive, exact but slow); <n> = n random rootings (fast, noisy)\n");
 			}
 		if(criterion == 7)
 			{
@@ -1813,7 +1837,10 @@ void print_commands(int num)
 			if(criterion == 5)
 				{
 				printf2("\n\tduplications\t<value>\t\t\t\t*1.0\n\tlosses\t\t<value>\t\t\t\t*1.0");
-				printf2("\n\tnumspeciesrootings\t<value> | all\t\t*2\n\tnumgenerootings\t\t<value> | all\t\t*2\n");
+				printf2("\n\tnumspeciesrootings\t<value> | all | mindup\t*mindup\n\tnumgenerootings\t\t<value> | all | mindup\t*mindup");
+			printf2("\n\t   rooting used to score reconciliations: mindup = restrict to the minimum-\n"
+			        "\t   duplication rootings (near-exhaustive, deterministic, fast); all = every\n"
+			        "\t   rooting (exhaustive, exact but slow); <n> = n random rootings (fast, noisy)\n");
 				}
 			if(criterion == 7)
 				{
@@ -1874,7 +1901,10 @@ void print_commands(int num)
 	if(criterion == 5)
 		{
 		printf2("\n\tduplications\t<value>\t\t\t\t*1.0\n\tlosses\t\t<value>\t\t\t\t*1.0");
-		printf2("\n\tnumspeciesrootings\t<value> | all\t\t*2\n\tnumgenerootings\t\t<value> | all\t\t*2\n");
+		printf2("\n\tnumspeciesrootings\t<value> | all | mindup\t*mindup\n\tnumgenerootings\t\t<value> | all | mindup\t*mindup");
+			printf2("\n\t   rooting used to score reconciliations: mindup = restrict to the minimum-\n"
+			        "\t   duplication rootings (near-exhaustive, deterministic, fast); all = every\n"
+			        "\t   rooting (exhaustive, exact but slow); <n> = n random rootings (fast, noisy)\n");
 		}
 
             printf2("\n");
@@ -2266,6 +2296,7 @@ static void autoprunemono_apply(void)
 	int *taxa_fate = NULL;
 	char *temptree = malloc(TREE_LENGTH * sizeof(char));
 	char *pruned_tree = NULL, *tmp = NULL;
+	size_t apm_bufsz = TREE_LENGTH;   /* current size of temptree/pruned_tree/tmp; grown per tree below */
 
 	if(!temptree) { printf2("Error: out of memory for autoprunemono\n"); return; }
 
@@ -2297,11 +2328,30 @@ static void autoprunemono_apply(void)
 		if(!multicopy) continue;
 		n_multicopy++;
 
+		/* Grow the working buffers to fit THIS tree. returntree_fullnames() below
+		 * expands numeric ids to (longer) full names into temptree, so the buffer
+		 * must hold the full-name form -- which for large gene-family trees exceeds
+		 * a fixed TREE_LENGTH. pruned_tree/tmp hold the (smaller) numeric pruned
+		 * tree, so the same size is a safe upper bound. Buffers only grow. */
+		{
+		size_t need = returntree_fullname_buflen(fundamentals[i], i) + 128;
+		if(need < (size_t)TREE_LENGTH) need = TREE_LENGTH;
+		if(need > apm_bufsz)
+			{
+			char *nt;
+			nt = realloc(temptree, need);    if(!nt) goto apm_oom; temptree = nt;
+			nt = realloc(pruned_tree, need); if(!nt) goto apm_oom; pruned_tree = nt;
+			nt = realloc(tmp, need);         if(!nt) goto apm_oom; tmp = nt;
+			apm_bufsz = need;
+			}
+		}
+
 		/* Dismantle any tree already in memory */
 		if(tree_top != NULL) { dismantle_tree(tree_top); tree_top = NULL; }
 		temp_top = NULL;
 
-		/* Build tree from stored representation using full names */
+		/* Build tree from stored representation using full names (temptree/
+		 * pruned_tree/tmp already grown to fit this tree just above). */
 		temptree[0] = '\0';
 		strcpy(temptree, fundamentals[i]);
 		returntree_fullnames(temptree, i);
@@ -2401,6 +2451,14 @@ static void autoprunemono_apply(void)
 		if(n_pruned > 0)
 			printf2("  Original (unpruned) trees stored for reconstruct.\n");
 		}
+	return;
+
+apm_oom:
+	printf2("Error: out of memory for autoprunemono\n");
+	if(tree_top != NULL) { dismantle_tree(tree_top); tree_top = NULL; }
+	free(temptree);
+	free(pruned_tree);
+	free(tmp);
 	}
 
 /* -----------------------------------------------------------------------
@@ -2640,6 +2698,7 @@ static void compute_autoweights_clan(const char *clanfile, int mode)
 
         /* Build source tree into tree_top */
         temptree[0] = '\0';
+        ensure_fullname_bufsize(&temptree, i);
         strcpy(temptree, fundamentals[i]);
         returntree_fullnames(temptree, i);
         basic_tree_build(1, temptree, tree_top, TRUE);
@@ -3082,7 +3141,13 @@ static void autodecompose_apply(void)
         }
     for(i=0; i<Total_fund_trees; i++)
         {
-        char *fullname_text = malloc(TREE_LENGTH * sizeof(char));
+        /* Size the buffer to THIS tree's full-name form: returntree_fullnames()
+         * expands numeric ids to (longer) full names, which for large gene-family
+         * trees exceeds a fixed TREE_LENGTH. */
+        size_t need = returntree_fullname_buflen(fundamentals[i], i);
+        if(need < strlen(fundamentals[i]) + 1) need = strlen(fundamentals[i]) + 1;
+        if(need < (size_t)TREE_LENGTH) need = TREE_LENGTH;
+        char *fullname_text = malloc(need * sizeof(char));
         if(fullname_text == NULL)
             {
             printf2("Error: out of memory for autodecompose snapshot -- aborted\n");
@@ -3776,27 +3841,14 @@ void execute_command(char *commandline, int do_all)
 		sourcetree_scores = malloc(Total_fund_trees*sizeof(float));
 		for(i=0; i<Total_fund_trees; i++) sourcetree_scores[i] = -1;
 
-        fund_scores = malloc(Total_fund_trees*sizeof(int**));
-        if(fund_scores == NULL) memory_error(35);
-            
-        for(i=0; i<Total_fund_trees; i++)
-            {
-            fund_scores[i] = malloc((number_of_taxa)*sizeof(int*));
-            if(fund_scores[i] == NULL) memory_error(36);
-            else
-                {
-                for(j=0; j<(number_of_taxa); j++)
-                    {
-                    fund_scores[i][j] = malloc((number_of_taxa)*sizeof(int));
-                    if(fund_scores[i][j] == NULL) memory_error(37);
-                    else
-                        {
-                        for(k=0; k<(number_of_taxa); k++)
-                            fund_scores[i][j][k] = 0;
-                        }
-                    }
-                }
-            }
+        /* fund_scores (int[Total_fund_trees][N][N] path-distance matrices) is
+         * O(trees * taxa^2) and only the distance-fit criterion ever reads it.
+         * It is no longer allocated here; cal_fund_scores() allocates it lazily
+         * the first time a dfit scoring pass needs it. For large tree sets under
+         * the ML/RF/etc. criteria this avoids a very large unused allocation
+         * (e.g. ~110 GB for 121k trees x 477 taxa). Leaving it NULL is safe: all
+         * fund_scores snapshot/restore paths are guarded by fund_scores != NULL. */
+        fund_scores = NULL;
 
 		calculated_fund_scores = FALSE;
 
@@ -4238,6 +4290,13 @@ void set_parameters(void)
                     }
                 }
             }
+        /* Leaving the distance-fit criterion: release the large O(trees*taxa^2)
+         * fund_scores / stored_* arrays so they do not stay resident for the
+         * rest of the session. No-op if they were never allocated; a later dfit
+         * run re-creates them lazily. */
+        if(strcmp(parsed_command[i], "criterion") == 0 && criterion != 0)
+            free_fund_scores_arrays();
+
         if(strcmp(parsed_command[i], "seed") == 0)
         	{
         	isdigit=TRUE;

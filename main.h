@@ -57,6 +57,8 @@ void  prune_monophylies(void);
 void  tips(int num);
 void  exhaustive_SPR(char *string);
 int   coding(int nrep, int scoring, int ptpreps);
+void  ensure_fund_scores_alloc(void);
+void  free_fund_scores_arrays(void);
 void  cal_fund_scores(int printfundscores);
 void  rf_precompute_fund_biparts(void);
 void  dismantle_tree(struct taxon *position);

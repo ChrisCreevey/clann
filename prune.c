@@ -233,9 +233,15 @@ int collapse_monophyly_in_tree(int treenum, FILE *infofile, char *out_tree, int 
 	{
 	int k=0, l=0, numt=0, *taxa_fate = NULL, clannID=0, report=FALSE, taxaorder=0, leaf_count=0, i=0, num_nodes=0;
 	char *tmp = NULL, **taxa_fate_names = NULL;
-	char *temptree = malloc(TREE_LENGTH * sizeof(char));
+	/* Size buffers to THIS tree's full-name form: returntree_fullnames() expands
+	 * numeric ids to (longer) full names, which for large gene-family trees
+	 * exceeds a fixed TREE_LENGTH. */
+	size_t cbuf = returntree_fullname_buflen(fundamentals[treenum], treenum);
+	if(cbuf < strlen(fundamentals[treenum]) + 1) cbuf = strlen(fundamentals[treenum]) + 1;
+	if(cbuf < (size_t)TREE_LENGTH) cbuf = TREE_LENGTH;
+	char *temptree = malloc(cbuf * sizeof(char));
 	if(!temptree) { printf2("Error: out of memory in collapse_monophyly_in_tree\n"); return 0; }
-	tmp = malloc(TREE_LENGTH * sizeof(char));
+	tmp = malloc(cbuf * sizeof(char));
 	if(!tmp) { free(temptree); printf2("Error: out of memory in collapse_monophyly_in_tree\n"); return 0; }
 
 	if(tree_top != NULL) dismantle_tree(tree_top);  /* Dismantle any trees already in memory */
@@ -383,7 +389,8 @@ void prune_monophylies(void)
     strcpy(filename2, "prunedtrees.txt");
     strcpy(filename3, "prunedtrees_info.txt");
 
-    pruned_tree = malloc(TREE_LENGTH*sizeof(char));
+    size_t pt_bufsz = TREE_LENGTH;   /* grown per tree below to fit large source trees */
+    pruned_tree = malloc(pt_bufsz*sizeof(char));
     pruned_tree[0] = '\0';
 
     for(j=0; j<num_commands; j++)
@@ -411,6 +418,13 @@ void prune_monophylies(void)
 
     for(j=0; j<Total_fund_trees; j++)
         {
+        /* Grow pruned_tree to hold this tree's collapsed (numeric) form, which for
+         * large gene-family trees can exceed a fixed TREE_LENGTH. */
+        if(strlen(fundamentals[j]) + 128 > pt_bufsz)
+            {
+            char *np = realloc(pruned_tree, strlen(fundamentals[j]) + 128);
+            if(np) { pruned_tree = np; pt_bufsz = strlen(fundamentals[j]) + 128; }
+            }
         pruned_tree[0] = '\0';
         collapse_monophyly_in_tree(j, tempoutfile, pruned_tree, &num_nodes, NULL, NULL);
 

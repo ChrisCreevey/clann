@@ -321,7 +321,9 @@ set seed=12345
 
 ### hs / hsearch
 
-Heuristic search for the best-scoring supertree using SPR (subtree pruning and regrafting) branch swapping. The available options depend on the current criterion. When compiled with OpenMP, multiple independent replicates run in parallel.
+Heuristic search for the best-scoring supertree. By default the local search uses **Variable Neighborhood Descent** (escalating NNI→SPR→TBR moves) together with **Iterated Local Search** — the combination that most reliably converges to the global optimum (see [Search-strategy options](#search-strategy-options) below). The available options depend on the current criterion. When compiled with OpenMP, multiple independent replicates run in parallel.
+
+> **On judging convergence.** Because the true tree is unknown, the surest evidence that a search has found the *global* optimum is that several independent replicates converge to the *same* tree. Run a few replicates (`nreps`) and check how many end at the same best score; the defaults are tuned to make that agreement as likely as possible rather than to minimise runtime.
 
 ```
 hs [options]
@@ -333,7 +335,7 @@ hs [options]
 |--------|--------|---------|-------------|
 | `sample` | `<integer>` | 10,000 | Number of random starting trees evaluated before selecting the best `nreps` as starting points for heuristic search. Larger values find better starting trees at the cost of time. |
 | `nreps` | `<integer>` | 10 | Number of independent heuristic search replicates. |
-| `swap` | `nni`, `spr`, `tbr` | `spr` | Tree rearrangement algorithm: NNI (nearest-neighbour interchange), SPR (subtree pruning and regrafting), or TBR (tree bisection and reconnection). SPR and TBR generally explore more of tree space than NNI. |
+| `swap` | `nni`, `spr`, `tbr` | `tbr` | Tree rearrangement algorithm when `vns no`: NNI (nearest-neighbour interchange), SPR (subtree pruning and regrafting), or TBR (tree bisection and reconnection). SPR and TBR explore more of tree space than NNI. **Ignored when VNS is on (the default)**, since VNS uses all three in escalation — see [Search-strategy options](#search-strategy-options). |
 | `nsteps` | `<integer>` | 5 | Number of improvement steps per replicate before stopping. |
 | `start` | `nj`, `random`, `<filename>` | `nj` | Starting tree. `nj` uses a neighbour-joining tree; `random` uses the best tree from random sampling; a filename loads a user-provided starting tree. |
 | `maxswaps` | `<integer>` | 1,000,000 | Maximum number of branch swaps per replicate. |
@@ -348,6 +350,24 @@ hs [options]
 | `clusteroutput` | `<filename>` | `treeclusters.tsv` | Output file for the cluster TSV. Only used when `clusterlandscape=yes`. |
 | `clusterorderby` | `score`, `visits` | `score` | Sort order for the greedy sweep: `score` places the best-scoring topology first (it becomes the cluster representative); `visits` places the most-visited topology first. Only used when `clusterlandscape=yes`. |
 | `autoprunemono` | — | — | Set via the `exe` command (`exe myfile.ph autoprunemono=yes`), not `hs` directly. Prunes monophyletic same-species clades from multicopy trees at load time so more source trees contribute to the search. See [Autoprunemono](#autoprunemono). |
+
+<a name="search-strategy-options"></a>
+**Search-strategy options:**
+
+These control *how thoroughly* each replicate searches. The defaults favour reliable convergence to the global optimum over raw speed; set `vns no` (and/or `ils 0`) for a faster, less thorough search. They apply to the SPR/TBR criteria (dfit, sfit, qfit, rf, ml, and — except where noted — recon).
+
+| Option | Values | Default | Description |
+|--------|--------|---------|-------------|
+| `vns` | `yes`, `no` | `yes` | **Variable Neighborhood Descent.** Search NNI moves to convergence; if stuck, escalate to SPR, then TBR; drop back to NNI whenever a bigger move improves the tree. The result is optimal under all three move sets, which escapes traps a single move type cannot (a tree with no improving SPR move can often be fixed by one TBR move). The single most effective option for reaching the global optimum; the only cost is runtime (~2–3× a single-operator climb). Turn off for speed. |
+| `ils` | `<integer>`, `0` | `10` | **Iterated Local Search.** When a climb converges, perturb the best tree with a few random SPR moves and re-optimise, keeping the better result; repeat until this many consecutive perturbations yield no improvement. Removes the worst outcomes (deep traps). Set `0` to disable. |
+| `ilsstrength` | `<integer ≥ 1>` | `3` | Number of random SPR moves in each ILS perturbation. Grows adaptively (up to 4×) after each failed kick and resets on any improvement — small nudges when progress is steady, bigger jumps to break a persistent trap. |
+| `ilsguided` | `yes`, `no` | `no` | Aim ILS kicks at the taxa involved in unsatisfied source trees, rather than at random branches. Opt-in: in testing this did not beat random kicks (the deceptive landscape means locally-conflicted taxa don't reliably point toward the global optimum). The underlying per-taxon conflict signal is useful on its own as a rogue-taxon diagnostic. Not available for `recon`. |
+| `plateau` | `yes`, `no` | `yes` | Allow equal-score sideways moves so the search can cross the large flat regions (plateaus) of the RF-based score landscape instead of stopping at their edge. A per-replicate visited-set prevents revisiting the same trees. Helps `dfit` clearly; roughly neutral for `ml`. |
+| `maxplateau` | `<integer>`, `0` | auto (2N) | Cap on consecutive sideways moves, so the search cannot wander a plateau indefinitely. Auto-scales to 2×(number of taxa). Set `0` to disable plateau moves. |
+| `strategy` | `first`, `best` | `first` | `first` commits to the first improving move found; `best` surveys the whole neighbourhood and takes the single best move (more thorough per step, slower). |
+| `maxexhaustive` | `<number>`, `0` | 1,000,000 | If the total number of possible supertrees is at or below this limit, run a guaranteed **exhaustive** search (scoring every tree) instead of the heuristic — faster and optimal for tiny problems. Applies to the tree space *after* paralogue collapsing. Set `0` to always use the heuristic. Not available for `recon`. |
+
+<sub>Also relevant here: `maxskips`, `progress`, and `droprep` (listed in the main options table above) control replicate stopping and parallel behaviour.</sub>
 
 **Weight options (criterion-specific):**
 
@@ -372,6 +392,7 @@ hs [options]
 | `mlbeta` | `<float > 0>` | 1.0 | Slope parameter β for the exponential likelihood model P(G_i\|T) ∝ e^(−β·d_i). Larger values make the likelihood sharper and penalise RF distance more strongly. Can also be set via `set mlbeta=<value>`. |
 | `mlscale` | `paper`, `lust`, `lnl` | `lnl` | Scoring convention. `lnl` reports lnL = −β·Σd_i (negative, standard ML convention). `paper` reports the Steel & Rodrigo (2008) positive score directly. `lust` uses Akanni *et al.* (2014) log₁₀ scaling. See `set mlscale` for details. |
 | `mleta` | `<float ≥ 0>` | `0.0` | **[Experimental]** Tree-size scaling exponent η. Each source tree's RF distance is divided by k_i^η before scoring, where k_i is the number of internal splits in that tree. η = 0 recovers the original Steel & Rodrigo (2008) model; η = 1 fully normalises by split count; η > 1 actively down-weights large trees beyond normalisation. Can be estimated from data using `mlscores eta=auto`. See note below. |
+| `smoothsearch` | `yes`, `no` | `no` | **[Experimental, ML only]** Guide the search with a smoother *transfer-distance* objective (partial credit for near-miss splits) as a tie-breaker on RF plateaus, then report the true ML score. Motivated by the flat, rugged RF landscape, but in testing it did not significantly improve reaching the optimum and costs ~2× the scoring time. Kept opt-in. The final reported score is always true ML. |
 
 > **mleta — experimental tree-size scaling exponent.** The Steel model implicitly treats each split disagreement as an independent event with equal cost, meaning source trees with more splits contribute proportionally more to WD and therefore dominate β̂ and the search objective. The `mleta` parameter addresses this by scaling each tree's RF distance by k_i^η before scoring, derived from the probability model P(d_i | S, β, η) = (β/k_i^η) · exp(−(β/k_i^η) · d_i). This gives log L(β, η) = n·log(β) − η·Σ log(k_i) − β·Σ w_i·d_i/k_i^η. The term −η·Σ log(k_i) is a natural penalty from the model's normalisation constant that prevents η from growing without bound, unlike ad hoc weighting schemes. η = 0 is the original Steel (2008) model; η = 1 gives equal per-tree contribution regardless of size; η > 1 actively down-weights large trees (appropriate if large trees are less reliable due to ILS or estimation error). The optimal η can be estimated jointly with β using `mlscores eta=auto`, which performs a 1-D grid search since β profiles analytically at each fixed η. If the optimal supertree topology changes substantially between η = 0 and the estimated η*, tree-size heterogeneity is a confounding factor in your dataset.
 >
@@ -383,8 +404,10 @@ hs [options]
 |--------|--------|---------|-------------|
 | `duplications` | `<float>` | 1.0 | Cost weight applied to each duplication event. |
 | `losses` | `<float>` | 1.0 | Cost weight applied to each gene loss event. |
-| `numspeciesrootings` | `<integer>`, `all` | 2 | Number of species-tree rootings to trial when computing the reconciliation score. `all` tries every possible rooting (slow but exact). |
-| `numgenerootings` | `<integer>`, `all` | 2 | Number of gene-tree rootings to trial per species-tree rooting. |
+| `numspeciesrootings` | `<integer>`, `all`, `mindup` | `mindup` | How the species-tree rooting is chosen when scoring reconciliations. `mindup` (default) restricts scoring to the minimum-duplication rootings — near-exhaustive accuracy, deterministic, and fast. `all` tries every rooting (exhaustive/exact but slow). `<n>` samples `n` random rootings (fast but noisy — not recommended). |
+| `numgenerootings` | `<integer>`, `all`, `mindup` | `mindup` | Same choices, for the gene-tree rooting trialled per species-tree rooting. Default `mindup`. |
+
+> **Why `mindup` is the default.** Random rooting samples (the old `2×2` default) badly overestimate the reconciliation cost and are noisy enough to misrank candidate supertrees during the search, so it settles on worse trees. Exhaustive rooting (`all`) is accurate but O(N²) in the number of rootings. `mindup` restricts the expensive dup+loss scoring to the *minimum-duplication* rootings (found cheaply with a linear-time algorithm), which are where the optimum almost always lies — giving exhaustive-quality search results deterministically at a fraction of the cost. See [`NOTES_species-gene-tree-reconciliation.md`](NOTES_species-gene-tree-reconciliation.md) for the full rationale.
 
 #### Options for mrp criterion (criterion 1)
 
@@ -1400,11 +1423,8 @@ These criteria require PAUP\* to be installed and accessible on your PATH. Insta
 **Q: How do I reproduce a previous analysis exactly?**
 Use `set seed=<N>` with a fixed integer before running any search command. Record the seed value in your log file (`log status=on`).
 
-**Q: `reconstruct` gives different scores each run.**
-By default, only a small number of gene-tree and species-tree rootings are sampled. Increase `numspeciesrootings` and `numgenerootings` (or set to `all`) for deterministic results:
-```
-reconstruct speciestree=memory numspeciesrootings=all numgenerootings=all
-```
+**Q: Do `hs criterion=recon` and `reconstruct` report the same duplication/loss score for a tree?**
+Yes — they now use the same reconciliation. `reconstruct` always roots exhaustively (every species × gene rooting) and its total equals the `hs` score for the tree the search found. `hs criterion=recon` defaults to `mindup` rooting, which is exact at the optimum, so the score you optimise and the score `reconstruct ... showrecon` illustrates agree. (If you deliberately `reconstruct` a *clearly suboptimal* tree, its exhaustive total may come in slightly below the `mindup` score for that tree — expected, and only for non-optimal trees.) Any small run-to-run variation in `reconstruct` output on multicopy data comes from paralog-representative selection, not rooting.
 
 **Q: How do I run Clann non-interactively on a cluster or in a pipeline?**
 The simplest approach is the direct CLI:

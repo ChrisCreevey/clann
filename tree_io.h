@@ -99,6 +99,8 @@ void  print_named_tree(struct taxon *position, char *tree);
 void  print_fullnamed_tree(struct taxon *position, char *tree, int fundtreenum);
 void  reallocate_retained_supers(void);
 void  execute_command(char *filename, int do_all);
+void  ensure_fund_scores_alloc(void);
+void  free_fund_scores_arrays(void);
 void  cal_fund_scores(int printfundscores);
 
 /* -----------------------------------------------------------------------
@@ -119,6 +121,8 @@ void     include(int do_all);
 void     exclude_taxa(int do_all);
 void     restoretaxa(int do_all);
 void     returntree(char *temptree);
+size_t   returntree_fullname_buflen(const char *numeric, int treenum);
+void     ensure_fullname_bufsize(char **buf, int treenum);
 void     returntree_fullnames(char *temptree, int treenum);
 
 /* restoretaxa availability flag (set by exclude_taxa, cleared by restoretaxa) */
