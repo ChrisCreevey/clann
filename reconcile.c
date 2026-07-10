@@ -956,6 +956,18 @@ static int  *g_lr_par   = NULL;            /* struct-parent tag, -1 at root */
 static int  *g_lr_mdown = NULL;            /* LCA of species under node */
 static int  *g_lr_mup   = NULL;            /* LCA of species NOT under node */
 static int   g_lr_cap   = 0;
+/* These linear-DP scratch tables are rebuilt from scratch by every
+ * lr_root_counts() call. get_recon_score() (the recon criterion) calls
+ * lr_root_counts(), and the heuristic search runs get_recon_score() in parallel
+ * (one replicate per thread, GOMP_parallel over do_search). Without per-thread
+ * copies, concurrent lr_root_counts() calls realloc/overwrite the same arrays
+ * and one thread dereferences another's freed/half-built g_lr_node[] -- observed
+ * as SIGSEGV in `set criterion=recon; hs nthreads>1`. threadprivate gives each
+ * thread its own tables, matching build_species_partag()'s globals below.
+ * (Recon is NOT single-threaded, contrary to an earlier note.) */
+#ifdef _OPENMP
+#pragma omp threadprivate(g_lr_node, g_lr_par, g_lr_mdown, g_lr_mup, g_lr_cap)
+#endif
 
 static int lr_parent_tag(struct taxon *v)
 	{
@@ -1005,6 +1017,9 @@ static void lr_up(struct taxon *u, int xnum)   /* pre-order: mup[c] = LCA(mup[u]
 static int  g_lr_vc = -1;         /* virtual centre tag = n */
 static int *g_lr_topsibs = NULL;  /* top-level sibling tags (VC's children) */
 static int  g_lr_ntop = 0;
+#ifdef _OPENMP
+#pragma omp threadprivate(g_lr_vc, g_lr_topsibs, g_lr_ntop)   /* see note above */
+#endif
 
 static int lr_dupsum(int w, int par, int Mw)
 	{
@@ -1058,6 +1073,9 @@ static int lr_dupstat(int v, int p)
  * {par(v),v} to {v,c} crosses v, flipping only v's parent, so the count changes
  * by dupstat(v,c) - dupstat(v,par(v)). O(gene) over the whole tree. */
 static int *g_lr_out = NULL;
+#ifdef _OPENMP
+#pragma omp threadprivate(g_lr_out)   /* see note above */
+#endif
 static void lr_dp_down(int v, int o_v)
 	{
 	struct taxon *c;
