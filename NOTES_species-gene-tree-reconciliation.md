@@ -231,6 +231,22 @@ mapping to that real component share a tag. `node_comp()` resolves this by
 deriving each gene node's forest component from its leaves (spanning → the
 implicit root at depth −1), independent of the collided tag.
 
+**Illustration (`reconstruct`).** The arithmetic scorer does no tree
+reconstruction, so `reconstruct`'s drawing/NHX/`.recon` outputs can't be read off
+it. `annotate_standard()` builds a standard-model reconciled tree just for the
+illustration: it wraps both trees in explicit roots (so the gene-tree-root
+duplication is counted) and inserts losses **per edge, per copy** — `std_mirror`
+walks the species path `T→M(child)` inserting each off-path species subtree as a
+lost lineage, and duplication copies each descend the whole `T` subtree
+independently. This is exactly the fix for the legacy under-count: legacy
+`add_losses` reconstructs a node's subtree once with all children present (so a
+duplication's overlapping losses **merge**, a union), whereas per-edge insertion
+never merges (a sum). Validated: `count_losses()` on the annotated tree and the
+duplication marks equal the arithmetic standard score, 0 mismatches over 80,000
+reconciliations. So under `lossmodel=standard` the ASCII/NHX/`.recon` events match
+the reported score, exactly as legacy's do (both count a lost *clade* as one loss
+even though it draws as several `*LOST` leaves).
+
 **Caveats.** Switching **changes the scores** (e.g. `tutorial_multicopy.ph`: best
 tree = 30 under `standard` vs 17 under `legacy`) and can change which supertree
 the search selects, so the two models are not comparable — keep `legacy` to

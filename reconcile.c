@@ -934,6 +934,7 @@ static int  species_lca_tag(int a, int b, int root);
 static void label_gene_tree_rec(struct taxon *gene_position, struct taxon *species_top, int *presence, int xnum);
 static void resolve_tricotomies_mindup(struct taxon *gene_tree, struct taxon *species_tree, int xnum);
 static float recon_standard_score(struct taxon *gene_top, int xnum, int *pd, int *pl);   /* lossmodel=standard; defined after the species depth table */
+struct taxon *annotate_standard(struct taxon *gene_top, struct taxon *species_top, int xnum);   /* lossmodel=standard illustration annotator */
 
 /* =====================================================================
  * Linear-time all-rootings duplication reconciliation (step 1: binary).
@@ -2161,6 +2162,127 @@ void subtree_id(struct taxon * position, int *tmp)
 			}
 		position = position->next_sibling;
 		}
+	}
+
+/* ===================================================================
+ * lossmodel=standard illustration annotator.
+ *
+ * Builds the standard-model reconciled tree for drawing/NHX/.recon so the drawn
+ * events match the arithmetic standard score. Legacy add_losses() merges a
+ * duplication's overlapping lost lineages (union) and skips the gene-tree root;
+ * this instead inserts losses PER EDGE (per copy, never merged) on explicitly
+ * rooted gene+species trees, so count_losses() == the standard loss count and
+ * the duplication marks == the standard dup count. Only used for illustration,
+ * so O(gene*species) allocation is fine. See NOTES §6b.
+ * =================================================================== */
+static int sp_is_anc(int anc, int desc)   /* is species tag `anc` an ancestor-or-self of `desc`? */
+	{
+	while(desc >= 0 && desc < g_species_partag_n)
+		{ if(desc == anc) return 1; desc = g_species_partag[desc]; }
+	return desc == anc;
+	}
+/* Copy a whole species subtree as a lost lineage (every node loss=-1). */
+static struct taxon *std_loss_copy(struct taxon *sp)
+	{
+	struct taxon *g = make_taxon(), *sc, *head = NULL, *tail = NULL;
+	g->tag = sp->tag; g->name = sp->name; g->loss = -1;
+	for(sc = sp->daughter; sc != NULL; sc = sc->next_sibling)
+		{
+		struct taxon *ch = std_loss_copy(sc);
+		if(head == NULL) { head = tail = ch; g->daughter = ch; ch->parent = g; }
+		else { tail->next_sibling = ch; ch->prev_sibling = tail; tail = ch; }
+		}
+	return g;
+	}
+/* Mirror the species path from `sp` down to species node `target`, splicing the
+ * gene subtree `gc` in at `target` and creating each off-path species child as a
+ * lost lineage. Returns the top gene node of the reconstructed path (or `gc`
+ * itself if `sp` already is `target`). */
+static struct taxon *std_mirror(struct taxon *sp, int target, struct taxon *gc)
+	{
+	struct taxon *g, *sc, *head = NULL, *tail = NULL;
+	if(sp->tag == target) return gc;
+	g = make_taxon(); g->tag = sp->tag; g->name = sp->name; g->loss = 0;
+	for(sc = sp->daughter; sc != NULL; sc = sc->next_sibling)
+		{
+		struct taxon *rep = sp_is_anc(sc->tag, target) ? std_mirror(sc, target, gc) : std_loss_copy(sc);
+		if(head == NULL) { head = tail = rep; g->daughter = rep; rep->parent = g; }
+		else { tail->next_sibling = rep; rep->prev_sibling = tail; tail = rep; }
+		}
+	return g;
+	}
+/* Insert the losses for gene edge parent `g` (map T) -> child `c` (map Mc, a
+ * strict descendant of T). is_dup: g is a duplication, so this copy descends the
+ * whole T subtree (T's off-path children are lost); otherwise it is a speciation
+ * edge that starts below T (T's split is not a loss). Replaces c's slot under g
+ * with the reconstructed skeleton. */
+static void std_edge(struct taxon *g, struct taxon *c, int T, int Mc, int is_dup, struct taxon *SR)
+	{
+	struct taxon *Tnode = get_branch(SR, T), *sc, *pv = c->prev_sibling, *nx = c->next_sibling;
+	struct taxon *head = NULL, *tail = NULL;
+	if(Tnode == NULL) return;
+	c->prev_sibling = NULL; c->next_sibling = NULL; c->parent = NULL;
+	for(sc = Tnode->daughter; sc != NULL; sc = sc->next_sibling)
+		{
+		struct taxon *rep;
+		if(sp_is_anc(sc->tag, Mc)) rep = std_mirror(sc, Mc, c);   /* path toward Mc */
+		else if(is_dup) rep = std_loss_copy(sc);                  /* off-path lost by this copy */
+		else continue;                                            /* speciation: handled by sibling gene children */
+		if(head == NULL) { head = tail = rep; } else { tail->next_sibling = rep; rep->prev_sibling = tail; tail = rep; }
+		}
+	if(head == NULL) head = tail = c;   /* nothing skipped/added: keep c */
+	if(pv != NULL) { pv->next_sibling = head; head->prev_sibling = pv; }
+	else g->daughter = head;
+	head->parent = g;
+	tail->next_sibling = nx; if(nx != NULL) nx->prev_sibling = tail;
+	}
+/* Post-order: mark standard duplications (loss=2) and insert per-edge losses. */
+static void annotate_std_rec(struct taxon *g, struct taxon *SR)
+	{
+	struct taxon *c, *next; int T, is_dup = 0;
+	for(c = g->daughter; c != NULL; c = c->next_sibling) if(c->daughter) annotate_std_rec(c, SR);
+	T = g->tag;
+	for(c = g->daughter; c != NULL; c = c->next_sibling)
+		{ int Mc = (c->name != -1) ? c->name : c->tag; if(Mc == T) { is_dup = 1; break; } }
+	if(is_dup) g->loss = 2;
+	for(c = g->daughter; c != NULL; c = next)
+		{
+		int Mc = (c->name != -1) ? c->name : c->tag;
+		next = c->next_sibling;
+		if(Mc == T) continue;   /* kept copy / maps to same node -> no edge loss */
+		std_edge(g, c, T, Mc, is_dup, SR);
+		}
+	}
+static void std_zero_loss(struct taxon *n) { for(; n != NULL; n = n->next_sibling) { n->loss = 0; if(n->daughter) std_zero_loss(n->daughter); } }
+/* Duplicate a subtree regardless of whether its top has a parent (duplicate_tree
+ * requires parent==NULL to treat a node as a top). */
+static struct taxon *dup_subtree(struct taxon *top)
+	{
+	struct taxon *sp = top->parent, *r;
+	top->parent = NULL;
+	temp_top = NULL; duplicate_tree(top, NULL); r = temp_top; temp_top = NULL;
+	top->parent = sp;
+	return r;
+	}
+/* Build and return the standard-model annotated (wrapped) reconciliation of a
+ * copy of gene_top against species_top. Caller draws it and dismantle_tree()s it.
+ * Restores species_top's numbering/partag on the way out. */
+struct taxon *annotate_standard(struct taxon *gene_top, struct taxon *species_top, int xnum)
+	{
+	struct taxon *SR, *R, *sdup, *gdup, *s; int sxnum;
+	(void)xnum;
+	sdup = dup_subtree(species_top);
+	SR = make_taxon(); SR->daughter = sdup; for(s = sdup; s != NULL; s = s->next_sibling) s->parent = SR;
+	sxnum = number_tree1(SR, number_of_taxa) - 1;
+	build_species_partag(SR);
+	gdup = dup_subtree(gene_top);
+	R = make_taxon(); R->daughter = gdup; for(s = gdup; s != NULL; s = s->next_sibling) s->parent = R;
+	std_zero_loss(R);
+	label_gene_tree_rec(R, SR, NULL, sxnum);
+	annotate_std_rec(R, SR);
+	dismantle_tree(SR);
+	number_tree1(species_top, number_of_taxa); build_species_partag(species_top);
+	return R;
 	}
 
 int reconstruct_map(struct taxon *position, struct taxon *species_top)
@@ -3707,6 +3829,12 @@ void reconstruct(int print_settings)  /* Carry out gene-tree reconciliation of s
 			else
 				printf2("%s\t%f\n", tree_names[l], best_total);
 			tree_top = best_mapping;
+			/* lossmodel=standard: best_mapping is unannotated (the arithmetic scorer
+			 * does no reconstruction), so build the standard-model reconciled tree for
+			 * the illustration -- its dup marks and loss lineages match the standard
+			 * score exactly (validated). Legacy mode leaves best_mapping as-is. */
+			if(loss_model == 1)
+				tree_top = annotate_standard(best_mapping, species_tree->daughter, 0);
 			/** ADD IN PRINTFULLNAMED TREE HERE **/
 			temptree[0] = '\0';
 			print_fullnamed_tree(tree_top, temptree, l);
@@ -3791,6 +3919,9 @@ void reconstruct(int print_settings)  /* Carry out gene-tree reconciliation of s
 				gene_tree = NULL;
 				}
 			how_many--;
+			/* lossmodel=standard: dismantle the separate annotated illustration tree */
+			if(loss_model == 1 && tree_top != NULL && tree_top != best_mapping)
+				{ dismantle_tree(tree_top); tree_top = NULL; }
 			if(best_mapping != NULL)
 				{
 				dismantle_tree(best_mapping);
