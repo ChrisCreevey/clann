@@ -68,6 +68,7 @@ extern float  num_partitions, total_partitions, sprscore;
 extern float *best_topology_scores, **weighted_scores, *sourcetree_scores;
 extern float *score_of_bootstraps, *yaptp_results;
 extern float  largest_length, dup_weight, loss_weight, hgt_weight, BESTSCORE;
+extern int    loss_model;   /* recon loss model: 0 = legacy (Clann reconstruction), 1 = standard DL depth formula */
 extern float  ml_beta;
 extern int    ml_scale;
 extern double ml_eta;    /* [experimental] tree-size scaling exponent: 0=Steel 2008, 1=normalised, >1=downweight large trees */

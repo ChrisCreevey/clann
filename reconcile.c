@@ -933,6 +933,7 @@ static void build_species_partag(struct taxon *species_top);
 static int  species_lca_tag(int a, int b, int root);
 static void label_gene_tree_rec(struct taxon *gene_position, struct taxon *species_top, int *presence, int xnum);
 static void resolve_tricotomies_mindup(struct taxon *gene_tree, struct taxon *species_tree, int xnum);
+static float recon_standard_score(struct taxon *gene_top, int xnum, int *pd, int *pl);   /* lossmodel=standard; defined after the species depth table */
 
 /* =====================================================================
  * Linear-time all-rootings duplication reconciliation (step 1: binary).
@@ -1547,6 +1548,13 @@ float tree_map_prepared(struct taxon * gene_top, struct taxon * species_top, int
 
 	/* label the gene tree against the (already-numbered) species tree */
 	label_gene_tree_rec(gene_top, species_top, NULL, xnum);
+	if(loss_model == 1)   /* lossmodel=standard: arithmetic DL score, no reconstruction */
+		{
+		int d = 0, l = 0;
+		float sc = recon_standard_score(gene_top, xnum, &d, &l);
+		if(print) fprintf(distributionreconfile, "%d\t%d\n", d, l);
+		return sc;
+		}
 	/* duplications: a node whose id equals one of its daughters' ids */
 	num_dups = reconstruct_map(gene_top, species_top);
 	/* Losses are the expensive part (add_losses reconstructs the missing
@@ -1947,6 +1955,106 @@ static int  g_species_partag_n = 0;
 #ifdef _OPENMP
 #pragma omp threadprivate(g_species_partag, g_species_depth, g_species_partag_n)
 #endif
+
+/* ---- lossmodel=standard: textbook duplication-loss reconciliation ----------
+ * A non-mutating, allocation-free score matching the standard DL parsimony
+ * model (as used by NOTUNG/DupTree/ete3), replacing Clann's legacy add_losses()
+ * subtree reconstruction. Call on the labelled gene tree (label_gene_tree_rec
+ * done) with build_species_partag() already run.
+ *
+ * For a gene node g mapped to species node T=M(g), with children mapped to M(c):
+ *   duplication iff some child maps to T;
+ *   losses = sum_c (depth(M(c)) - depth(T)),  minus (#children) at speciations.
+ * The rooted gene tree's root is the implicit parent of the top-level forest
+ * siblings; it is charged too (mapped to the LCA of the siblings' maps). Species
+ * nodes above the depth-0 forest top (the sentinel root) are treated as depth -1
+ * so a clean root split scores zero losses. */
+static int sp_depth(int tag)
+	{
+	if(tag < 0 || tag >= g_species_partag_n) return -1;   /* sentinel/out-of-range: above the forest top */
+	return g_species_depth[tag];
+	}
+/* Top-level forest component of a species tag (its parent==-1 ancestor). Clann's
+ * rooted species tree is a 2+ component forest with the true root implicit above
+ * the depth-0 components; a gene node whose children fall in different components
+ * maps to that implicit root, which must be treated as depth -1 (not the reused
+ * xnum tag of one component). */
+static int sp_comp(int tag)
+	{
+	if(tag < 0 || tag >= g_species_partag_n) return -1;
+	while(g_species_partag[tag] >= 0) tag = g_species_partag[tag];
+	return tag;
+	}
+/* STD_ROOT marks the implicit whole-tree root above Clann's species forest -- the
+ * component a gene node maps into when its leaves span >1 top-level component.
+ * Deriving it from the leaves (bottom-up) makes it immune to the sentinel/xnum
+ * tag collision (the implicit root and the top real component node share a tag). */
+#define STD_ROOT (-99)
+
+/* Single O(n) post-order pass. Charges the standard DL dup/loss cost of the
+ * subtree rooted at `node` (this node included when it is internal): returns the
+ * subtree's forest component (STD_ROOT if it spans), and writes the depth of the
+ * species node it maps to (-1 for the implicit root) to *out_depth. For an
+ * internal node with children c_i mapping to depth d_i and this node to depth dT:
+ *   losses += sum_i(d_i - dT) - (#children if speciation, else 0);
+ *   speciation unless a child maps to the same species node (duplication). */
+static int std_score_rec(struct taxon *node, int *dups, int *losses, int *out_depth)
+	{
+	struct taxon *c;
+	if(node->daughter == NULL) { *out_depth = sp_depth(node->name); return sp_comp(node->name); }
+	{
+	int T = node->tag, mycomp = -2, nchild = 0, sum_child_depth = 0, child_span = 0, real_dup = 0, dT, is_dup;
+	for(c = node->daughter; c != NULL; c = c->next_sibling)
+		{
+		int cd, ccomp = std_score_rec(c, dups, losses, &cd);
+		sum_child_depth += cd;
+		if(mycomp == -2) mycomp = ccomp; else if(ccomp != mycomp) mycomp = STD_ROOT;
+		if(ccomp == STD_ROOT) child_span = 1;
+		{ int Mc = (c->name != -1) ? c->name : c->tag; if(Mc == T) real_dup = 1; }
+		nchild++;
+		}
+	dT = (mycomp == STD_ROOT) ? -1 : sp_depth(T);
+	is_dup = (mycomp == STD_ROOT) ? child_span : real_dup;
+	*losses += (sum_child_depth - nchild * dT) - (is_dup ? 0 : nchild);
+	if(is_dup) (*dups)++;
+	*out_depth = dT;
+	return mycomp;
+	}
+	}
+
+static float recon_standard_score(struct taxon *gene_top, int xnum, int *pd, int *pl)
+	{
+	int dups = 0, losses = 0, Rcomp = -2, k = 0, sum_child_depth = 0, child_span = 0, Troot = -1;
+	struct taxon *s;
+	/* Charge every internal gene node (one pass), gathering the top-level forest
+	 * siblings' components/depths for the implicit root -- the gene tree's own root. */
+	for(s = gene_top; s != NULL; s = s->next_sibling)
+		{
+		int cd, ccomp = std_score_rec(s, &dups, &losses, &cd);
+		sum_child_depth += cd;
+		if(Rcomp == -2) Rcomp = ccomp; else if(ccomp != Rcomp) Rcomp = STD_ROOT;
+		if(ccomp == STD_ROOT) child_span = 1;
+		k++;
+		}
+	if(k >= 2)
+		{
+		int dR, is_dup;
+		if(Rcomp == STD_ROOT) { dR = -1; is_dup = child_span; }
+		else   /* siblings share one component: root maps to their real LCA within it */
+			{
+			int real_dup = 0;
+			for(s = gene_top; s != NULL; s = s->next_sibling){ int Ms = (s->name != -1) ? s->name : s->tag; Troot = (Troot < 0) ? Ms : species_lca_tag(Troot, Ms, xnum); }
+			dR = sp_depth(Troot);
+			for(s = gene_top; s != NULL; s = s->next_sibling){ int Ms = (s->name != -1) ? s->name : s->tag; if(Ms == Troot) { real_dup = 1; break; } }
+			is_dup = real_dup;
+			}
+		losses += (sum_child_depth - k * dR) - (is_dup ? 0 : k);
+		if(is_dup) dups++;
+		}
+	if(pd) *pd = dups;
+	if(pl) *pl = losses;
+	return dup_weight * (float)dups + loss_weight * (float)losses;
+	}
 
 static void build_partag_rec(struct taxon *node, int parent_tag, int depth)
 	{
@@ -3225,6 +3333,12 @@ void reconstruct(int print_settings)  /* Carry out gene-tree reconciliation of s
 				printf2("Error: '%s' is an invalid value for losses\n", parsed_command[i+1]);
 				error = TRUE;
 				}
+			}
+		if(strcmp(parsed_command[i], "lossmodel") == 0)
+			{
+			if(strcmp(parsed_command[i+1], "standard") == 0) loss_model = 1;
+			else if(strcmp(parsed_command[i+1], "legacy") == 0) loss_model = 0;
+			else { printf2("Error: lossmodel must be 'standard' or 'legacy'\n"); error = TRUE; }
 			}
 		}
 	/* Resolve species tree source and validate */

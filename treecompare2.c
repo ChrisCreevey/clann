@@ -246,6 +246,7 @@ int seed, num_commands = 0, number_retained_supers = 10, number_of_steps = 99999
 struct taxon *tree_top = NULL, *temp_top = NULL, *temp_top2 = NULL, *branchpointer = NULL, *longestseq = NULL;
 float *scores_retained_supers = NULL, *partition_number = NULL, num_partitions = 0, total_partitions = 0, sprscore = -1, *best_topology_scores = NULL, **weighted_scores = NULL, *sourcetree_scores = NULL, *tree_weights = NULL;
 float *score_of_bootstraps = NULL, *yaptp_results = NULL, largest_length = 0, dup_weight = 1, loss_weight = 1, hgt_weight = 1, BESTSCORE = -1;
+int   loss_model = 0;   /* recon loss model: 0 = legacy (Clann reconstruction), 1 = standard DL depth formula (lossmodel=standard) */
 float ml_beta = 1.0f;   /* L.U.st exponential slope parameter (default 1.0) */
 int   ml_scale = 2;     /* ML score scale: 0=paper (raw sum), 1=lust (log10), 2=lnl (default) */
 double ml_eta = 0.0;    /* [experimental] tree-size scaling exponent: 0=Steel 2008, 1=normalised, >1=downweight large trees */
@@ -4039,6 +4040,12 @@ void heuristic_search(int user, int print, int sample, int nreps)
 					error = TRUE;
 					}
 				}
+				if(strcmp(parsed_command[i], "lossmodel") == 0)
+					{
+					if(strcmp(parsed_command[i+1], "standard") == 0) loss_model = 1;
+					else if(strcmp(parsed_command[i+1], "legacy") == 0) loss_model = 0;
+					else { printf2("Error: lossmodel must be 'standard' or 'legacy'\n"); error = TRUE; }
+					}
 			}
 		if(strcmp(parsed_command[i], "nthreads") == 0)
 			{
