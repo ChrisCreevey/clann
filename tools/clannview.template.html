@@ -1,0 +1,398 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Clann tree viewer</title>
+<style>
+  :root{
+    --bg:#f7f7f8; --panel:#ffffff; --ink:#1c1d20; --muted:#6a6d75; --line:#c9ccd2;
+    --branch:#3a3d44; --accent:#2f6df6; --dup:#d9482b; --spec:#3a3d44; --loss:#9aa0aa;
+    --sel:#2f6df6; --hl:#ffd24d;
+  }
+  :root[data-theme="dark"]{
+    --bg:#16171a; --panel:#1f2126; --ink:#e9eaee; --muted:#9a9ea8; --line:#3a3d44;
+    --branch:#c4c8d0; --accent:#6ea0ff; --dup:#ff6b4a; --spec:#c4c8d0; --loss:#6b7079;
+    --sel:#6ea0ff; --hl:#b9902a;
+  }
+  *{box-sizing:border-box}
+  html,body{height:100%;margin:0}
+  body{font:13px/1.4 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+       color:var(--ink);background:var(--bg);display:flex;flex-direction:column}
+  header{display:flex;align-items:center;gap:14px;padding:8px 12px;border-bottom:1px solid var(--line);background:var(--panel)}
+  header .title{font-weight:600}
+  header .meta{color:var(--muted);font-size:12px}
+  header .meta b{color:var(--ink);font-weight:600}
+  .spacer{flex:1}
+  main{flex:1;display:flex;min-height:0}
+  #side{width:230px;flex:none;border-right:1px solid var(--line);background:var(--panel);
+        overflow:auto;padding:10px}
+  #side h4{margin:12px 0 6px;font-size:11px;text-transform:uppercase;letter-spacing:.04em;color:var(--muted)}
+  #side h4:first-child{margin-top:0}
+  .row{display:flex;align-items:center;gap:8px;margin:5px 0}
+  .row label{flex:1;user-select:none}
+  .seg{display:flex;border:1px solid var(--line);border-radius:6px;overflow:hidden}
+  .seg button{flex:1;border:0;background:transparent;color:var(--ink);padding:4px 6px;cursor:pointer;font:inherit}
+  .seg button.on{background:var(--accent);color:#fff}
+  input[type=range]{width:100%}
+  input[type=search]{width:100%;padding:4px 6px;border:1px solid var(--line);border-radius:6px;background:var(--bg);color:var(--ink)}
+  button.act{width:100%;padding:5px 8px;border:1px solid var(--line);border-radius:6px;background:var(--bg);color:var(--ink);cursor:pointer;margin:3px 0;font:inherit}
+  button.act:hover{border-color:var(--accent)}
+  button.act.warn{color:var(--dup)}
+  #wrap{flex:1;position:relative;overflow:hidden}
+  svg{width:100%;height:100%;display:block;cursor:grab;background:var(--bg)}
+  svg.grab{cursor:grabbing}
+  svg.reroot{cursor:crosshair}
+  .branch{stroke:var(--branch);stroke-width:1.5;fill:none}
+  .branch.hit{stroke:transparent;stroke-width:9;cursor:pointer}
+  .branch.sel{stroke:var(--sel);stroke-width:2.5}
+  .lossbranch{stroke:var(--loss);stroke-width:1.4;stroke-dasharray:3 3;fill:none}
+  .leaflabel{fill:var(--ink);cursor:default}
+  .leaflabel.dim{fill:var(--muted)}
+  .leaflabel.hl{fill:#000}
+  .intlabel{fill:var(--muted);font-size:10px}
+  .support{fill:var(--muted);font-size:10px}
+  .nodeglyph{cursor:pointer}
+  .hlbox{fill:var(--hl);opacity:.35}
+  .collapsed{fill:var(--branch);opacity:.8;cursor:pointer}
+  .tip{position:absolute;pointer-events:none;background:var(--panel);border:1px solid var(--line);
+       border-radius:6px;padding:6px 8px;font-size:12px;box-shadow:0 4px 14px rgba(0,0,0,.18);max-width:280px;display:none;z-index:5}
+  .tip b{color:var(--ink)} .tip .ev{font-weight:600}
+  .legend{position:absolute;left:10px;bottom:10px;background:var(--panel);border:1px solid var(--line);
+          border-radius:8px;padding:8px 10px;font-size:12px;box-shadow:0 3px 10px rgba(0,0,0,.12)}
+  .legend div{display:flex;align-items:center;gap:7px;margin:3px 0}
+  .sw{width:14px;height:14px;flex:none;display:inline-block}
+  .hint{color:var(--muted);font-size:11px;margin-top:6px}
+  kbd{border:1px solid var(--line);border-bottom-width:2px;border-radius:4px;padding:0 4px;font-size:11px;background:var(--bg)}
+</style>
+</head>
+<body>
+<header>
+  <span class="title" id="hTitle">Clann tree viewer</span>
+  <span class="meta" id="hMeta"></span>
+  <span class="spacer"></span>
+  <button class="act" style="width:auto" id="themeBtn" title="Toggle light/dark">◐</button>
+</header>
+<main>
+  <aside id="side">
+    <h4>Layout</h4>
+    <div class="row"><div class="seg" id="segLayout" style="flex:1">
+      <button data-v="clado" class="on">Cladogram</button><button data-v="phylo">Phylogram</button>
+    </div></div>
+    <div class="row"><label>Row spacing</label></div>
+    <input type="range" id="vspace" min="10" max="46" value="20">
+    <div class="row"><label>Font size</label></div>
+    <input type="range" id="fsize" min="8" max="20" value="12">
+
+    <h4>Show</h4>
+    <div class="row"><label for="tSupport">Support values</label><input type="checkbox" id="tSupport" checked></div>
+    <div class="row"><label for="tLen">Branch lengths</label><input type="checkbox" id="tLen"></div>
+    <div class="row"><label for="tInt">Internal labels</label><input type="checkbox" id="tInt"></div>
+    <div class="row"><label for="tAlign">Align tip labels</label><input type="checkbox" id="tAlign"></div>
+    <div class="row" id="rowLoss"><label for="tLoss">Losses</label><input type="checkbox" id="tLoss" checked></div>
+    <div class="row" id="rowScale"><label for="tScale">Scale bar</label><input type="checkbox" id="tScale" checked></div>
+
+    <h4>Find</h4>
+    <input type="search" id="find" placeholder="highlight taxa (comma-sep)…">
+
+    <h4>Edit</h4>
+    <div class="row"><label>Reroot mode</label><input type="checkbox" id="rerootMode"></div>
+    <div class="hint">Click a branch to reroot there. Click a node dot to collapse/expand.</div>
+    <button class="act" id="ladder">Ladderize ⇅</button>
+    <button class="act" id="expandAll">Expand all</button>
+    <button class="act warn" id="reset">Reset view</button>
+
+    <h4>Export</h4>
+    <button class="act" id="expSvg">Download SVG</button>
+    <button class="act" id="expNwk">Copy Newick (current rooting)</button>
+    <div class="hint" style="margin-top:10px">Scroll to zoom · drag to pan · <kbd>R</kbd> reroot toggle</div>
+  </aside>
+  <div id="wrap">
+    <svg id="svg"><g id="scene"></g></svg>
+    <div class="tip" id="tip"></div>
+    <div class="legend" id="legend"></div>
+  </div>
+</main>
+
+<script>
+/* ============================ EMBEDDED DATA ============================
+   Clann replaces the DATA object below. Format:
+   { type:"tree"|"reconciliation", meta:{...},
+     tree:{ name, length, support, event, species, children:[...] } }
+   event ∈ {null|"speciation"|"duplication"|"loss"}; species = mapped species name. */
+const DATA = /*CLANN_DATA_BEGIN*/ {
+  type:"reconciliation",
+  meta:{title:"tree_7 reconciliation", dataset:"tutorial_multicopy.ph", criterion:"recon",
+        lossmodel:"standard", score:13, dups:3, losses:10},
+  tree:{
+   name:"", event:"duplication", children:[
+    {name:"", event:"speciation", children:[
+      {name:"", event:"duplication", children:[
+        {name:"Human.1", species:"Human", length:0.05},
+        {name:"Human.2", species:"Human", length:0.06}]},
+      {name:"", event:"speciation", children:[
+        {name:"Chimp.1", species:"Chimp", length:0.04},
+        {name:"", event:"loss", species:"Gorilla"}]}]},
+    {name:"", event:"speciation", children:[
+      {name:"", event:"speciation", children:[
+        {name:"", event:"loss", species:"(Mouse,Rat)"},
+        {name:"", event:"speciation", children:[
+          {name:"Dog.1", species:"Dog", length:0.08, support:98},
+          {name:"Cat.1", species:"Cat", length:0.07, support:98}]}]},
+      {name:"", event:"duplication", children:[
+        {name:"Orangutan.1", species:"Orangutan", length:0.06},
+        {name:"", event:"speciation", children:[
+          {name:"Orangutan.2", species:"Orangutan", length:0.05},
+          {name:"", event:"loss", species:"Macaque"}]}]}]}]}
+} /*CLANN_DATA_END*/;
+/* ====================================================================== */
+
+// ---------- model ----------
+let ID=0;
+function build(n, parent){
+  n.id=ID++; n.parent=parent||null; n.collapsed=false;
+  n.children=(n.children||[]).map(c=>build(c,n));
+  n.isLeaf = n.children.length===0 && n.event!=="loss";
+  n.isLoss = n.event==="loss";
+  return n;
+}
+function leaves(n,acc){acc=acc||[];if(n.collapsed||(!n.children.length)){if(!n.isLoss||showLoss)acc.push(n);}else n.children.forEach(c=>leaves(c,acc));return acc;}
+function each(n,f){f(n);n.children.forEach(c=>each(c,f));}
+function depthOf(n){let d=0,p=n;while(p.parent){d++;p=p.parent;}return d;}
+function maxDepth(root){let m=0;each(root,n=>{if(!n.collapsed){m=Math.max(m,depthOf(n));}});return m;}
+
+// ---------- state ----------
+let root=build(structuredClone(DATA.tree),null);
+const isRecon = DATA.type==="reconciliation";
+let showLoss=true, layout="clado", vspace=20, fsize=12;
+let opt={support:true,len:false,intl:false,align:false,scale:true};
+let view={k:1,x:40,y:20};
+let rerootOn=false, hlSet=new Set();
+
+// ---------- layout ----------
+function computeLayout(){
+  // y by leaf order
+  const ls=[]; (function order(n){ if(n.collapsed||!n.children.length){ if(!n.isLoss||showLoss) ls.push(n);} else n.children.forEach(order);} )(root);
+  ls.forEach((n,i)=>n._y=i*vspace);
+  // internal y = mean of visible children
+  (function setY(n){
+    if(n.collapsed||!n.children.length) return n._y;
+    const ys=n.children.filter(c=>!c.isLoss||showLoss).map(setY);
+    n._y = ys.length? (Math.min(...ys)+Math.max(...ys))/2 : (n._y||0);
+    return n._y;
+  })(root);
+  // x
+  const md=Math.max(1,maxDepth(root));
+  let maxLen=0; (function cl(n,acc){n._cl=acc;maxLen=Math.max(maxLen,acc);if(!n.collapsed)n.children.forEach(c=>cl(c,acc+(c.length||0)));})(root,0);
+  const W=Math.max(360, (typeof innerWidth!=='undefined'?innerWidth:900)-560);
+  const xstep=Math.max(26, W/(md+1));
+  each(root,n=>{
+    if(layout==="phylo" && maxLen>0){ n._x = (n._cl/maxLen)*(W-10); }
+    else { n._x = depthOf(n)*xstep; }
+  });
+  root._x = layout==="phylo"?0:0;
+  return {ls, W, maxLen};
+}
+
+// ---------- render ----------
+const svg=document.getElementById('svg'), scene=document.getElementById('scene'), tip=document.getElementById('tip');
+function el(t,a){const e=document.createElementNS('http://www.w3.org/2000/svg',t);for(const k in a)e.setAttribute(k,a[k]);return e;}
+function render(){
+  const {ls}=computeLayout();
+  scene.innerHTML='';
+  const tipX = Math.max(...leaves(root).map(n=>n._x));
+  // edges
+  each(root,n=>{
+    if(!n.parent) return;
+    if(n.isLoss && !showLoss) return;
+    const p=n.parent;
+    const cls = n.isLoss?'lossbranch':'branch';
+    // elbow: vertical at parent.x, horizontal to n.x
+    const path=`M${p._x},${p._y} V${n._y} H${n._x}`;
+    scene.appendChild(el('path',{d:path,class:cls}));
+    if(!n.isLoss){
+      const hit=el('path',{d:path,class:'branch hit','data-id':n.id});
+      hit.addEventListener('click',ev=>{ev.stopPropagation(); if(rerootOn) doReroot(n); else selectBranch(n);});
+      hit.addEventListener('mousemove',e=>showTip(e,n,true));
+      hit.addEventListener('mouseleave',hideTip);
+      scene.appendChild(hit);
+    }
+  });
+  // vertical connectors handled by V in path above; but ensure the parent's vertical spans children:
+  each(root,n=>{
+    if(n.collapsed||n.children.length<2) return;
+    const vis=n.children.filter(c=>!c.isLoss||showLoss);
+    if(vis.length<2) return;
+    const y0=Math.min(...vis.map(c=>c._y)), y1=Math.max(...vis.map(c=>c._y));
+    scene.appendChild(el('path',{d:`M${n._x},${y0} V${y1}`,class:'branch'}));
+  });
+  // nodes + labels
+  each(root,n=>{
+    if(n.isLoss){ if(showLoss){ // loss stub marker
+        scene.appendChild(el('circle',{cx:n._x,cy:n._y,r:3.2,fill:'none',stroke:'var(--loss)','stroke-width':1.4}));
+        const t=el('text',{x:n._x+7,y:n._y+3.5,class:'intlabel','font-size':Math.max(9,fsize-2)});
+        t.textContent='✕ '+(n.species||'loss'); t.style.fill='var(--loss)'; scene.appendChild(t);
+      } return; }
+    if(n.collapsed){
+      // triangle
+      const nleaf=leaves(n).length||1, h=Math.min(60,6+nleaf*3);
+      const tri=el('path',{d:`M${n._x},${n._y} L${n._x+34},${n._y-h/2} L${n._x+34},${n._y+h/2} Z`,class:'collapsed'});
+      tri.addEventListener('click',ev=>{ev.stopPropagation();n.collapsed=false;render();});
+      scene.appendChild(tri);
+      const t=el('text',{x:n._x+40,y:n._y+4,class:'leaflabel','font-size':fsize});
+      t.textContent=(n.name||('▸ '+nleaf+' taxa')); scene.appendChild(t);
+      return;
+    }
+    if(n.isLeaf){
+      const lx = opt.align? tipX+8 : n._x+7;
+      if(opt.align && lx>n._x+7) scene.appendChild(el('path',{d:`M${n._x},${n._y} H${lx-3}`,class:'lossbranch'}));
+      const t=el('text',{x:lx,y:n._y+fsize*0.34,class:'leaflabel','font-size':fsize});
+      t.textContent=n.name||'?';
+      if(hlSet.size){ if(matchHL(n)) t.classList.add('hl'); else t.classList.add('dim'); }
+      t.addEventListener('mousemove',e=>showTip(e,n,false));
+      t.addEventListener('mouseleave',hideTip);
+      scene.appendChild(t);
+    }
+    // node glyph (event)
+    if(isRecon && n.children.length){
+      let g;
+      if(n.event==="duplication"){ g=el('rect',{x:n._x-4,y:n._y-4,width:8,height:8,fill:'var(--dup)',class:'nodeglyph'}); }
+      else { g=el('circle',{cx:n._x,cy:n._y,r:3,fill:'var(--spec)',class:'nodeglyph'}); }
+      g.setAttribute('data-id',n.id);
+      g.addEventListener('click',ev=>{ev.stopPropagation(); n.collapsed=!n.collapsed; render();});
+      g.addEventListener('mousemove',e=>showTip(e,n,false));
+      g.addEventListener('mouseleave',hideTip);
+      scene.appendChild(g);
+    } else if(!isRecon && n.children.length){
+      const g=el('circle',{cx:n._x,cy:n._y,r:2.6,fill:'var(--branch)',class:'nodeglyph'});
+      g.addEventListener('click',ev=>{ev.stopPropagation();n.collapsed=!n.collapsed;render();});
+      scene.appendChild(g);
+    }
+    // support / internal labels
+    if(n.children.length && !n.collapsed){
+      if(opt.support && n.support!=null){
+        const t=el('text',{x:n._x-4,y:n._y-5,class:'support','text-anchor':'end'}); t.textContent=n.support; scene.appendChild(t);
+      }
+      if(opt.intl && n.name){
+        const t=el('text',{x:n._x+5,y:n._y-5,class:'intlabel'}); t.textContent=n.name; scene.appendChild(t);
+      }
+    }
+  });
+  // branch length labels
+  if(opt.len && layout==="phylo"){
+    each(root,n=>{ if(n.parent && n.length && !n.isLoss){ const t=el('text',{x:(n.parent._x+n._x)/2,y:n._y-3,class:'support','text-anchor':'middle'}); t.textContent=(+n.length).toFixed(3); scene.appendChild(t);} });
+  }
+  applyView();
+  drawLegend();
+}
+function selectBranch(n){ document.querySelectorAll('.branch.sel').forEach(e=>e.classList.remove('sel')); }
+function matchHL(n){ const s=(n.name||'')+' '+(n.species||''); return [...hlSet].some(q=>s.toLowerCase().includes(q)); }
+
+// ---------- reroot ----------
+function doReroot(node){
+  // reroot on the edge above `node`: new root between node and node.parent
+  if(!node.parent) return;
+  // collect path node -> ... -> oldroot
+  const nr={name:"",children:[],event:isRecon?"speciation":null};
+  let cur=node, par=node.parent;
+  // detach node from par
+  removeChild(par,cur);
+  nr.children.push(cur); cur.parent=nr;
+  // reverse the chain up to root
+  let prev=nr, child=par;
+  while(child){
+    const up=child.parent;
+    if(up) removeChild(up,child);
+    child.parent=prev; prev.children.push(child);
+    prev=child; child=up;
+  }
+  // recompute events for recon (mapping is now stale -> mark unknown)
+  ID=0; root=build(nr,null);
+  if(isRecon){ each(root,n=>{ if(n.children.length && !n.isLoss){ n.event=n.event||"speciation"; }}); staleWarn=true; updateMeta(); }
+  render();
+}
+function removeChild(p,c){ p.children=p.children.filter(x=>x!==c); }
+let staleWarn=false;
+
+// ---------- newick ----------
+function toNewick(n){
+  if(!n.children.length){ return (n.name||'').replace(/[(),:;]/g,'_') + (n.length!=null?':'+n.length:''); }
+  return '('+n.children.filter(c=>!c.isLoss).map(toNewick).join(',')+')'+(n.support!=null?n.support:'')+(n.length!=null?':'+n.length:'');
+}
+
+// ---------- view / zoom / pan ----------
+function applyView(){ scene.setAttribute('transform',`translate(${view.x},${view.y}) scale(${view.k})`); }
+svg.addEventListener('wheel',e=>{e.preventDefault();const r=svg.getBoundingClientRect();const mx=e.clientX-r.left,my=e.clientY-r.top;
+  const f=Math.exp(-e.deltaY*0.0015); const nk=Math.min(8,Math.max(0.15,view.k*f));
+  view.x=mx-(mx-view.x)*(nk/view.k); view.y=my-(my-view.y)*(nk/view.k); view.k=nk; applyView();},{passive:false});
+let drag=null;
+svg.addEventListener('mousedown',e=>{ if(e.target.classList.contains('branch')&&e.target.classList.contains('hit'))return; drag={x:e.clientX-view.x,y:e.clientY-view.y}; svg.classList.add('grab');});
+window.addEventListener('mousemove',e=>{ if(drag){view.x=e.clientX-drag.x;view.y=e.clientY-drag.y;applyView();}});
+window.addEventListener('mouseup',()=>{drag=null;svg.classList.remove('grab');});
+
+// ---------- tooltip ----------
+function showTip(e,n,isBranch){
+  const r=document.getElementById('wrap').getBoundingClientRect();
+  let h='';
+  if(n.isLeaf||!n.children.length){ h=`<b>${n.name||'?'}</b>`; if(n.species)h+=`<br>species: <b>${n.species}</b>`; }
+  else { h=`<span class="ev" style="color:${n.event==='duplication'?'var(--dup)':'var(--spec)'}">${(n.event||'node').toUpperCase()}</span>`;
+         h+=`<br>${countLeaves(n)} descendant tips`; if(n.support!=null)h+=`<br>support: ${n.support}`; }
+  if(isBranch && n.length!=null) h+=`<br>length: ${(+n.length).toFixed(4)}`;
+  if(isBranch) h+=`<br><span style="color:var(--muted)">${rerootOn?'click: reroot here':'click a node dot to collapse'}</span>`;
+  tip.innerHTML=h; tip.style.display='block';
+  tip.style.left=Math.min(r.width-tip.offsetWidth-6, e.clientX-r.left+12)+'px';
+  tip.style.top=(e.clientY-r.top+12)+'px';
+}
+function hideTip(){tip.style.display='none';}
+function countLeaves(n){let c=0;each(n,x=>{if(!x.children.length&&!x.isLoss)c++;});return c;}
+
+// ---------- legend ----------
+function drawLegend(){
+  const L=document.getElementById('legend');
+  if(!isRecon){L.style.display='none';return;}
+  L.style.display='block';
+  L.innerHTML=`<div><span class="sw" style="background:var(--dup)"></span>Duplication</div>`+
+    `<div><span class="sw" style="background:var(--spec);border-radius:50%"></span>Speciation</div>`+
+    (showLoss?`<div><span class="sw" style="border:1.4px dashed var(--loss)"></span>Loss</div>`:'');
+}
+
+// ---------- controls ----------
+function updateMeta(){
+  const m=DATA.meta||{};
+  document.getElementById('hTitle').textContent=m.title||(isRecon?'Reconciliation':'Tree');
+  let s=[];
+  if(m.dataset)s.push(m.dataset);
+  if(m.criterion)s.push('criterion: <b>'+m.criterion+'</b>');
+  if(m.lossmodel)s.push('lossmodel: <b>'+m.lossmodel+'</b>');
+  if(m.score!=null)s.push('score: <b>'+m.score+'</b>');
+  if(m.dups!=null)s.push('<b>'+m.dups+'</b> dup');
+  if(m.losses!=null)s.push('<b>'+m.losses+'</b> loss');
+  if(staleWarn)s.push('<span style="color:var(--dup)">⚠ re-rooted: mapping stale</span>');
+  document.getElementById('hMeta').innerHTML=s.join(' · ');
+}
+document.getElementById('segLayout').addEventListener('click',e=>{const b=e.target.closest('button');if(!b)return;
+  [...e.currentTarget.children].forEach(x=>x.classList.remove('on'));b.classList.add('on');layout=b.dataset.v;
+  document.getElementById('rowScale').style.display=layout==='phylo'?'flex':'none';render();});
+document.getElementById('vspace').oninput=e=>{vspace=+e.target.value;render();};
+document.getElementById('fsize').oninput=e=>{fsize=+e.target.value;render();};
+const chk=(id,k)=>{document.getElementById(id).onchange=e=>{opt[k]=e.target.checked;render();};};
+chk('tSupport','support');chk('tLen','len');chk('tInt','intl');chk('tAlign','align');chk('tScale','scale');
+document.getElementById('tLoss').onchange=e=>{showLoss=e.target.checked;render();};
+document.getElementById('find').oninput=e=>{hlSet=new Set(e.target.value.split(',').map(s=>s.trim().toLowerCase()).filter(Boolean));render();};
+document.getElementById('rerootMode').onchange=e=>{rerootOn=e.target.checked;svg.classList.toggle('reroot',rerootOn);};
+document.getElementById('ladder').onclick=()=>{ (function lad(n){n.children.sort((a,b)=>countLeaves(a)-countLeaves(b));n.children.forEach(lad);})(root); render();};
+document.getElementById('expandAll').onclick=()=>{each(root,n=>n.collapsed=false);render();};
+document.getElementById('reset').onclick=()=>{ID=0;root=build(structuredClone(DATA.tree),null);staleWarn=false;view={k:1,x:40,y:20};hlSet=new Set();document.getElementById('find').value='';updateMeta();render();};
+document.getElementById('themeBtn').onclick=()=>{const r=document.documentElement;r.dataset.theme=r.dataset.theme==='dark'?'light':'dark';};
+document.getElementById('expSvg').onclick=()=>{const s=new XMLSerializer().serializeToString(svg);const b=new Blob([s],{type:'image/svg+xml'});const a=document.createElement('a');a.href=URL.createObjectURL(b);a.download=(DATA.meta&&DATA.meta.title||'tree')+'.svg';a.click();};
+document.getElementById('expNwk').onclick=()=>{const nwk=toNewick(root)+';';navigator.clipboard&&navigator.clipboard.writeText(nwk);document.getElementById('expNwk').textContent='Copied ✓';setTimeout(()=>document.getElementById('expNwk').textContent='Copy Newick (current rooting)',1200);};
+window.addEventListener('keydown',e=>{if(e.key==='r'||e.key==='R'){const c=document.getElementById('rerootMode');c.checked=!c.checked;c.onchange({target:c});}});
+window.addEventListener('resize',render);
+
+// init
+if(!isRecon){document.getElementById('rowLoss').style.display='none';document.getElementById('legend').style.display='none';}
+document.getElementById('rowScale').style.display=layout==='phylo'?'flex':'none';
+updateMeta(); render();
+</script>
+</body>
+</html>

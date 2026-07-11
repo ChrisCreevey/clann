@@ -20,6 +20,7 @@
  */
 #include "reconcile.h"
 #include "prune.h"   /* for extract_length()/select_longest, reused by decomposegenetrees Stage 2's representative-choice logic */
+#include "viewer_template.h"   /* embedded self-contained interactive HTML tree/reconciliation viewer */
 
 void gene_content_parsimony(struct taxon * position, int * array)
 	{
@@ -3162,6 +3163,84 @@ void make_unrooted(struct taxon * position)
 	}
 
 /* -----------------------------------------------------------------------
+ * Self-contained interactive HTML viewer output.
+ *
+ * Writes a single .html file = the embedded viewer template (viewer_template.h)
+ * with the tree/reconciliation injected as JSON. Opens in any browser, no
+ * dependencies. Works for a plain tree (recon=0: best supertree, NJ tree) or a
+ * reconciled gene tree (recon=1: nodes carry duplication/speciation/loss events,
+ * read off the same loss field the NHX writer uses).
+ * ----------------------------------------------------------------------- */
+static void hv_json_str(FILE *f, const char *s)
+	{
+	fputc('"', f);
+	for(; s != NULL && *s; s++)
+		{
+		if(*s == '"' || *s == '\\') { fputc('\\', f); fputc(*s, f); }
+		else if(*s == '\n') fputs("\\n", f);
+		else if((unsigned char)*s < 0x20) fprintf(f, "\\u%04x", (unsigned)(unsigned char)*s);
+		else fputc(*s, f);
+		}
+	fputc('"', f);
+	}
+static const char *hv_leaf_species(struct taxon *n)
+	{
+	if(n->name >= 0 && n->name < number_of_taxa) return taxa_names[n->name];
+	if(n->tag  >= 0 && n->tag  < number_of_taxa) return taxa_names[n->tag];
+	return NULL;
+	}
+static void hv_json_node(struct taxon *n, FILE *f, int recon)
+	{
+	fputc('{', f);
+	if(n->daughter != NULL)
+		{
+		struct taxon *c; int first = 1;
+		if(recon) fprintf(f, "\"event\":\"%s\",", (n->loss == 2) ? "duplication" : "speciation");
+		if(recon && n->tag >= 0 && n->tag < number_of_taxa) { fputs("\"species\":", f); hv_json_str(f, taxa_names[n->tag]); fputc(',', f); }
+		fputs("\"children\":[", f);
+		for(c = n->daughter; c != NULL; c = c->next_sibling) { if(!first) fputc(',', f); first = 0; hv_json_node(c, f, recon); }
+		fputc(']', f);
+		}
+	else if(recon && n->loss == -1)
+		{
+		const char *sp = hv_leaf_species(n);
+		fputs("\"event\":\"loss\"", f);
+		if(sp != NULL) { fputs(",\"species\":", f); hv_json_str(f, sp); }
+		}
+	else
+		{
+		const char *nm = n->fullname ? n->fullname : ((n->name >= 0 && n->name < number_of_taxa) ? taxa_names[n->name] : "?");
+		fputs("\"name\":", f); hv_json_str(f, nm);
+		if(recon) { const char *sp = hv_leaf_species(n); if(sp != NULL) { fputs(",\"species\":", f); hv_json_str(f, sp); } }
+		if(n->length != 0) fprintf(f, ",\"length\":%g", (double)n->length);
+		}
+	fputc('}', f);
+	}
+/* metajson: a JSON object string (e.g. {"title":"...","score":30}); may be NULL. */
+static void write_html_view(struct taxon *tree, const char *filename, const char *metajson, int recon)
+	{
+	FILE *f = fopen(filename, "w");
+	if(f == NULL) { printf2("Warning: could not open HTML view file '%s'\n", filename); return; }
+	fputs(VIEWER_HTML_HEAD, f);
+	fputs("{\"type\":", f); fputs(recon ? "\"reconciliation\"" : "\"tree\"", f);
+	fputs(",\"meta\":", f); fputs(metajson ? metajson : "{}", f);
+	fputs(",\"tree\":", f);
+	if(tree != NULL && tree->next_sibling != NULL)   /* forest top: wrap in a synthetic root */
+		{
+		struct taxon *c; int first = 1;
+		fputs(recon ? "{\"event\":\"speciation\",\"children\":[" : "{\"children\":[", f);
+		for(c = tree; c != NULL; c = c->next_sibling) { if(!first) fputc(',', f); first = 0; hv_json_node(c, f, recon); }
+		fputs("]}", f);
+		}
+	else if(tree != NULL) hv_json_node(tree, f, recon);
+	else fputs("null", f);
+	fputc('}', f);
+	fputs(VIEWER_HTML_TAIL, f);
+	fclose(f);
+	printf2("Interactive HTML view written to: %s\n", filename);
+	}
+
+/* -----------------------------------------------------------------------
  * NHX (New Hampshire eXtended) output for reconciled gene trees
  *
  * Conventions:
@@ -3274,6 +3353,7 @@ void reconstruct(int print_settings)  /* Carry out gene-tree reconciliation of s
 	char *temptree2 = malloc(TREE_LENGTH * sizeof(char));
 	char reconfilename[100], otherfilename[100], *tmp1 = NULL, c = '\0', speciestree_file[1000];
 	char nhxfilename[1000];
+	char htmlfilename[1000];
 	FILE *nhxfile = NULL;
 	if(!temptree1 || !temptree2) { free(temptree1); free(temptree2); printf2("Error: out of memory in reconstruct\n"); return; }
 	FILE *reconstructionfile = NULL, *descendentsfile = NULL, *genebirthfile = NULL;
@@ -3285,6 +3365,7 @@ void reconstruct(int print_settings)  /* Carry out gene-tree reconciliation of s
 	reconfilename[0] ='\0';
 	otherfilename[0] = '\0';
 	nhxfilename[0] = '\0';
+	htmlfilename[0] = '\0';
 	
 	tmp1 = malloc(TREE_LENGTH*sizeof(char));
 	tmp1[0] = '\0';
@@ -3329,6 +3410,13 @@ void reconstruct(int print_settings)  /* Carry out gene-tree reconciliation of s
 				}
 			else
 				strncpy(nhxfilename, parsed_command[i+1], sizeof(nhxfilename)-1);
+			}
+		if(strcmp(parsed_command[i], "htmlview") == 0)
+			{
+			if(strcmp(parsed_command[i+1], "yes") == 0)
+				{ strncpy(htmlfilename, inputfilename, sizeof(htmlfilename)-12); strncat(htmlfilename, ".recon.html", sizeof(htmlfilename)-strlen(htmlfilename)-1); }
+			else
+				strncpy(htmlfilename, parsed_command[i+1], sizeof(htmlfilename)-1);
 			}
 		}
 
@@ -3851,6 +3939,22 @@ void reconstruct(int print_settings)  /* Carry out gene-tree reconciliation of s
 				else
 					fprintf(nhxfile, "# tree_%d  (score=%.4f)\n", l, best_total);
 				fprintf(nhxfile, "%s;\n\n", temptree1);
+				}
+
+			/* Interactive HTML view (one self-contained file per gene tree). tree_top is
+			 * the reconciled/annotated tree in both modes, so the drawn duplications and
+			 * losses match the reported per-tree score. */
+			if(htmlfilename[0] != '\0')
+				{
+				char hf[1100], meta[600], *dot;
+				strncpy(hf, htmlfilename, sizeof(hf)-16);
+				dot = strstr(hf, ".html"); if(dot) *dot = '\0';
+				snprintf(hf+strlen(hf), sizeof(hf)-strlen(hf), ".tree%d.html", l);
+				snprintf(meta, sizeof(meta),
+				         "{\"title\":\"%s reconciliation\",\"dataset\":\"%s\",\"criterion\":\"recon\",\"lossmodel\":\"%s\",\"score\":%.4g}",
+				         (tree_names[l][0] ? tree_names[l] : "gene tree"), inputfilename,
+				         (loss_model==1 ? "standard" : "legacy"), best_total);
+				write_html_view(tree_top, hf, meta, 1);
 				}
 
 			if(dorecon == TRUE)

@@ -59,6 +59,8 @@ clann.log
 clann.log.*
 *.recon
 *.recon.dist
+*.recon.html
+*.tree*.html
 *.onetoone
 *.strict.onetoone
 *.gene.births
