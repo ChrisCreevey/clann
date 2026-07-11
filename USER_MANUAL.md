@@ -406,8 +406,11 @@ These control *how thoroughly* each replicate searches. The defaults favour reli
 | `losses` | `<float>` | 1.0 | Cost weight applied to each gene loss event. |
 | `numspeciesrootings` | `<integer>`, `all`, `mindup` | `mindup` | How the species-tree rooting is chosen when scoring reconciliations. `mindup` (default) restricts scoring to the minimum-duplication rootings — near-exhaustive accuracy, deterministic, and fast. `all` tries every rooting (exhaustive/exact but slow). `<n>` samples `n` random rootings (fast but noisy — not recommended). |
 | `numgenerootings` | `<integer>`, `all`, `mindup` | `mindup` | Same choices, for the gene-tree rooting trialled per species-tree rooting. Default `mindup`. |
+| `lossmodel` | `legacy`, `standard` | `legacy` | Which duplication-loss model scores each reconciliation. `legacy` (default) is Clann's original count. `standard` is the textbook LCA-mapping DL model used by NOTUNG/DupTree/ete3 — allocation-free and faster, but it **changes the scores** (see note below). Accepted by both `hs` and `reconstruct`. |
 
 > **Why `mindup` is the default.** Random rooting samples (the old `2×2` default) badly overestimate the reconciliation cost and are noisy enough to misrank candidate supertrees during the search, so it settles on worse trees. Exhaustive rooting (`all`) is accurate but O(N²) in the number of rootings. `mindup` restricts the expensive dup+loss scoring to the *minimum-duplication* rootings (found cheaply with a linear-time algorithm), which are where the optimum almost always lies — giving exhaustive-quality search results deterministically at a fraction of the cost. See [`NOTES_species-gene-tree-reconciliation.md`](NOTES_species-gene-tree-reconciliation.md) for the full rationale.
+
+> **`lossmodel=standard` — what changes.** The `legacy` model reconstructs the missing species subtrees to count losses; it undercounts multi-copy losses (it merges overlapping lost lineages rather than summing them) and charges the unrooted tree top differently from the textbook model, so its numbers are not directly comparable to other reconciliation tools. `standard` computes the classic LCA-mapping duplication-loss cost — validated to match ete3 exactly — with a single O(N) pass and no allocation, so it is also faster. It is **opt-in** because switching **changes the reported scores** (e.g. on `examples/tutorial_multicopy.ph` the best tree scores 30 under `standard` vs 17 under `legacy`) and may change which supertree the search selects; results from the two models are not comparable. Use it for cross-tool comparability or a faster loss computation; keep `legacy` to reproduce earlier Clann results. Note that `mindup` rooting is a slightly looser proxy under `standard`, so pair it with `numspeciesrootings=all numgenerootings=all` if you need the exact standard optimum. Both `hs criterion=recon` and `reconstruct` must be given the same `lossmodel` for their numbers to agree.
 
 #### Options for mrp criterion (criterion 1)
 
@@ -432,6 +435,7 @@ set mlbeta=1.0
 hs nreps=10 nthreads=8
 set criterion=recon
 hs nreps=10 duplications=1.0 losses=0.5 numspeciesrootings=5
+hs nreps=10 lossmodel=standard              # textbook DL model (scores differ from legacy)
 hs nreps=20 nthreads=8 visitedtrees=landscape.tsv
 ```
 
@@ -673,6 +677,7 @@ reconstruct [options]
 | `speciestree` | `memory`, `first`, `<filename>` | `memory` | Source of the species tree. `memory` uses the supertree most recently produced by `hs`, `nj`, or `alltrees`. `first` uses the first source tree (legacy behaviour). A filename reads the species tree from a file. |
 | `dups` / `duplications` | `<float>` | 1.0 | Cost applied to each duplication event. |
 | `losses` | `<float>` | 1.0 | Cost applied to each gene loss event. |
+| `lossmodel` | `legacy`, `standard` | `legacy` | Duplication-loss model (see the [recon criterion options](#options-for-recon-criterion-criterion-5-only)). To have `reconstruct`'s totals match an `hs criterion=recon` search, give both the same `lossmodel`. |
 | `basescore` | `<float>` | 1.0 | Score used when resolving polytomies in gene trees. |
 | `showrecon` | `yes`, `no` | `no` | Print detailed reconciliation information for each node. |
 | `printfiles` | `yes`, `no` | `yes` | Generate detailed output files (see [Section 7](#7-output-files-reference)). |

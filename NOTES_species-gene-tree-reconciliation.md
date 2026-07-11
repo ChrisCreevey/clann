@@ -199,6 +199,52 @@ Recording these so they aren't re-attempted:
 
 ---
 
+## 6b. Two loss models: `legacy` (default) and `standard`
+
+Clann's original ("legacy") loss count *reconstructs* the missing species
+subtrees (`add_losses`/`construct_tree` build the implied lost lineages with
+`make_taxon`, then `count_losses` counts the maximal fully-lost subtrees). It is
+self-consistent (identical gene/species tree → 0) but idiosyncratic in two ways
+that make its numbers **not comparable to other reconciliation tools**:
+
+- it counts overlapping multi-copy losses as a **union** (shared region once)
+  rather than the standard per-lineage **sum**; and
+- it charges losses at the unrooted forest top per-sibling, unlike the textbook
+  rooted model.
+
+`lossmodel=standard` (opt-in on both `hs` and `reconstruct`; `legacy` stays the
+default) instead scores the **textbook LCA-mapping duplication-loss model** used
+by NOTUNG/DupTree/ete3: for each internal gene node mapped to species node `T`
+with children mapped to depth `d_i`,
+`losses += Σ_i(d_i − depth(T)) − (#children at speciations)`, duplication iff a
+child maps to `T`; the gene tree's root (the implicit parent of the top-level
+forest siblings) is charged too. It runs in a single **O(N) pass with no
+allocation**, so it is also **faster** than the legacy reconstruction (~1.6–1.8×
+on the tutorials). It was **cross-validated exactly against ete3** (0 mismatches
+on dups *and* losses over 1700+ reconciliations, single- and multi-copy, at every
+rooting the search visits).
+
+The one implementation subtlety: Clann's rooted species tree is stored as a
+2-component *forest* with the true root implicit, and the LCA sentinel reuses the
+`xnum` tag of a real top component — so a root-spanning gene node and a node
+mapping to that real component share a tag. `node_comp()` resolves this by
+deriving each gene node's forest component from its leaves (spanning → the
+implicit root at depth −1), independent of the collided tag.
+
+**Caveats.** Switching **changes the scores** (e.g. `tutorial_multicopy.ph`: best
+tree = 30 under `standard` vs 17 under `legacy`) and can change which supertree
+the search selects, so the two models are not comparable — keep `legacy` to
+reproduce earlier results. And `mindup` is a *looser* proxy under `standard`
+(gene/species min-duplication rootings track the min-dup+loss rooting less
+tightly than in the legacy model — on the tutorial `hs` finds 32 while exhaustive
+`reconstruct` finds 30), so pair `standard` with `numspeciesrootings=all
+numgenerootings=all` when you need the exact standard optimum. This section is
+also *why* §6's "no clean linear loss form" caveat is specifically about an
+**all-rootings** DP for Clann's *legacy* model — the standard *per-rooting* loss
+is a clean O(N) formula, which is exactly what `lossmodel=standard` uses.
+
+---
+
 ## 7. Practical recommendations
 
 - **Just use the defaults.** `hs criterion=recon` now gives accurate,

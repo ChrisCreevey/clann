@@ -82,6 +82,7 @@ static const char *opts_hs[] = {
     "maxexhaustive=", "smoothsearch=", "maxskips=", "droprep=", "maxswaps=",
     /* recon-criterion options */
     "duplications=", "losses=", "numspeciesrootings=", "numgenerootings=",
+    "lossmodel=",
     NULL
 };
 static const char *opts_boot[] = {
@@ -117,7 +118,7 @@ static const char *opts_sprdists[]   = { "filename=", "output=", NULL };
 static const char *opts_consensus[]  = { "savetrees=", "filename=", NULL };
 static const char *opts_reconstruct[]= {
     "speciestree=", "showrecon=", "printfiles=", "nhxfile=",
-    "dups=", "losses=", "basescore=", NULL
+    "dups=", "losses=", "basescore=", "lossmodel=", NULL
 };
 static const char *opts_mlscores[]   = {
     "fixbeta=", "mlbeta=", "mleta=", "mlscale=", "scan", "scanmin=",
@@ -1791,6 +1792,10 @@ void print_commands(int num)
 			printf2("\n\t   rooting used to score reconciliations: mindup = restrict to the minimum-\n"
 			        "\t   duplication rootings (near-exhaustive, deterministic, fast); all = every\n"
 			        "\t   rooting (exhaustive, exact but slow); <n> = n random rootings (fast, noisy)\n");
+			printf2("\n\tlossmodel\t\tlegacy | standard\t\t*legacy");
+			printf2("\n\t   loss model: legacy = the Clann reconstruction count (default); standard =\n"
+			        "\t   the textbook duplication-loss depth model -- comparable to NOTUNG/DupTree,\n"
+			        "\t   faster, but changes scores (multicopy and root losses counted differently)\n");
 			}
 		if(criterion == 7)
 			{
@@ -1841,6 +1846,10 @@ void print_commands(int num)
 			printf2("\n\t   rooting used to score reconciliations: mindup = restrict to the minimum-\n"
 			        "\t   duplication rootings (near-exhaustive, deterministic, fast); all = every\n"
 			        "\t   rooting (exhaustive, exact but slow); <n> = n random rootings (fast, noisy)\n");
+			printf2("\n\tlossmodel\t\tlegacy | standard\t\t*legacy");
+			printf2("\n\t   loss model: legacy = the Clann reconstruction count (default); standard =\n"
+			        "\t   the textbook duplication-loss depth model -- comparable to NOTUNG/DupTree,\n"
+			        "\t   faster, but changes scores (multicopy and root losses counted differently)\n");
 				}
 			if(criterion == 7)
 				{
@@ -1905,6 +1914,10 @@ void print_commands(int num)
 			printf2("\n\t   rooting used to score reconciliations: mindup = restrict to the minimum-\n"
 			        "\t   duplication rootings (near-exhaustive, deterministic, fast); all = every\n"
 			        "\t   rooting (exhaustive, exact but slow); <n> = n random rootings (fast, noisy)\n");
+			printf2("\n\tlossmodel\t\tlegacy | standard\t\t*legacy");
+			printf2("\n\t   loss model: legacy = the Clann reconstruction count (default); standard =\n"
+			        "\t   the textbook duplication-loss depth model -- comparable to NOTUNG/DupTree,\n"
+			        "\t   faster, but changes scores (multicopy and root losses counted differently)\n");
 		}
 
             printf2("\n");
@@ -2064,6 +2077,7 @@ void print_commands(int num)
 		printf2("\tOptions\t\tSettings\t\t\tCurrent\n");
         printf2("\t===========================================================\n");
 		printf2("\n\tduplications\t<value>\t\t\t\t*1.0\n\tlosses\t\t<value>\t\t\t\t*1.0");
+		printf2("\n\tlossmodel\tlegacy | standard\t\t*legacy\n\t   legacy = Clann reconstruction count; standard = textbook DL model (match hs)");
 		printf2("\n\tshowrecon\tyes | no\t\t\t*no\n\tbasescore\t<value>\t\t\t\t*1.0\n\tprintfiles\tyes | no\t\t\t*yes\n\tspeciestree\tmemory | first | <file>\t\t*memory\n\tnhxfile\t\t<filename>\t\t\t*none\n\t   prints nhx-formatted file of resulting reconstructions for all source trees");
 		}
      if(num == 25)
