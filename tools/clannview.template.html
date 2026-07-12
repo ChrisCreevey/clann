@@ -178,9 +178,12 @@ function build(n, parent){
   n.children=(n.children||[]).map(c=>build(c,n));
   n.isLeaf = n.children.length===0 && n.event!=="loss";
   n.isLoss = n.event==="loss";
+  // a whole clade is "lost" if every descendant leaf is a loss: draw all its
+  // internal branches dotted too, not just the leaf stubs.
+  n.lost = n.children.length ? n.children.every(c=>c.lost) : n.isLoss;
   return n;
 }
-function leaves(n,acc){acc=acc||[];if(n.collapsed||(!n.children.length)){if(!n.isLoss||showLoss)acc.push(n);}else n.children.forEach(c=>leaves(c,acc));return acc;}
+function leaves(n,acc){acc=acc||[];if(n.collapsed||(!n.children.length)){if(!n.lost||showLoss)acc.push(n);}else n.children.forEach(c=>leaves(c,acc));return acc;}
 function each(n,f){f(n);n.children.forEach(c=>each(c,f));}
 function depthOf(n){let d=0,p=n;while(p.parent){d++;p=p.parent;}return d;}
 function maxDepth(root){let m=0;each(root,n=>{if(!n.collapsed){m=Math.max(m,depthOf(n));}});return m;}
@@ -202,12 +205,12 @@ let rerootOn=false, hlSet=new Set();
 // ---------- layout ----------
 function computeLayout(){
   // y by leaf order
-  const ls=[]; (function order(n){ if(n.collapsed||!n.children.length){ if(!n.isLoss||showLoss) ls.push(n);} else n.children.forEach(order);} )(root);
+  const ls=[]; (function order(n){ if(n.collapsed||!n.children.length){ if(!n.lost||showLoss) ls.push(n);} else n.children.forEach(order);} )(root);
   ls.forEach((n,i)=>n._y=i*vspace);
   // internal y = mean of visible children
   (function setY(n){
     if(n.collapsed||!n.children.length) return n._y;
-    const ys=n.children.filter(c=>!c.isLoss||showLoss).map(setY);
+    const ys=n.children.filter(c=>!c.lost||showLoss).map(setY);
     n._y = ys.length? (Math.min(...ys)+Math.max(...ys))/2 : (n._y||0);
     return n._y;
   })(root);
@@ -234,13 +237,13 @@ function render(){
   // edges
   each(root,n=>{
     if(!n.parent) return;
-    if(n.isLoss && !showLoss) return;
+    if(n.lost && !showLoss) return;
     const p=n.parent;
-    const cls = n.isLoss?'lossbranch':'branch';
+    const cls = n.lost?'lossbranch':'branch';
     // elbow: vertical at parent.x, horizontal to n.x
     const path=`M${p._x},${p._y} V${n._y} H${n._x}`;
     scene.appendChild(el('path',{d:path,class:cls}));
-    if(!n.isLoss){
+    if(!n.lost){
       const hit=el('path',{d:path,class:'branch hit','data-id':n.id});
       hit.addEventListener('click',ev=>{ev.stopPropagation(); if(rerootOn) doReroot(n); else selectBranch(n);});
       hit.addEventListener('mousemove',e=>showTip(e,n,true));
@@ -251,10 +254,10 @@ function render(){
   // vertical connectors handled by V in path above; but ensure the parent's vertical spans children:
   each(root,n=>{
     if(n.collapsed||n.children.length<2) return;
-    const vis=n.children.filter(c=>!c.isLoss||showLoss);
+    const vis=n.children.filter(c=>!c.lost||showLoss);
     if(vis.length<2) return;
     const y0=Math.min(...vis.map(c=>c._y)), y1=Math.max(...vis.map(c=>c._y));
-    scene.appendChild(el('path',{d:`M${n._x},${y0} V${y1}`,class:'branch'}));
+    scene.appendChild(el('path',{d:`M${n._x},${y0} V${y1}`,class:n.lost?'lossbranch':'branch'}));
   });
   // nodes + labels
   each(root,n=>{
@@ -283,8 +286,9 @@ function render(){
       t.addEventListener('mouseleave',hideTip);
       scene.appendChild(t);
     }
-    // node glyph (event)
-    if(isRecon && n.children.length){
+    // node glyph (event) -- suppressed inside a fully-lost clade (drawn dotted)
+    if(n.lost){ /* no glyph on lost internal nodes */ }
+    else if(isRecon && n.children.length){
       let g;
       if(n.event==="duplication"){ g=el('rect',{x:n._x-4,y:n._y-4,width:8,height:8,fill:'var(--dup)',class:'nodeglyph'}); }
       else { g=el('circle',{cx:n._x,cy:n._y,r:3,fill:'var(--spec)',class:'nodeglyph'}); }
