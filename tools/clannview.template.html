@@ -24,6 +24,12 @@
   header .meta{color:var(--muted);font-size:12px}
   header .meta b{color:var(--ink);font-weight:600}
   .spacer{flex:1}
+  #nav{display:none;align-items:center;gap:5px}
+  #nav button{border:1px solid var(--line);background:var(--bg);color:var(--ink);border-radius:6px;
+              width:26px;height:24px;cursor:pointer;font-size:11px;line-height:1}
+  #nav button:hover{border-color:var(--accent)}
+  #nav select{border:1px solid var(--line);background:var(--bg);color:var(--ink);border-radius:6px;
+              padding:3px 6px;font:inherit;max-width:220px}
   main{flex:1;display:flex;min-height:0}
   #side{width:230px;flex:none;border-right:1px solid var(--line);background:var(--panel);
         overflow:auto;padding:10px}
@@ -69,6 +75,12 @@
 <body>
 <header>
   <span class="title" id="hTitle">Clann tree viewer</span>
+  <span id="nav">
+    <button id="prevT" title="Previous tree (←)">◀</button>
+    <select id="selT" title="Jump to tree"></select>
+    <button id="nextT" title="Next tree (→)">▶</button>
+    <span class="meta" id="cntT"></span>
+  </span>
   <span class="meta" id="hMeta"></span>
   <span class="spacer"></span>
   <button class="act" style="width:auto" id="themeBtn" title="Toggle light/dark">◐</button>
@@ -122,9 +134,15 @@
    event ∈ {null|"speciation"|"duplication"|"loss"}; species = mapped species name. */
 const DATA = /*CLANN_DATA_BEGIN*/ {
   type:"reconciliation",
-  meta:{title:"tree_7 reconciliation", dataset:"tutorial_multicopy.ph", criterion:"recon",
-        lossmodel:"standard", score:13, dups:3, losses:10},
-  tree:{
+  meta:{dataset:"tutorial_multicopy.ph", criterion:"recon", lossmodel:"standard"},
+  trees:[
+   {name:"tree_1", score:1, dups:0, losses:1, tree:{
+     name:"", event:"speciation", children:[
+       {name:"Human.1", species:"Human", length:0.05},
+       {name:"", event:"speciation", children:[
+         {name:"Chimp.1", species:"Chimp", length:0.04},
+         {name:"", event:"loss", species:"Gorilla"}]}]}},
+   {name:"tree_7", score:13, dups:3, losses:10, tree:{
    name:"", event:"duplication", children:[
     {name:"", event:"speciation", children:[
       {name:"", event:"duplication", children:[
@@ -143,7 +161,8 @@ const DATA = /*CLANN_DATA_BEGIN*/ {
         {name:"Orangutan.1", species:"Orangutan", length:0.06},
         {name:"", event:"speciation", children:[
           {name:"Orangutan.2", species:"Orangutan", length:0.05},
-          {name:"", event:"loss", species:"Macaque"}]}]}]}]}
+          {name:"", event:"loss", species:"Macaque"}]}]}]}]}}
+  ]
 } /*CLANN_DATA_END*/;
 /* ====================================================================== */
 
@@ -162,8 +181,14 @@ function depthOf(n){let d=0,p=n;while(p.parent){d++;p=p.parent;}return d;}
 function maxDepth(root){let m=0;each(root,n=>{if(!n.collapsed){m=Math.max(m,depthOf(n));}});return m;}
 
 // ---------- state ----------
-let root=build(structuredClone(DATA.tree),null);
 const isRecon = DATA.type==="reconciliation";
+// normalise to a list of trees (single-tree files still work)
+const TREES = Array.isArray(DATA.trees) ? DATA.trees
+            : [{name:(DATA.meta&&DATA.meta.title)||(isRecon?"reconciliation":"tree"), tree:DATA.tree,
+                score:DATA.meta&&DATA.meta.score, dups:DATA.meta&&DATA.meta.dups, losses:DATA.meta&&DATA.meta.losses}];
+let curIdx=0;
+function curEntry(){ return TREES[curIdx]||{}; }
+let root=build(structuredClone(curEntry().tree),null);
 let showLoss=true, layout="clado", vspace=20, fsize=12;
 let opt={support:true,len:false,intl:false,align:false,scale:true};
 let view={k:1,x:40,y:20};
@@ -358,17 +383,38 @@ function drawLegend(){
 
 // ---------- controls ----------
 function updateMeta(){
-  const m=DATA.meta||{};
-  document.getElementById('hTitle').textContent=m.title||(isRecon?'Reconciliation':'Tree');
+  const m=DATA.meta||{}, e=curEntry();
+  document.getElementById('hTitle').textContent=e.name||m.title||(isRecon?'Reconciliation':'Tree');
   let s=[];
   if(m.dataset)s.push(m.dataset);
   if(m.criterion)s.push('criterion: <b>'+m.criterion+'</b>');
   if(m.lossmodel)s.push('lossmodel: <b>'+m.lossmodel+'</b>');
-  if(m.score!=null)s.push('score: <b>'+m.score+'</b>');
-  if(m.dups!=null)s.push('<b>'+m.dups+'</b> dup');
-  if(m.losses!=null)s.push('<b>'+m.losses+'</b> loss');
+  if(e.score!=null)s.push('score: <b>'+e.score+'</b>');
+  if(e.dups!=null)s.push('<b>'+e.dups+'</b> dup');
+  if(e.losses!=null)s.push('<b>'+e.losses+'</b> loss');
   if(staleWarn)s.push('<span style="color:var(--dup)">⚠ re-rooted: mapping stale</span>');
   document.getElementById('hMeta').innerHTML=s.join(' · ');
+}
+function loadTree(i){
+  curIdx=(i+TREES.length)%TREES.length;
+  ID=0; root=build(structuredClone(curEntry().tree),null);
+  staleWarn=false; hlSet=new Set(); document.getElementById('find').value='';
+  view={k:1,x:40,y:20};
+  const sel=document.getElementById('selT'); if(sel.options.length) sel.value=curIdx;
+  document.getElementById('cntT').textContent=(curIdx+1)+' / '+TREES.length;
+  updateMeta(); render();
+}
+function setupNav(){
+  const nav=document.getElementById('nav');
+  if(TREES.length<2){ nav.style.display='none'; return; }
+  nav.style.display='inline-flex';
+  const sel=document.getElementById('selT'); sel.innerHTML='';
+  TREES.forEach((t,i)=>{ const o=document.createElement('option'); o.value=i;
+    o.textContent=(t.name||('tree '+(i+1)))+(t.score!=null?'  ('+t.score+')':''); sel.appendChild(o); });
+  sel.onchange=e=>loadTree(+e.target.value);
+  document.getElementById('prevT').onclick=()=>loadTree(curIdx-1);
+  document.getElementById('nextT').onclick=()=>loadTree(curIdx+1);
+  document.getElementById('cntT').textContent='1 / '+TREES.length;
 }
 document.getElementById('segLayout').addEventListener('click',e=>{const b=e.target.closest('button');if(!b)return;
   [...e.currentTarget.children].forEach(x=>x.classList.remove('on'));b.classList.add('on');layout=b.dataset.v;
@@ -382,17 +428,22 @@ document.getElementById('find').oninput=e=>{hlSet=new Set(e.target.value.split('
 document.getElementById('rerootMode').onchange=e=>{rerootOn=e.target.checked;svg.classList.toggle('reroot',rerootOn);};
 document.getElementById('ladder').onclick=()=>{ (function lad(n){n.children.sort((a,b)=>countLeaves(a)-countLeaves(b));n.children.forEach(lad);})(root); render();};
 document.getElementById('expandAll').onclick=()=>{each(root,n=>n.collapsed=false);render();};
-document.getElementById('reset').onclick=()=>{ID=0;root=build(structuredClone(DATA.tree),null);staleWarn=false;view={k:1,x:40,y:20};hlSet=new Set();document.getElementById('find').value='';updateMeta();render();};
+document.getElementById('reset').onclick=()=>loadTree(curIdx);
 document.getElementById('themeBtn').onclick=()=>{const r=document.documentElement;r.dataset.theme=r.dataset.theme==='dark'?'light':'dark';};
 document.getElementById('expSvg').onclick=()=>{const s=new XMLSerializer().serializeToString(svg);const b=new Blob([s],{type:'image/svg+xml'});const a=document.createElement('a');a.href=URL.createObjectURL(b);a.download=(DATA.meta&&DATA.meta.title||'tree')+'.svg';a.click();};
 document.getElementById('expNwk').onclick=()=>{const nwk=toNewick(root)+';';navigator.clipboard&&navigator.clipboard.writeText(nwk);document.getElementById('expNwk').textContent='Copied ✓';setTimeout(()=>document.getElementById('expNwk').textContent='Copy Newick (current rooting)',1200);};
-window.addEventListener('keydown',e=>{if(e.key==='r'||e.key==='R'){const c=document.getElementById('rerootMode');c.checked=!c.checked;c.onchange({target:c});}});
+window.addEventListener('keydown',e=>{
+  if(e.target.tagName==='INPUT'||e.target.tagName==='SELECT')return;
+  if(e.key==='r'||e.key==='R'){const c=document.getElementById('rerootMode');c.checked=!c.checked;c.onchange({target:c});}
+  else if(e.key==='ArrowLeft'&&TREES.length>1)loadTree(curIdx-1);
+  else if(e.key==='ArrowRight'&&TREES.length>1)loadTree(curIdx+1);
+});
 window.addEventListener('resize',render);
 
 // init
 if(!isRecon){document.getElementById('rowLoss').style.display='none';document.getElementById('legend').style.display='none';}
 document.getElementById('rowScale').style.display=layout==='phylo'?'flex':'none';
-updateMeta(); render();
+setupNav(); updateMeta(); render();
 </script>
 </body>
 </html>

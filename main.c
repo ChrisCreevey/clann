@@ -2079,7 +2079,7 @@ void print_commands(int num)
 		printf2("\n\tduplications\t<value>\t\t\t\t*1.0\n\tlosses\t\t<value>\t\t\t\t*1.0");
 		printf2("\n\tlossmodel\tlegacy | standard\t\t*legacy\n\t   legacy = Clann reconstruction count; standard = textbook DL model (match hs)");
 		printf2("\n\tshowrecon\tyes | no\t\t\t*no\n\tbasescore\t<value>\t\t\t\t*1.0\n\tprintfiles\tyes | no\t\t\t*yes\n\tspeciestree\tmemory | first | <file>\t\t*memory\n\tnhxfile\t\t<filename>\t\t\t*none\n\t   prints nhx-formatted file of resulting reconstructions for all source trees");
-		printf2("\n\thtmlview\t<filename> | yes\t\t*none\n\t   self-contained interactive HTML viewer per gene tree (open in a browser)");
+		printf2("\n\thtmlview\t<filename> | yes\t\t*none\n\t   one self-contained interactive HTML viewer for all gene trees (open in a browser)");
 		}
      if(num == 25)
         {
