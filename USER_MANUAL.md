@@ -1290,10 +1290,15 @@ HTML file** with the `htmlview=` option:
 | `reconstruct` | all reconciled gene trees, with duplication/loss events | `<input>.recon.html` |
 
 Give `htmlview=<filename>` to choose the name, or `htmlview=yes` to use the
-default above. Open the file in any web browser — it is completely
-**offline and dependency-free** (all HTML, CSS, and JavaScript are embedded; no
-internet connection, server, or plug-in is required), so it can be emailed or
-archived as a single artefact.
+default above. The file is completely **offline and dependency-free** (all HTML,
+CSS, and JavaScript are embedded; no internet connection, server, or plug-in is
+required), so it can be emailed or archived as a single artefact.
+
+At an interactive prompt the file is also **opened automatically** in your
+default browser. This is suppressed whenever Clann is not reading from a terminal
+(a piped script, `-n`/`-c` mode, or a headless session), so batch runs never spawn
+browser windows. Add **`open=no`** to write the file without opening it even
+interactively.
 
 The viewer offers:
 

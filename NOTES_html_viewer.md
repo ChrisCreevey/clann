@@ -139,6 +139,25 @@ Static helpers in `reconcile.c` do the serialisation: `hv_json_node`,
 
 (These default output names are gitignored.)
 
+### Auto-opening in a browser
+
+When `htmlview=` is given, the file is also **opened in the user's default
+browser** via `html_view_launch` (reconcile.c) — `open` on macOS, `start` on
+Windows, `xdg-open` elsewhere. Two guards keep this from ever misbehaving in a
+non-interactive context:
+
+- **`isatty(STDIN_FILENO)`** — the launch is a no-op unless stdin is an
+  interactive terminal, so a batch run (`clann < script`, `-n`, `-c`), a pipe, CI,
+  or a headless SSH session never spawns browser windows (which would otherwise be
+  one per file in a loop).
+- **`open=no`** — an explicit per-command opt-out for users who want the file
+  written but not opened even at an interactive prompt.
+
+The path is shell-quoted (single quotes on POSIX, with `'\''` escaping; double
+quotes on Windows) so spaces and metacharacters in the filename can neither break
+the command nor inject one. A failed opener is reported but never derails the
+command that produced the file.
+
 ---
 
 ## 5. Viewer features

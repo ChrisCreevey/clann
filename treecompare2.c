@@ -3659,7 +3659,7 @@ void heuristic_search(int user, int print, int sample, int nreps)
     hs_vns_is_auto      = 1;   /* reset: auto-enable VNS for large trees unless user sets vns= this call */
     char *tree = NULL, c = '\0', *best_tree = NULL, *temptree = NULL, **starths = NULL, userfilename[10000], useroutfile[10000], histogramfile_name[10000];
     char *memory_start_tree = NULL;  /* saved copy of retained_supers[0] for start=memory (captured at parse time, before the retained_supers reset) */
-    char htmlfilename[10000], htmlmeta[10100]; int htmlfirst = TRUE;
+    char htmlfilename[10000], htmlmeta[10100]; int htmlfirst = TRUE, htmlopen = TRUE;
     FILE *userfile = NULL, *outfile = NULL, *paupfile = NULL, *histogram_file = NULL, *htmlfile = NULL;
     htmlfilename[0] = '\0';
     float distance=0, number=0, *startscores = NULL, used_weights = 0;
@@ -3826,6 +3826,8 @@ void heuristic_search(int user, int print, int sample, int nreps)
 			else
 				strncpy(htmlfilename, parsed_command[i+1], sizeof(htmlfilename)-1);
 			}
+		if(strcmp(parsed_command[i], "open") == 0 && strcmp(parsed_command[i+1], "no") == 0)
+			htmlopen = FALSE;
         if(strcmp(parsed_command[i], "nsteps") == 0)
             {
             number_of_steps = toint(parsed_command[i+1]);
@@ -5682,7 +5684,7 @@ void heuristic_search(int user, int print, int sample, int nreps)
 							
                         i++;
                         }
-                    if(htmlfile != NULL) { html_view_close(htmlfile, htmlfilename); htmlfile = NULL; }
+                    if(htmlfile != NULL) { html_view_close(htmlfile, htmlfilename); htmlfile = NULL; if(htmlopen) html_view_launch(htmlfilename); }
 
                     }
 				

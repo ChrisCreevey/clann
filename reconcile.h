@@ -87,6 +87,7 @@ FILE *html_view_open(const char *filename, const char *metajson, int recon);
 void  html_view_add_tree(FILE *f, struct taxon *tree, const char *name, float score, int recon, int first);
 void  html_view_add_newick(FILE *f, const char *newick, const char *name, int treenum, int first);
 void  html_view_close(FILE *f, const char *filename);
+void  html_view_launch(const char *filename);   /* open file in default browser (interactive terminals only) */
 float tree_map(struct taxon *gene_top, struct taxon *species_top, int print);
 void  label_gene_tree(struct taxon *gene_position, struct taxon *species_top, int *presence, int xnum);
 int   reconstruct_map(struct taxon *position, struct taxon *species_top);

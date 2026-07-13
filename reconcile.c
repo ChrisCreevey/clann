@@ -45,7 +45,7 @@ void nj(void)
 	{
 	int i, j, missing_method = 1, error = FALSE;
 	char *tree = NULL, useroutfile[100], *fakefilename = NULL;
-	char htmlfilename[1000], htmlmeta[10100]; FILE *htmlfile = NULL;
+	char htmlfilename[1000], htmlmeta[10100]; FILE *htmlfile = NULL; int htmlopen = TRUE;
 	FILE *outfile = NULL;
 	int *saved_tags = NULL;  /* for single-copy auto-filter */
 
@@ -81,8 +81,11 @@ void nj(void)
 			else
 				strncpy(htmlfilename, parsed_command[i+1], sizeof(htmlfilename)-1);
 			}
+
+		if(strcmp(parsed_command[i], "open") == 0 && strcmp(parsed_command[i+1], "no") == 0)
+			htmlopen = FALSE;
 		}
-		
+
 	if(!error)
 		{
 		if((outfile = fopen(useroutfile, "w")) == NULL)
@@ -127,6 +130,7 @@ void nj(void)
 			html_view_add_newick(htmlfile, retained_supers[0], "NJ tree", -1, TRUE);
 			html_view_close(htmlfile, htmlfilename);
 			htmlfile = NULL;
+			if(htmlopen) html_view_launch(htmlfilename);
 			}
 		restore_singlecopy_filter(saved_tags);
 		fclose(outfile);
@@ -3311,6 +3315,54 @@ void html_view_close(FILE *f, const char *filename)
 	printf2("Interactive HTML view written to: %s\n", filename);
 	}
 
+/* Open the just-written HTML file in the user's default browser via the platform
+ * opener (macOS 'open', Windows 'start', else 'xdg-open'). Deliberately a no-op
+ * unless stdin is an interactive terminal, so it never spawns browser windows
+ * during batch/piped/scripted (-n, -c) runs, CI, or headless SSH sessions. The
+ * path is single-quoted (POSIX) / double-quoted (Windows) to survive spaces and
+ * to avoid shell metacharacter injection. Failure is silent — a missing opener
+ * must never derail the command that produced the file. Callers gate this on
+ * their own open= flag (default on); this function only adds the tty guard. */
+void html_view_launch(const char *filename)
+	{
+	if(filename == NULL || filename[0] == '\0') return;
+	if(!isatty(STDIN_FILENO)) return;   /* interactive terminals only */
+#if defined(_WIN32)
+	{
+	char *cmd = malloc(strlen(filename) + 32);
+	if(cmd == NULL) return;
+	/* start "" "<file>" — the empty title arg keeps a quoted path from being
+	 * consumed as the window title. */
+	sprintf(cmd, "start \"\" \"%s\"", filename);
+	system(cmd);
+	free(cmd);
+	}
+#else
+	{
+#if defined(__APPLE__)
+	const char *opener = "open";
+#else
+	const char *opener = "xdg-open";
+#endif
+	const char *p; char *cmd, *q;
+	/* worst case every char is a single quote -> 4 bytes each ('\'') */
+	cmd = malloc(strlen(opener) + 4 * strlen(filename) + 32);
+	if(cmd == NULL) return;
+	q = cmd;
+	q += sprintf(q, "%s '", opener);
+	for(p = filename; *p != '\0'; p++)
+		{
+		if(*p == '\'') { *q++='\''; *q++='\\'; *q++='\''; *q++='\''; }
+		else *q++ = *p;
+		}
+	*q++ = '\'';
+	strcpy(q, " >/dev/null 2>&1");
+	if(system(cmd) != 0) printf2("(could not auto-open %s in a browser; open it manually)\n", filename);
+	free(cmd);
+	}
+#endif
+	}
+
 /* -----------------------------------------------------------------------
  * NHX (New Hampshire eXtended) output for reconciled gene trees
  *
@@ -3426,7 +3478,7 @@ void reconstruct(int print_settings)  /* Carry out gene-tree reconciliation of s
 	char nhxfilename[1000];
 	char htmlfilename[1000];
 	FILE *nhxfile = NULL, *htmlfile = NULL;
-	int htmlfirst = 1;
+	int htmlfirst = 1, htmlopen = TRUE;
 	if(!temptree1 || !temptree2) { free(temptree1); free(temptree2); printf2("Error: out of memory in reconstruct\n"); return; }
 	FILE *reconstructionfile = NULL, *descendentsfile = NULL, *genebirthfile = NULL;
 
@@ -3490,6 +3542,8 @@ void reconstruct(int print_settings)  /* Carry out gene-tree reconciliation of s
 			else
 				strncpy(htmlfilename, parsed_command[i+1], sizeof(htmlfilename)-1);
 			}
+		if(strcmp(parsed_command[i], "open") == 0 && strcmp(parsed_command[i+1], "no") == 0)
+			htmlopen = FALSE;
 		}
 
 
@@ -4137,7 +4191,7 @@ void reconstruct(int print_settings)  /* Carry out gene-tree reconciliation of s
 		printf2("NHX output written to: %s\n", nhxfilename);
 		nhxfile = NULL;
 		}
-	if(htmlfile != NULL) { html_view_close(htmlfile, htmlfilename); htmlfile = NULL; }
+	if(htmlfile != NULL) { html_view_close(htmlfile, htmlfilename); htmlfile = NULL; if(htmlopen) html_view_launch(htmlfilename); }
 	tree_top = NULL;
 	free(temptree);
 	free(temptree1);

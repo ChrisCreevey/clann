@@ -876,7 +876,7 @@ void showtrees(int savet)
 	FILE *showfile = NULL;
 	float bestscore =10000000, worstscore = 0, **tempscores = NULL;
 	int *tempsourcetreetag = NULL, display = TRUE, best_total = -1, total = 0, display_fullnames = FALSE, taxaorder=0;
-	FILE *htmlfile = NULL; int htmlfirst = TRUE; char htmlfilename[1000], htmlmeta[10100];
+	FILE *htmlfile = NULL; int htmlfirst = TRUE, htmlopen = TRUE; char htmlfilename[1000], htmlmeta[10100];
 	htmlfilename[0] = '\0';
 	struct taxon *position = NULL, *species_tree = NULL, *gene_tree = NULL, *best_mapping = NULL, *unknown_fund = NULL, *pos = NULL,*copy = NULL;
 
@@ -935,6 +935,8 @@ void showtrees(int savet)
 			else
 				strncpy(htmlfilename, parsed_command[i+1], sizeof(htmlfilename)-1);
 			}
+		if(strcmp(parsed_command[i], "open") == 0 && strcmp(parsed_command[i+1], "no") == 0)
+			htmlopen = FALSE;
 		if(strcmp(parsed_command[i], "display") == 0)
 			{
 			if(strcmp(parsed_command[i+1], "no") == 0)
@@ -1260,7 +1262,7 @@ void showtrees(int savet)
 				counter++;
 		        }
 			}
-		if(htmlfile != NULL) { html_view_close(htmlfile, htmlfilename); htmlfile = NULL; }
+		if(htmlfile != NULL) { html_view_close(htmlfile, htmlfilename); htmlfile = NULL; if(htmlopen) html_view_launch(htmlfilename); }
 
 
 /*
