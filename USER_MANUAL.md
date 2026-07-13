@@ -47,6 +47,7 @@ See COPYING.txt for full licence terms.
    - [tips](#tips)
    - [recluster](#recluster)
    - 5b. [Tree-space landscape analysis](#5b-tree-space-landscape-analysis)
+   - 5c. [Interactive HTML tree viewer](#interactive-html-tree-viewer)
 6. [Worked Examples](#6-worked-examples)
 7. [Output Files Reference](#7-output-files-reference)
 8. [Tips and Troubleshooting](#8-tips-and-troubleshooting)
@@ -340,6 +341,7 @@ hs [options]
 | `start` | `nj`, `random`, `<filename>` | `nj` | Starting tree. `nj` uses a neighbour-joining tree; `random` uses the best tree from random sampling; a filename loads a user-provided starting tree. |
 | `maxswaps` | `<integer>` | 1,000,000 | Maximum number of branch swaps per replicate. |
 | `savetrees` | `<filename>` | `Heuristic_result.txt` | Output file for the best supertree(s) found. |
+| `htmlview` | `<filename>`, `yes` | *(none)* | Also write the best supertree(s) as one self-contained interactive HTML viewer (`yes` names it `<input>.supertree.html`). See [Interactive HTML tree viewer](#interactive-html-tree-viewer). |
 | `nthreads` | `<integer>` | all CPUs | Number of OpenMP threads. Each thread runs an independent search replicate in parallel. Not available for `criterion=recon`. |
 | `maxskips` | `<integer>` | auto (N³) | Stop a replicate after this many consecutive already-visited SPR moves. Set to `0` to disable. Default auto-scales to (number of taxa)³. Prevents long runs that have converged. |
 | `progress` | `<integer>` | 5 | *(OpenMP only)* How often (in seconds) to print a best-so-far status line when running multiple threads. Set to `0` to print every time a new global best is found. Has no effect when running single-threaded. |
@@ -455,6 +457,7 @@ nj [options]
 |--------|--------|---------|-------------|
 | `missing` | `4point`, `ultrametric` | `4point` | Method for estimating pairwise distances for taxa pairs not co-occurring in any source tree. `4point` uses the four-point condition; `ultrametric` assumes an ultrametric tree. |
 | `savetrees` | `<filename>` | `NJ-tree.ph` | Output file for the NJ supertree. |
+| `htmlview` | `<filename>`, `yes` | *(none)* | Also write the NJ tree as one self-contained interactive HTML viewer (`yes` names it `<input>.nj.html`). See [Interactive HTML tree viewer](#interactive-html-tree-viewer). |
 
 **Examples:**
 ```
@@ -682,6 +685,7 @@ reconstruct [options]
 | `showrecon` | `yes`, `no` | `no` | Print detailed reconciliation information for each node. |
 | `printfiles` | `yes`, `no` | `yes` | Generate detailed output files (see [Section 7](#7-output-files-reference)). |
 | nhxfile | `<filename>` | none | Prints nhx-formatted file of resulting reconstructions for all source trees. This allows viewing of the reconstructions (inclusding indications of duplications, losses, etc) with compatible tools. |
+| `htmlview` | `<filename>`, `yes` | *(none)* | Also write all reconciled gene trees as one self-contained interactive HTML viewer (`yes` names it `<input>.recon.html`); duplication and loss events are marked. See [Interactive HTML tree viewer](#interactive-html-tree-viewer). |
 
 **Typical workflow:**
 
@@ -751,6 +755,7 @@ showtrees [filter options]
 | `display` | `yes`, `no` | `yes` | Whether to print trees to the screen. |
 | `savetrees` | `yes`, `no` | `no` | Whether to save the displayed trees to a file. |
 | `filename` | `<filename>` | `showtrees.txt` | Output file (when `savetrees=yes`). |
+| `htmlview` | `<filename>`, `yes` | *(none)* | Also write the displayed gene tree(s) as one self-contained interactive HTML viewer (`yes` names it `<input>.trees.html`). Honours the same filter options. See [Interactive HTML tree viewer](#interactive-html-tree-viewer). |
 
 Filter options are the same as `savetrees` (`range`, `size`, `namecontains`, `containstaxa`, `score`).
 
@@ -759,6 +764,7 @@ Filter options are the same as `savetrees` (`range`, `size`, `namecontains`, `co
 showtrees
 showtrees range=1-5
 showtrees namecontains=RAxML savetrees=yes filename=raxml_trees.txt
+showtrees display=no htmlview=my_genetrees.html
 ```
 
 ---
@@ -1267,6 +1273,48 @@ guidance on interpreting the results.
 For the full visualisation workflow — SPR distance computation, Python scripts
 (MDS scatter plot, score histogram, neighbour graph, 3D surface), and
 troubleshooting — see [NOTES_treespace_landscape.md](NOTES_treespace_landscape.md).
+
+---
+
+<a name="interactive-html-tree-viewer"></a>
+## 5c. Interactive HTML tree viewer
+
+Several commands can write their result as a single **self-contained interactive
+HTML file** with the `htmlview=` option:
+
+| Command | What it shows | Default filename (`htmlview=yes`) |
+|---------|---------------|-----------------------------------|
+| `showtrees` | the input gene tree(s) | `<input>.trees.html` |
+| `hs` | the best supertree(s) | `<input>.supertree.html` |
+| `nj` | the neighbour-joining tree | `<input>.nj.html` |
+| `reconstruct` | all reconciled gene trees, with duplication/loss events | `<input>.recon.html` |
+
+Give `htmlview=<filename>` to choose the name, or `htmlview=yes` to use the
+default above. Open the file in any web browser — it is completely
+**offline and dependency-free** (all HTML, CSS, and JavaScript are embedded; no
+internet connection, server, or plug-in is required), so it can be emailed or
+archived as a single artefact.
+
+The viewer offers:
+
+- a **tree navigator** (previous/next, dropdown, and `filter trees…` box) when the
+  file holds more than one tree — filter by tree name, tree number, or a
+  **contained taxon name**;
+- **cladogram** or **phylogram** layout, adjustable row spacing and font size;
+- toggles for support values, branch lengths, internal labels, and aligned tip
+  labels;
+- **click-to-reroot** (Reroot mode) and click-a-node-dot to collapse/expand;
+  rerooting a reconciliation marks its duplication/loss mapping **stale** (the
+  events were computed for the original rooting);
+- a `Find` box that highlights taxa;
+- export of the current view as **SVG** or as a **Newick string reflecting the
+  current rooting**;
+- light/dark themes.
+
+For a `reconstruct` file, duplication nodes and loss lineages are drawn as events,
+and a fully-lost clade (one whose descendant leaves are all losses) has its
+branches dotted. See [NOTES_html_viewer.md](NOTES_html_viewer.md) for the design,
+data format, and planned recPhyloXML interoperability.
 
 ---
 
