@@ -190,3 +190,9 @@ class ClannEngine:
     def state(self) -> dict:
         """Current session state read from Clann's globals."""
         return self._submit(self._do_state)
+
+    def set_workdir(self, path: str) -> None:
+        """Point Clann's working directory (where relative paths resolve and
+        output files land) at `path` — used to confine a session to its sandbox.
+        Applied on the next load/run/reset, all of which chdir to self.workdir."""
+        self.workdir = path

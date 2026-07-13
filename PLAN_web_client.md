@@ -114,6 +114,19 @@ reliably return the engine to a clean baseline between runs (it exists — verif
 it in Step 2 with a load→run→reset→load→run loop that produces identical results
 to two fresh processes).
 
+**Verified nuance — intra-`hs` OpenMP parallelism is fine (Step 1.1).** The
+"single OS thread" rule is about the thread that *enters* `clann_run_command`, not
+about the OpenMP threads `hs` forks *inside* one call. `hs nthreads=N` runs N reps
+in parallel exactly as the standalone binary does; confirmed through the pinned
+engine worker thread (`hs recon nthreads=4` → "OpenMP threads = 4", correct score,
+no crash). ctypes releases the GIL during the C call and re-acquires it per output
+callback, so `printf2` progress lines fired concurrently from OpenMP threads
+capture safely (they may interleave in the log — cosmetic). What stays serialised
+is *separate requests*: one engine still runs one analysis at a time; a fast
+multi-threaded search, but not two concurrent searches in the same session.
+Cross-session parallelism (each session's worker running its own multi-threaded
+`hs`) arrives with Model A (Step 3.3).
+
 ### 3.2 Long-running, blocking commands
 `hs` can run for minutes. The HTTP request cannot block that long. Need an
 **async job model**: `POST /api/run` returns a `job_id` immediately; the client
@@ -333,15 +346,32 @@ on a green predecessor. A single Claude instance should take one step.
   - *Run:* `PYTHONPATH=. arch -x86_64 /usr/bin/python3 clann_web/tests/test_server.py`
 - *Done-when:* ✅ a browserless HTTP round-trip drives a real, persistent analysis.
 
-**Step 1.2 — File upload into a session sandbox.** `[ ]`
+**Step 1.2 — File upload into a session sandbox.** `[x]`
 - *Goal:* replace "bundled example" with real uploads, safely (§3.4).
-- *Work:* `POST /api/files` (multipart) writes to a per-session temp dir; `load`
-  accepts only a sandbox-relative filename; reject/relocate absolute or `..`
-  paths. Same rewrite for any output path option.
-- *Verify:* `pytest`: upload `tutorial_multicopy.ph`, load it, `showtrees` reports
-  8 trees; an upload named `../evil` is rejected; a `savetrees=/etc/x` is confined
-  to the sandbox.
-- *Done-when:* arbitrary paths cannot escape the session dir.
+- *Work (DONE):* `clann_web/sandbox.py` — a per-session temp dir (`tempfile.mkdtemp`)
+  plus a `sanitize_command()` that confines every file path in a command:
+  **input** paths (files Clann reads: `exe <file>`, `speciestree=`, `start=`,
+  `file=`, …) must be a bare, already-uploaded filename — absolute paths,
+  directory components, and `..` raise `UnsafePath`; **output** paths (`savetrees=`,
+  `htmlview=`, `nhxfile=`, `filename=`, `histogramfile=`, `visitedtrees=`, …) are
+  relocated to their basename inside the sandbox; keyword values
+  (`yes`/`no`/`memory`/`nj`/`matrix`/…) are left untouched. Server gained
+  `POST /api/files?name=` (raw-body upload, basename-validated), `/api/load` now
+  routes through `confine_input`, `/api/run` through `sanitize_command` (and
+  echoes the rewritten `command`). Each session owns a sandbox; the engine's
+  workdir is set to it (`engine.set_workdir`), so Clann reads/writes only there.
+  `new_session` swaps in a fresh sandbox and destroys the old; `serve()`/tests
+  clean up on shutdown (verified: zero leftover `/tmp/clannweb-*`).
+- *Verify (DONE):* `clann_web/tests/test_sandbox.py` — a unit layer on the
+  sanitizer (output escapes relocated: `savetrees=/etc/passwd` → `savetrees=passwd`;
+  `exe /etc/passwd`, `exe ../secret.ph`, `file=/etc/passwd` all raise) and a live
+  server layer: upload `../evil.ph` → **400, nothing written outside**; normal
+  upload lands in the sandbox; `load ../../etc/hosts` → **400**;
+  `showtrees htmlview=/tmp/escape.html` → relocated to the sandbox, `/tmp/escape.html`
+  **not created**. The Step 1.1 test was updated to upload-then-load and still
+  passes (recon 17 over the wire). Both `PASS`.
+- *Done-when:* ✅ arbitrary paths cannot escape the session dir (inputs must be
+  uploaded; outputs are relocated in).
 
 **Step 1.3 — Structured run result.** `[ ]`
 - *Goal:* `/api/run` returns JSON `{ ok, log, trees[], scores[], session_state }`,
@@ -469,17 +499,18 @@ on a green predecessor. A single Claude instance should take one step.
 
 ## 8. Suggested next three sessions
 
-**Steps 0.1, 0.1b, 0.2, and 1.1 are done** (§6) — the persistent in-process engine
-is proven, `clann_reset()` gives a clean deterministic baseline, the
-`CLANN_SERVER_MODE` build has provably no shell/`system()` surface, and a stdlib
-HTTP server (`clann_web/`) now drives a real persistent session over loopback.
+**Steps 0.1, 0.1b, 0.2, 1.1, and 1.2 are done** (§6) — the persistent in-process
+engine is proven, `clann_reset()` is deterministic, the `CLANN_SERVER_MODE` build
+has provably no shell surface, a stdlib HTTP server drives real persistent
+sessions over loopback, and each session is now confined to its own file sandbox.
 Next:
 
-1. **Step 1.2** — file upload into a per-session sandbox (replace bundled-example
-   paths; reject `..`/absolute paths; confine output paths).
-2. **Step 1.3** — structured JSON run result (trees + scores), reusing the viewer
-   JSON emitter (needs Step 0.3 first, or interim text-parse via `pyclann`).
-3. **Step 2.1** — static SPA shell + command palette from `/api/commands`.
+1. **Step 0.3 / 1.3** — structured JSON run result (trees + scores). Best done by
+   factoring the viewer's JSON emitter (`html_view_*`) to write to a string/file
+   the API can read (Step 0.3), then returning it from `/api/run` (Step 1.3);
+   interim fallback is text-parsing via `pyclann/_commands.py`.
+2. **Step 2.1** — static SPA shell + command palette from `/api/commands`.
+3. **Step 2.2** — command schema → dynamic option forms.
 
 After those, the architecture is proven end-to-end (engine ↔ HTTP ↔ real
 multi-command session) and the remaining steps are incremental UI + robustness.

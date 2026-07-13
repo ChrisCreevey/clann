@@ -12,10 +12,15 @@ or without pytest:
 """
 
 import json
+import os
 import threading
+import urllib.parse
 import urllib.request
 
 from clann_web.server import make_server
+
+REPO = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+TUTORIAL = os.path.join(REPO, "examples", "tutorial_multicopy.ph")
 
 
 def _post(base, path, payload=None):
@@ -28,6 +33,17 @@ def _post(base, path, payload=None):
             return json.loads(r.read())
     except urllib.error.HTTPError as e:
         # 4xx/5xx still carry a JSON body we want to inspect.
+        return json.loads(e.read())
+
+
+def _upload(base, name, data: bytes):
+    req = urllib.request.Request(
+        base + "/api/files?name=" + urllib.parse.quote(name), data=data,
+        headers={"Content-Type": "application/octet-stream"}, method="POST")
+    try:
+        with urllib.request.urlopen(req, timeout=30) as r:
+            return json.loads(r.read())
+    except urllib.error.HTTPError as e:
         return json.loads(e.read())
 
 
@@ -48,8 +64,11 @@ def run_checks():
         assert "session_id" in s, s
         assert s["state"]["num_source_trees"] == 0, s
 
-        # load the bundled tutorial (bundled path; sandboxing is Step 1.2)
-        r = _post(base, "/api/load", {"file": "examples/tutorial_multicopy.ph"})
+        # upload the tutorial into the session sandbox, then load it by name
+        with open(TUTORIAL, "rb") as fh:
+            up = _upload(base, "tutorial_multicopy.ph", fh.read())
+        assert up["ok"] and "tutorial_multicopy.ph" in up["files"], up
+        r = _post(base, "/api/load", {"file": "tutorial_multicopy.ph"})
         assert r["ok"], r
         assert r["state"]["num_source_trees"] == 8, r["state"]
         assert r["state"]["num_taxa"] == 9, r["state"]
@@ -78,6 +97,7 @@ def run_checks():
         bad = _post(base, "/api/run", {})
         assert bad.get("ok") is False, bad
     finally:
+        httpd.clann_app.sandbox.destroy()
         httpd.shutdown()
         httpd.server_close()
 
