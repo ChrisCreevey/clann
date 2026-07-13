@@ -300,16 +300,38 @@ on a green predecessor. A single Claude instance should take one step.
 
 ### Phase 1 — Minimal vertical slice (single user, Model B)
 
-**Step 1.1 — Skeleton FastAPI server wrapping the engine.** `[ ]`
-- *Goal:* one process, global-lock engine, three endpoints end-to-end.
-- *Work:* `clann_web/` Python package. Load `libclann.so` via ctypes (reuse
-  `pyclann` patterns). Endpoints: `POST /api/session` (init/reset engine),
-  `POST /api/load` (path to a bundled example), `POST /api/run` (a command
-  string, **synchronous** for now), returning captured text. Bind `127.0.0.1`.
-- *Verify:* `pytest` + `curl`: create session → load tutorial → `run "set
-  criterion=recon"` → `run "hs nreps=5 seed=42"` → response text contains
-  `17.0000`.
-- *Done-when:* a browserless HTTP round-trip drives a real analysis.
+**Step 1.1 — Skeleton server wrapping the engine.** `[x]`
+- *Goal:* one process, single-engine, endpoints end-to-end over HTTP.
+- *Work (DONE):* `clann_web/` package — `engine.py` (`ClannEngine`: ctypes wrapper
+  around **`libclann-server.so`**, output captured via `clann_set_output_fn`,
+  session state read from Clann globals `number_of_taxa`/`Total_fund_trees`/
+  `criterion`/`trees_in_memory`), `server.py` (endpoints), `__main__.py`
+  (`python -m clann_web`, binds `127.0.0.1`, warns on non-loopback host), and a
+  pytest end-to-end test. Endpoints: `POST /api/session` (reset → new session),
+  `POST /api/load {file}`, `POST /api/run {command}` (synchronous), `GET
+  /api/session`; each run/load returns `{ok, log, state}`.
+  - *Two design points worth carrying forward:*
+    1. **Framework:** used the **stdlib `http.server`** (zero deps), not FastAPI —
+       `libclann-server.so` is x86_64 (Homebrew gcc) so the server must run under
+       an x86_64 interpreter (`arch -x86_64 /usr/bin/python3`), where FastAPI
+       isn't installed and would be fragile to build under Rosetta. The HTTP layer
+       is deliberately thin; swapping to FastAPI is deferred to packaging
+       (Step 4.2), ideally alongside a universal/arm64 lib build. `engine.py` is
+       framework-agnostic and unaffected.
+    2. **Threading:** Clann must run on **one** OS thread (global + OpenMP
+       `threadprivate` state) — calling it from `ThreadingHTTPServer` handler
+       threads **segfaulted**. Fixed by pinning the engine to a **dedicated worker
+       thread**: the library is loaded, `clann_init`-ed, and every call executed
+       there; public methods marshal work onto it via a queue and block. This
+       serialises analysis (Model B) and pre-shapes the Step 3.3 worker model.
+- *Verify (DONE):* `clann_web/tests/test_server.py` starts the real server on an
+  ephemeral loopback port and drives session→load→`set criterion=recon`→`hs`→
+  `reconstruct speciestree=memory`, asserting `num_source_trees==8`, `num_taxa==9`,
+  `17.000000` in the `hs` log, `trees_in_memory>=1`, and recon `17.0000` — `PASS`.
+  A `curl` transcript reproduces it against `python -m clann_web` (session → load
+  → set → `hs` → `Supertree 1 of 1 score = 17.000000`).
+  - *Run:* `PYTHONPATH=. arch -x86_64 /usr/bin/python3 clann_web/tests/test_server.py`
+- *Done-when:* ✅ a browserless HTTP round-trip drives a real, persistent analysis.
 
 **Step 1.2 — File upload into a session sandbox.** `[ ]`
 - *Goal:* replace "bundled example" with real uploads, safely (§3.4).
@@ -447,16 +469,17 @@ on a green predecessor. A single Claude instance should take one step.
 
 ## 8. Suggested next three sessions
 
-**Steps 0.1, 0.1b, and 0.2 are done** (§6) — the persistent in-process engine is
-proven, `clann_reset()` gives a clean deterministic baseline, and the
-`CLANN_SERVER_MODE` build has provably no shell/`system()` surface. Phase 0 is
-complete; the foundation is safe to build a port on. Next:
+**Steps 0.1, 0.1b, 0.2, and 1.1 are done** (§6) — the persistent in-process engine
+is proven, `clann_reset()` gives a clean deterministic baseline, the
+`CLANN_SERVER_MODE` build has provably no shell/`system()` surface, and a stdlib
+HTTP server (`clann_web/`) now drives a real persistent session over loopback.
+Next:
 
-1. **Step 1.1** — skeleton FastAPI server driving a real, *persistent* session
-   over HTTP (load once, then `nj`/`hs`/`reconstruct` against the same engine,
-   loading `libclann-server.so`). Bind `127.0.0.1`.
-2. **Step 1.2** — file upload into a per-session sandbox.
-3. **Step 1.3** — structured JSON run result (trees + scores + session state).
+1. **Step 1.2** — file upload into a per-session sandbox (replace bundled-example
+   paths; reject `..`/absolute paths; confine output paths).
+2. **Step 1.3** — structured JSON run result (trees + scores), reusing the viewer
+   JSON emitter (needs Step 0.3 first, or interim text-parse via `pyclann`).
+3. **Step 2.1** — static SPA shell + command palette from `/api/commands`.
 
 After those, the architecture is proven end-to-end (engine ↔ HTTP ↔ real
 multi-command session) and the remaining steps are incremental UI + robustness.

@@ -1,0 +1,91 @@
+"""End-to-end test for the Step 1.1 skeleton server.
+
+Starts the real server (loading libclann-server.so) on an ephemeral loopback
+port in a background thread and drives a full persistent session over HTTP:
+  new session -> load tutorial -> set criterion=recon -> hs -> reconstruct
+asserting the recon optimum (17) and that session state persists across calls.
+
+Run (Apple Silicon: the lib is x86_64, so use a matching interpreter):
+  arch -x86_64 /usr/bin/python3 -m pytest clann_web/tests/test_server.py -q
+or without pytest:
+  arch -x86_64 /usr/bin/python3 clann_web/tests/test_server.py
+"""
+
+import json
+import threading
+import urllib.request
+
+from clann_web.server import make_server
+
+
+def _post(base, path, payload=None):
+    data = json.dumps(payload or {}).encode()
+    req = urllib.request.Request(base + path, data=data,
+                                 headers={"Content-Type": "application/json"},
+                                 method="POST")
+    try:
+        with urllib.request.urlopen(req, timeout=120) as r:
+            return json.loads(r.read())
+    except urllib.error.HTTPError as e:
+        # 4xx/5xx still carry a JSON body we want to inspect.
+        return json.loads(e.read())
+
+
+def _get(base, path):
+    with urllib.request.urlopen(base + path, timeout=30) as r:
+        return json.loads(r.read())
+
+
+def run_checks():
+    httpd = make_server("127.0.0.1", 0)  # port 0 = ephemeral
+    host, port = httpd.server_address
+    base = f"http://127.0.0.1:{port}"
+    t = threading.Thread(target=httpd.serve_forever, daemon=True)
+    t.start()
+    try:
+        # fresh session
+        s = _post(base, "/api/session")
+        assert "session_id" in s, s
+        assert s["state"]["num_source_trees"] == 0, s
+
+        # load the bundled tutorial (bundled path; sandboxing is Step 1.2)
+        r = _post(base, "/api/load", {"file": "examples/tutorial_multicopy.ph"})
+        assert r["ok"], r
+        assert r["state"]["num_source_trees"] == 8, r["state"]
+        assert r["state"]["num_taxa"] == 9, r["state"]
+
+        # persistent session: set criterion, then hs, then reconstruct
+        _post(base, "/api/run", {"command": "set seed=42"})
+        c = _post(base, "/api/run", {"command": "set criterion=recon"})
+        assert c["state"]["criterion"] == "recon", c["state"]
+
+        h = _post(base, "/api/run", {"command": "hs nreps=5 nthreads=1"})
+        assert h["ok"], h
+        assert "17.000000" in h["log"], h["log"][-500:]
+        assert h["state"]["trees_in_memory"] >= 1, h["state"]
+
+        # reconstruct uses the tree hs just left in memory (state persisted)
+        rec = _post(base, "/api/run",
+                    {"command": "reconstruct speciestree=memory open=no"})
+        assert rec["ok"], rec
+        assert "17.0000" in rec["log"], rec["log"][-500:]
+
+        # GET session reflects the same live state
+        g = _get(base, "/api/session")
+        assert g["state"]["num_source_trees"] == 8, g
+
+        # error handling: missing field
+        bad = _post(base, "/api/run", {})
+        assert bad.get("ok") is False, bad
+    finally:
+        httpd.shutdown()
+        httpd.server_close()
+
+
+def test_server_end_to_end():
+    run_checks()
+
+
+if __name__ == "__main__":
+    run_checks()
+    print("PASS: HTTP session load->set->hs->reconstruct; recon 17 over the wire.")
