@@ -83,6 +83,7 @@ static const char *opts_hs[] = {
     /* recon-criterion options */
     "duplications=", "losses=", "numspeciesrootings=", "numgenerootings=",
     "lossmodel=",
+    "htmlview=",
     NULL
 };
 static const char *opts_boot[] = {
@@ -90,7 +91,7 @@ static const char *opts_boot[] = {
     "mleta=", "mlscale=", "nthreads=", "seed=", NULL
 };
 static const char *opts_nj[] = {
-    "missing=", "savetrees=", NULL
+    "missing=", "savetrees=", "htmlview=", NULL
 };
 static const char *opts_usertrees[] = {
     "file=", "criterion=", "mlbeta=", "mleta=", "mlscale=", "normcorrect",
@@ -103,7 +104,7 @@ static const char *opts_set[] = {
 };
 static const char *opts_showtrees[] = {
     "range=", "namecontains=", "savetrees=", "filename=", "display=",
-    "fullnames", NULL
+    "fullnames", "htmlview=", NULL
 };
 static const char *opts_excludetrees[] = {
     "range=", "size=", "namecontains=", "containstaxa=", "score=",
@@ -1755,6 +1756,7 @@ void print_commands(int num)
             printf2("\n\tclusteroutput\t<filename>\t\t\t*treeclusters.tsv");
             printf2("\n\tclusterthreshold <float 0-1>\t\t\t*0.2 (max normalized RF distance to join cluster)");
             printf2("\n\tclusterorderby\tscore | visits\t\t\t*score (sort order before greedy sweep)");
+            printf2("\n\thtmlview\t<filename> | yes\t\t*none  (one self-contained interactive HTML viewer for the best supertree(s), open in a browser)");
             if(criterion == 0)
                 {
                 printf2("\n\tweight\t\tequal | comparisons\t\t");
@@ -2015,7 +2017,7 @@ void print_commands(int num)
 		printf2("\tOptions\t\tSettings\t\t\tCurrent\n");
         printf2("\t===========================================================\n");
 		
-		printf2("\n\trange\t\t<integer value> - <integer value> \t*all\n\tsize\t\tequalto <integer value>\n\t\t\tlessthan <integer value>\n\t\t\tgreaterthan <integer value>\t\t*none\n\tnamecontians\t<character string>\t\t\t*none\n\tcontainstaxa\t<character string>\t\t\t*none\n\tscore\t\t<min score> - <max score>\t\t*none\n\tsavetrees\tyes | no\t\t\t\t*no\n\tfilename\t<output file name>\t\t\t*showtrees.txt\n\tdisplay\t\tyes | no\t\t\t\t*yes\n");
+		printf2("\n\trange\t\t<integer value> - <integer value> \t*all\n\tsize\t\tequalto <integer value>\n\t\t\tlessthan <integer value>\n\t\t\tgreaterthan <integer value>\t\t*none\n\tnamecontians\t<character string>\t\t\t*none\n\tcontainstaxa\t<character string>\t\t\t*none\n\tscore\t\t<min score> - <max score>\t\t*none\n\tsavetrees\tyes | no\t\t\t\t*no\n\tfilename\t<output file name>\t\t\t*showtrees.txt\n\tdisplay\t\tyes | no\t\t\t\t*yes\n\thtmlview\t<filename> | yes\t\t\t*none  (one self-contained interactive HTML viewer for the gene tree(s), open in a browser)\n");
 		}
 
 	 if(num == 17)
@@ -2055,7 +2057,7 @@ void print_commands(int num)
 		printf2("\tOptions\t\tSettings\t\t\tCurrent\n");
         printf2("\t===========================================================\n");
 		if(delimiter) printf2("\n\t(Note: delimiter mode is ON -- multicopy gene trees will be automatically\n\texcluded from the search; use 'maxnamelen=full' to disable)\n");
-		printf2("\n\tmissing\t\t4point | ultrametric\t\t*4point\n\tsavetrees\t<file name>\t\t\t*NJtree.ph\n");
+		printf2("\n\tmissing\t\t4point | ultrametric\t\t*4point\n\tsavetrees\t<file name>\t\t\t*NJtree.ph\n\thtmlview\t<filename> | yes\t\t*none  (self-contained interactive HTML viewer for the NJ tree, open in a browser)\n");
 		}
 	 if(num == 22)
 		{

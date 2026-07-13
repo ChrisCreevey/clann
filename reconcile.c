@@ -45,9 +45,11 @@ void nj(void)
 	{
 	int i, j, missing_method = 1, error = FALSE;
 	char *tree = NULL, useroutfile[100], *fakefilename = NULL;
+	char htmlfilename[1000], htmlmeta[10100]; FILE *htmlfile = NULL;
 	FILE *outfile = NULL;
 	int *saved_tags = NULL;  /* for single-copy auto-filter */
-	
+
+	htmlfilename[0] = '\0';
 	useroutfile[0] = '\0';
 	strcpy(useroutfile, "NJ-tree.ph");
     for(i=0; i<num_commands; i++)
@@ -71,6 +73,14 @@ void nj(void)
 			
 		if(strcmp(parsed_command[i], "savetrees") == 0)
 			strcpy(useroutfile, parsed_command[i+1]);
+
+		if(strcmp(parsed_command[i], "htmlview") == 0)
+			{
+			if(strcmp(parsed_command[i+1], "yes") == 0)
+				{ strncpy(htmlfilename, inputfilename, sizeof(htmlfilename)-9); strncat(htmlfilename, ".nj.html", sizeof(htmlfilename)-strlen(htmlfilename)-1); }
+			else
+				strncpy(htmlfilename, parsed_command[i+1], sizeof(htmlfilename)-1);
+			}
 		}
 		
 	if(!error)
@@ -110,6 +120,14 @@ void nj(void)
 		strcpy(retained_supers[0], tree);
 		scores_retained_supers[0] = 0;
 		trees_in_memory = 1;
+		if(htmlfilename[0] != '\0')
+			{
+			snprintf(htmlmeta, sizeof(htmlmeta), "{\"dataset\":\"%s\",\"criterion\":\"nj\"}", inputfilename);
+			htmlfile = html_view_open(htmlfilename, htmlmeta, 0);
+			html_view_add_newick(htmlfile, retained_supers[0], "NJ tree", -1, TRUE);
+			html_view_close(htmlfile, htmlfilename);
+			htmlfile = NULL;
+			}
 		restore_singlecopy_filter(saved_tags);
 		fclose(outfile);
 		free(tree);
@@ -3232,53 +3250,65 @@ static void hv_json_tree(struct taxon *tree, FILE *f, int recon)
 static int hv_count_dups(struct taxon *n)
 	{ int c = 0; for(; n != NULL; n = n->next_sibling) { if(n->loss == 2) c++; if(n->daughter) c += hv_count_dups(n->daughter); } return c; }
 
-/* Single-tree viewer file (plain tree or one reconciliation). metajson may be NULL.
- * Kept for best-tree/NJ viewing (recon=0); unused until those are wired in. */
-static void write_html_view(struct taxon *tree, const char *filename, const char *metajson, int recon) __attribute__((unused));
-static void write_html_view(struct taxon *tree, const char *filename, const char *metajson, int recon)
-	{
-	FILE *f = fopen(filename, "w");
-	if(f == NULL) { printf2("Warning: could not open HTML view file '%s'\n", filename); return; }
-	fputs(VIEWER_HTML_HEAD, f);
-	fputs("{\"type\":", f); fputs(recon ? "\"reconciliation\"" : "\"tree\"", f);
-	fputs(",\"meta\":", f); fputs(metajson ? metajson : "{}", f);
-	fputs(",\"tree\":", f);
-	hv_json_tree(tree, f, recon);
-	fputc('}', f);
-	fputs(VIEWER_HTML_TAIL, f);
-	fclose(f);
-	printf2("Interactive HTML view written to: %s\n", filename);
-	}
-
-/* Multi-tree viewer: one file holding every gene-tree reconciliation, navigable
- * in the browser. open once, add per tree, close once. */
-static FILE *html_multi_open(const char *filename, const char *metajson)
+/* --- public HTML-viewer API (one navigable self-contained file) -------------
+ * open once, add each tree, close once. recon=1 embeds reconciliation events
+ * (duplication/loss glyphs, per-tree dup/loss counts); recon=0 is a plain tree
+ * (best supertree, NJ tree, or a shown gene tree). Used by reconstruct (recon,
+ * from in-memory annotated trees) and by hs/nj/showtrees (plain, from Newick). */
+FILE *html_view_open(const char *filename, const char *metajson, int recon)
 	{
 	FILE *f = fopen(filename, "w");
 	if(f == NULL) { printf2("Warning: could not open HTML view file '%s'\n", filename); return NULL; }
 	fputs(VIEWER_HTML_HEAD, f);
-	fputs("{\"type\":\"reconciliation\",\"meta\":", f);
-	fputs(metajson ? metajson : "{}", f);
+	fputs("{\"type\":", f); fputs(recon ? "\"reconciliation\"" : "\"tree\"", f);
+	fputs(",\"meta\":", f); fputs(metajson ? metajson : "{}", f);
 	fputs(",\"trees\":[", f);
 	return f;
 	}
-static void html_multi_add(FILE *f, struct taxon *tree, const char *name, float score, int recon, int first)
+void html_view_add_tree(FILE *f, struct taxon *tree, const char *name, float score, int recon, int first)
 	{
 	if(f == NULL) return;
 	if(!first) fputc(',', f);
-	fputs("{\"name\":", f); hv_json_str(f, name ? name : "gene tree");
-	fprintf(f, ",\"score\":%.4g,\"dups\":%d,\"losses\":%d,\"tree\":",
-	        (double)score, hv_count_dups(tree), count_losses(tree));
-	hv_json_tree(tree, f, recon);
-	fputc('}', f);
+	fputs("{\"name\":", f); hv_json_str(f, name ? name : "tree");
+	if(recon) fprintf(f, ",\"score\":%.4g,\"dups\":%d,\"losses\":%d",
+	                  (double)score, hv_count_dups(tree), count_losses(tree));
+	fputs(",\"tree\":", f); hv_json_tree(tree, f, recon); fputc('}', f);
 	}
-static void html_multi_close(FILE *f, const char *filename)
+/* Add a plain tree given as a Newick string, with leaves shown as full taxon
+ * names. `treenum` >= 0: `newick` is gene tree `treenum`'s numeric form
+ * (fundamentals[treenum]); it is expanded to full names via returntree_fullnames.
+ * `treenum` == -1: `newick` already carries full names (e.g. a supertree in
+ * retained_supers[]), and is parsed as-is. */
+void html_view_add_newick(FILE *f, const char *newick, const char *name, int treenum, int first)
+	{
+	char *buf; struct taxon *tr;
+	if(f == NULL || newick == NULL || newick[0] == '\0') return;
+	if(treenum >= 0)
+		{
+		buf = malloc(TREE_LENGTH * sizeof(char));
+		if(buf == NULL) return;
+		ensure_fullname_bufsize(&buf, treenum);
+		strcpy(buf, newick);
+		returntree_fullnames(buf, treenum);
+		}
+	else
+		{
+		buf = malloc((strlen(newick) + 10) * sizeof(char));
+		if(buf == NULL) return;
+		strcpy(buf, newick);
+		}
+	temp_top = NULL; basic_tree_build(1, buf, NULL, TRUE);
+	tr = temp_top; temp_top = NULL;
+	if(tr != NULL) { html_view_add_tree(f, tr, name, 0, 0, first); dismantle_tree(tr); }
+	free(buf);
+	}
+void html_view_close(FILE *f, const char *filename)
 	{
 	if(f == NULL) return;
 	fputs("]}", f);
 	fputs(VIEWER_HTML_TAIL, f);
 	fclose(f);
-	printf2("Interactive HTML view (all gene trees) written to: %s\n", filename);
+	printf2("Interactive HTML view written to: %s\n", filename);
 	}
 
 /* -----------------------------------------------------------------------
@@ -3872,7 +3902,7 @@ void reconstruct(int print_settings)  /* Carry out gene-tree reconciliation of s
 			snprintf(meta, sizeof(meta),
 			         "{\"dataset\":\"%s\",\"criterion\":\"recon\",\"lossmodel\":\"%s\"}",
 			         inputfilename, (loss_model==1 ? "standard" : "legacy"));
-			htmlfile = html_multi_open(htmlfilename, meta);
+			htmlfile = html_view_open(htmlfilename, meta, 1);
 			htmlfirst = 1;
 			}
 
@@ -4002,7 +4032,7 @@ void reconstruct(int print_settings)  /* Carry out gene-tree reconciliation of s
 				char tname[200];
 				if(tree_names[l][0]) snprintf(tname, sizeof(tname), "%s", tree_names[l]);
 				else snprintf(tname, sizeof(tname), "tree_%d", l);
-				html_multi_add(htmlfile, tree_top, tname, best_total, 1, htmlfirst);
+				html_view_add_tree(htmlfile, tree_top, tname, best_total, 1, htmlfirst);
 				htmlfirst = 0;
 				}
 
@@ -4107,7 +4137,7 @@ void reconstruct(int print_settings)  /* Carry out gene-tree reconciliation of s
 		printf2("NHX output written to: %s\n", nhxfilename);
 		nhxfile = NULL;
 		}
-	if(htmlfile != NULL) { html_multi_close(htmlfile, htmlfilename); htmlfile = NULL; }
+	if(htmlfile != NULL) { html_view_close(htmlfile, htmlfilename); htmlfile = NULL; }
 	tree_top = NULL;
 	free(temptree);
 	free(temptree1);

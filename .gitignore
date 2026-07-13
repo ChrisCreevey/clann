@@ -61,6 +61,8 @@ clann.log.*
 *.recon.dist
 *.recon.html
 *.tree*.html
+*.supertree.html
+*.nj.html
 *.onetoone
 *.strict.onetoone
 *.gene.births

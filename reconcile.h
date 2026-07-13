@@ -78,6 +78,15 @@ void  decompose_gene_trees_cmd(void);
  * ----------------------------------------------------------------------- */
 void  reconstruct(int print_settings);
 void  print_nhx_tree(struct taxon *position, char *buf);
+
+/* Self-contained interactive HTML tree/reconciliation viewer (see viewer_template.h,
+ * NOTES_html_viewer.md). One navigable file: open, add each tree, close. recon=1
+ * embeds duplication/loss events; recon=0 is a plain tree (best supertree/NJ/gene
+ * tree). Plain trees can be added straight from a Newick string. */
+FILE *html_view_open(const char *filename, const char *metajson, int recon);
+void  html_view_add_tree(FILE *f, struct taxon *tree, const char *name, float score, int recon, int first);
+void  html_view_add_newick(FILE *f, const char *newick, const char *name, int treenum, int first);
+void  html_view_close(FILE *f, const char *filename);
 float tree_map(struct taxon *gene_top, struct taxon *species_top, int print);
 void  label_gene_tree(struct taxon *gene_position, struct taxon *species_top, int *presence, int xnum);
 int   reconstruct_map(struct taxon *position, struct taxon *species_top);

@@ -21,6 +21,7 @@
 
 #include "tree_io.h"
 #include "viz.h"
+#include "reconcile.h"   /* html_view_open/add_newick/close for showtrees htmlview= */
 
 /* Private (static) forward declarations */
 static void quick(float **items, int count);
@@ -875,6 +876,8 @@ void showtrees(int savet)
 	FILE *showfile = NULL;
 	float bestscore =10000000, worstscore = 0, **tempscores = NULL;
 	int *tempsourcetreetag = NULL, display = TRUE, best_total = -1, total = 0, display_fullnames = FALSE, taxaorder=0;
+	FILE *htmlfile = NULL; int htmlfirst = TRUE; char htmlfilename[1000], htmlmeta[10100];
+	htmlfilename[0] = '\0';
 	struct taxon *position = NULL, *species_tree = NULL, *gene_tree = NULL, *best_mapping = NULL, *unknown_fund = NULL, *pos = NULL,*copy = NULL;
 
 	tempscores = malloc(Total_fund_trees*sizeof(float *));
@@ -924,6 +927,13 @@ void showtrees(int savet)
 					error = TRUE;
 					}
 				}
+			}
+		if(strcmp(parsed_command[i], "htmlview") == 0)
+			{
+			if(strcmp(parsed_command[i+1], "yes") == 0)
+				{ strncpy(htmlfilename, inputfilename, sizeof(htmlfilename)-12); strncat(htmlfilename, ".trees.html", sizeof(htmlfilename)-strlen(htmlfilename)-1); }
+			else
+				strncpy(htmlfilename, parsed_command[i+1], sizeof(htmlfilename)-1);
 			}
 		if(strcmp(parsed_command[i], "display") == 0)
 			{
@@ -1180,6 +1190,12 @@ void showtrees(int savet)
 				}
 			}
 
+		if(htmlfilename[0] != '\0')
+			{
+			snprintf(htmlmeta, sizeof(htmlmeta), "{\"dataset\":\"%s\"}", inputfilename);
+			htmlfile = html_view_open(htmlfilename, htmlmeta, 0);
+			htmlfirst = TRUE;
+			}
 		for(j=0; j<Total_fund_trees; j++)
 	        {
 	        if(tempsourcetreetag[j] && sourcetreetag[j])
@@ -1233,9 +1249,18 @@ void showtrees(int savet)
 					if(trees_in_memory > 0)printf2("Score = %f\n", sourcetree_scores[j]);
 					tree_coordinates(temptree, TRUE, TRUE, FALSE, -1);
 					}
+				if(htmlfile != NULL)
+					{
+					char htmlname[NAME_LENGTH];
+					if(strcmp(tree_names[j], "") != 0) snprintf(htmlname, sizeof(htmlname), "%s", tree_names[j]);
+					else snprintf(htmlname, sizeof(htmlname), "tree_%d", j+1);
+					html_view_add_newick(htmlfile, fundamentals[j], htmlname, j, htmlfirst);
+					htmlfirst = FALSE;
+					}
 				counter++;
 		        }
 			}
+		if(htmlfile != NULL) { html_view_close(htmlfile, htmlfilename); htmlfile = NULL; }
 
 
 /*
