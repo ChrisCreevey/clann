@@ -197,3 +197,17 @@ void printf2(char *format, ...)
         va_end(ap);
         }
     }
+
+/* Single choke point for external shell/system() calls — see utils.h.  In a
+ * server build the system() call is compiled out entirely (so the object has no
+ * reference to the symbol at all) and every attempt is refused. */
+int clann_shell(const char *cmd)
+    {
+#ifdef CLANN_SERVER_MODE
+    (void)cmd;
+    printf2("Refused: external shell/system commands are disabled in this (server) build.\n");
+    return -1;
+#else
+    return system(cmd);
+#endif
+    }

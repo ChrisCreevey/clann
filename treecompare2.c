@@ -2044,7 +2044,7 @@ void bootstrap_search(void)
 					strcat(system_call, logfile_name);
 					}
 
-				if(system(system_call) != 0) printf2("Error calling paup, please execute the file coding.nex in paup to perform the parsimony step\n");
+				if(clann_shell(system_call) != 0) printf2("Error calling paup, please execute the file coding.nex in paup to perform the parsimony step\n");
 
 				}
             
@@ -4567,7 +4567,7 @@ void heuristic_search(int user, int print, int sample, int nreps)
 						strcat(system_call, logfile_name);
 						}
 
-					if(system(system_call) != 0) printf2("Error calling paup, please execute the file coding.nex in paup to perform the parsimony step\n");
+					if(clann_shell(system_call) != 0) printf2("Error calling paup, please execute the file coding.nex in paup to perform the parsimony step\n");
 
 					}
 				if(error == FALSE)
@@ -4599,7 +4599,7 @@ void heuristic_search(int user, int print, int sample, int nreps)
 					strcat(system_call, logfile_name);
 					}
 
-				if(system(system_call) != 0) printf2("Error calling PAUP*\n\tPlease execute the file average_consensus.nex in PAUP to complete the analysis\n");
+				if(clann_shell(system_call) != 0) printf2("Error calling PAUP*\n\tPlease execute the file average_consensus.nex in PAUP to complete the analysis\n");
 				           
                 }
             }  /***** FINISH AVERAGE CONSENSUS */
@@ -6842,7 +6842,7 @@ void yaptp_search(void)
 				strcat(system_call, logfile_name);
 				}
 
-			if(system(system_call) != 0) printf2("Error calling paup, please execute the file coding.nex in paup to perform the parsimony step\n");
+			if(clann_shell(system_call) != 0) printf2("Error calling paup, please execute the file coding.nex in paup to perform the parsimony step\n");
 
             }
         else

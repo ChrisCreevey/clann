@@ -540,7 +540,7 @@ int main(int argc, char *argv[])
 		{
 		PATH[0] ='\0'; HOME[0] = '\0';
 
-		system("echo $HOME > clann5361temp1023");
+		clann_shell("echo $HOME > clann5361temp1023");
 		tmpclann = fopen("clann5361temp1023", "r");
 		fscanf(tmpclann, "%s", HOME);
 		fclose(tmpclann);
@@ -839,7 +839,7 @@ int main(int argc, char *argv[])
 											strcat(system_call, logfile_name);
 											}
 
-										if(system(system_call) != 0) printf2("Error calling paup, please execute the file coding.nex in paup to perform the parsimony step\n");
+										if(clann_shell(system_call) != 0) printf2("Error calling paup, please execute the file coding.nex in paup to perform the parsimony step\n");
 										}
 									if(x == FALSE)
 										{
@@ -1008,7 +1008,7 @@ int main(int argc, char *argv[])
                                                                 else
                                                                     {
                                                                     printf2("\n\tType exit to return to Clann\n\n");
-                                                                    system("bash");
+                                                                    clann_shell("bash");
                                                                     }
                                                                 }
 															else

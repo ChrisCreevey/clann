@@ -262,16 +262,31 @@ on a green predecessor. A single Claude instance should take one step.
     task.)
 - *Done-when:* ✅ reset determinism demonstrated; the seeding gotcha is documented.
 
-**Step 0.2 — Server-safe build guard (`CLANN_SERVER_MODE`).** `[ ]`
+**Step 0.2 — Server-safe build guard (`CLANN_SERVER_MODE`).** `[x]`
 - *Goal:* a compile mode with no shell/`system()` reachable and no browser
   auto-open (defuses §3.5).
-- *Work:* add `-DCLANN_SERVER_MODE`; guard `!`/`system("bash")`, the PAUP\*
-  `system()` calls, and `html_view_launch` so they are compiled out or refuse at
-  runtime with a clear message. Add a `libclann-server.so` make target.
-- *Verify:* `grep`-driven test (or `nm`) shows no `system` call is reachable from
-  `clann_run_command` in the server build; running `!` returns an error string,
-  not a shell. Standalone binary behaviour unchanged.
-- *Done-when:* server lib builds and the shell surface is provably gone.
+- *Work (DONE):* added a single choke point `clann_shell()` (`utils.c`/`utils.h`):
+  in a normal build it is `system(cmd)`; under `-DCLANN_SERVER_MODE` the
+  `system()` call is **compiled out entirely** and every attempt prints a refusal
+  and returns non-zero. Routed **all** direct `system()` calls through it — the
+  PAUP\* invocations (`treecompare2.c` ×4, `main.c` ×1), the `!` shell escape
+  (`main.c` `system("bash")`), the `$HOME` probe (`main.c`), and the HTML-viewer
+  opener (`reconcile.c` ×2). `html_view_launch()` additionally early-returns in
+  server mode (the browser is the client). Added a `libclann-server.so` make
+  target (own object dir, `-DCLANN_LIBRARY_MODE -DCLANN_SERVER_MODE`).
+- *Verify (DONE):*
+  - **Linker:** `nm -u libclann-server.so | grep _system` → **empty** (no
+    reference to `system` at all), while `libclann.so` *does* reference it. So no
+    `system()` is compiled into the server build.
+  - **Runtime (ctypes, one process):** the server lib still runs real analysis
+    (`hs criterion=recon` → `17.000000`), and a **reachable** shell path
+    (`set criterion=mrp; hs` → PAUP\* via `clann_shell`) prints
+    `Refused: external shell/system commands are disabled in this (server) build.`
+    instead of spawning anything. `PASS`.
+  - **Regression:** the standalone binary still scores `17.0000` (behaviour
+    unchanged; `!`, PAUP\*, and browser-open all work in the normal build).
+- *Done-when:* ✅ server lib builds; the shell surface is provably gone at both the
+  linker and runtime level; the normal build is unaffected.
 
 **Step 0.3 — Structured tree output from the engine.** `[ ]`
 - *Goal:* get the viewer's JSON (a tree/reconciliation as in `NOTES_html_viewer.md`
@@ -432,14 +447,16 @@ on a green predecessor. A single Claude instance should take one step.
 
 ## 8. Suggested next three sessions
 
-**Steps 0.1 and 0.1b are already done** (§6) — the persistent in-process engine is
-proven *and* `clann_reset()` gives a clean, deterministic baseline, so both the
-long-lived-session path and worker reuse are sound. Next:
+**Steps 0.1, 0.1b, and 0.2 are done** (§6) — the persistent in-process engine is
+proven, `clann_reset()` gives a clean deterministic baseline, and the
+`CLANN_SERVER_MODE` build has provably no shell/`system()` surface. Phase 0 is
+complete; the foundation is safe to build a port on. Next:
 
-1. **Step 0.2** — `CLANN_SERVER_MODE` shell lockdown (unblocks binding a port).
-2. **Step 1.1** — skeleton FastAPI server driving a real, *persistent* session
-   over HTTP (load once, then `nj`/`hs`/`reconstruct` against the same engine).
-3. **Step 1.2** — file upload into a per-session sandbox.
+1. **Step 1.1** — skeleton FastAPI server driving a real, *persistent* session
+   over HTTP (load once, then `nj`/`hs`/`reconstruct` against the same engine,
+   loading `libclann-server.so`). Bind `127.0.0.1`.
+2. **Step 1.2** — file upload into a per-session sandbox.
+3. **Step 1.3** — structured JSON run result (trees + scores + session state).
 
 After those, the architecture is proven end-to-end (engine ↔ HTTP ↔ real
 multi-command session) and the remaining steps are incremental UI + robustness.

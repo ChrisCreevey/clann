@@ -3322,9 +3322,15 @@ void html_view_close(FILE *f, const char *filename)
  * path is single-quoted (POSIX) / double-quoted (Windows) to survive spaces and
  * to avoid shell metacharacter injection. Failure is silent — a missing opener
  * must never derail the command that produced the file. Callers gate this on
- * their own open= flag (default on); this function only adds the tty guard. */
+ * their own open= flag (default on); this function only adds the tty guard.
+ * In a server build it is disabled entirely — the browser is the client, and the
+ * server process must never launch external processes (see clann_shell). */
 void html_view_launch(const char *filename)
 	{
+#ifdef CLANN_SERVER_MODE
+	(void)filename;
+	return;
+#else
 	if(filename == NULL || filename[0] == '\0') return;
 	if(!isatty(STDIN_FILENO)) return;   /* interactive terminals only */
 #if defined(_WIN32)
@@ -3334,7 +3340,7 @@ void html_view_launch(const char *filename)
 	/* start "" "<file>" — the empty title arg keeps a quoted path from being
 	 * consumed as the window title. */
 	sprintf(cmd, "start \"\" \"%s\"", filename);
-	system(cmd);
+	clann_shell(cmd);
 	free(cmd);
 	}
 #else
@@ -3357,10 +3363,11 @@ void html_view_launch(const char *filename)
 		}
 	*q++ = '\'';
 	strcpy(q, " >/dev/null 2>&1");
-	if(system(cmd) != 0) printf2("(could not auto-open %s in a browser; open it manually)\n", filename);
+	if(clann_shell(cmd) != 0) printf2("(could not auto-open %s in a browser; open it manually)\n", filename);
 	free(cmd);
 	}
 #endif
+#endif /* !CLANN_SERVER_MODE */
 	}
 
 /* -----------------------------------------------------------------------

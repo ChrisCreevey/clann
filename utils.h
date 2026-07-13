@@ -60,4 +60,12 @@ void  printf2(char *format, ...);
 /* Error handler — defined in treecompare2.c; declared here for universal access */
 void  memory_error(int error_num);
 
+/* Single choke point for every external shell/system() call (PAUP*, the '!'
+ * shell escape, the HTML-viewer browser opener, …).  In a normal build it is
+ * just system(cmd).  In a server build (-DCLANN_SERVER_MODE) it executes
+ * nothing, prints a refusal, and returns non-zero — so a Clann engine embedded
+ * behind a network port can never spawn a shell or arbitrary process.  All
+ * call sites must go through this rather than calling system() directly. */
+int   clann_shell(const char *cmd);
+
 #endif /* CLANN_UTILS_H */
