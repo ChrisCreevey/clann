@@ -460,15 +460,25 @@ on a green predecessor. A single Claude instance should take one step.
   one process) now passes; standalone recon regression still `17.0000`.
 - *Done-when:* ✅ a user can complete an analysis by clicking.
 
-**Step 2.4 — Embed the interactive tree viewer.** `[ ]`
+**Step 2.4 — Embed the interactive tree viewer.** `[x]`
 - *Goal:* results show the existing clannview visualisation, fed by API JSON.
-- *Work:* refactor `tools/clannview.template.html` so its JS can be mounted in the
-  SPA and **loaded with JSON from the API** (not only from a baked `.html`). Route
-  `trees[]` from `/api/run` into it. Reuse navigator/reroot/collapse/search as-is.
-- *Verify:* screenshot: after `hs`, the supertree renders in the embedded viewer;
-  after `reconstruct`, reconciliations render with duplication/loss events and the
-  tree navigator (matches the standalone viewer already verified).
-- *Done-when:* the visualisation the user asked for is live in the client.
+- *Work (DONE):* `clann_web/viewer.py` reuses the **same** viewer as Clann's
+  htmlview files: it splits `tools/clannview.template.html` at its
+  `/*CLANN_DATA_BEGIN*/ … /*CLANN_DATA_END*/` markers and injects the JSON document
+  Clann already wrote for the run (`const DATA = … { result json } …;`) — no
+  duplicated rendering code. The server stores the raw `resultjson` of the latest
+  run (`_App.last_result_json`) and serves the wrapped page at `GET /api/viewer`
+  (placeholder before any result). The SPA embeds it in an `<iframe>` that
+  reloads (`/api/viewer?t=…`) whenever a run returns `has_viewer`; the Newick table
+  and log moved into collapsible `<details>` below it.
+- *Verify (DONE):* **live browser** — after upload→load→`set criterion=recon`→`hs`,
+  the results panel shows the full interactive viewer (Cladogram/Phylogram toggle,
+  row-spacing/font sliders, Show controls) rendering the supertree with real leaves
+  (Orangutan, Human, Chimp, Gorilla, Mouse, Rat, Dog, Cat, Macaque), header
+  "Supertree 1 · tutorial_multicopy.ph · criterion: recon". `test_ui.py` asserts
+  `/api/viewer` returns a placeholder before a result and a correctly-wrapped
+  viewer (single marker pair, injected data) after. Full suite green (4 tests).
+- *Done-when:* ✅ the visualisation the user asked for is live in the client.
 
 ### Phase 3 — Long-running jobs & robustness
 
@@ -552,16 +562,16 @@ no shell surface, a stdlib HTTP server drives real persistent sessions over
 loopback, each session is confined to its own file sandbox, and `/api/run` now
 returns structured `{trees, scores, result_type}` (Newick + the viewer's node
 JSON) — everything the browser needs. **Phase 2 (the browser client) is underway** — the
-SPA shell + palette (2.1) and a clickable upload→load→run loop with a results
-table (2.3) are live. Next:
+SPA shell + palette (2.1), a clickable upload→load→run loop (2.3), and the
+embedded interactive tree/reconciliation viewer (2.4) are all live — the client
+now does the whole job visually. Remaining polish/robustness:
 
-1. **Step 2.4** — embed the interactive viewer, fed by the `trees[].tree` JSON
-   `/api/run` already returns (the compelling visual; the run path already returns
-   the structured trees it needs).
-2. **Step 2.2** — command schema → dynamic option forms, replacing the free-text
+1. **Step 2.2** — command schema → dynamic option forms, replacing the free-text
    options field (author `command_schema.json`; keep `hs seed=` off the form until
    the flagged fix lands).
-3. **Step 3.1** — async jobs + live log streaming (so long `hs` runs don't block).
+2. **Step 3.1** — async jobs + live log streaming (so long `hs` runs don't block
+   the request; stream per-rep progress via SSE).
+3. **Step 3.3 / 4.x** — per-session worker processes, security pass, packaging.
 
 After those, the architecture is proven end-to-end (engine ↔ HTTP ↔ real
 multi-command session) and the remaining steps are incremental UI + robustness.

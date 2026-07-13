@@ -116,8 +116,14 @@
   <section class="card full" id="results-card" style="display:none">
     <h2>Results</h2>
     <div id="scores" class="muted"></div>
-    <div id="trees-wrap"></div>
-    <details style="margin-top:12px" open>
+    <iframe id="viewer" title="Interactive tree viewer"
+      style="display:none;width:100%;height:560px;border:1px solid var(--line);
+             border-radius:10px;margin-top:12px;background:var(--bg)"></iframe>
+    <details style="margin-top:12px">
+      <summary class="muted" style="cursor:pointer">Trees (Newick)</summary>
+      <div id="trees-wrap"></div>
+    </details>
+    <details style="margin-top:12px">
       <summary class="muted" style="cursor:pointer">Log</summary>
       <pre class="log" id="log"></pre>
     </details>
@@ -256,6 +262,14 @@ function renderResults(data) {
 
   const trees = data.trees || [];
   const scores = data.scores || [];
+  const viewer = $("viewer");
+  if (data.has_viewer && trees.length) {
+    viewer.style.display = "";
+    viewer.src = "/api/viewer?t=" + Date.now();   // reload latest result
+  } else {
+    viewer.style.display = "none";
+    viewer.removeAttribute("src");
+  }
   if (trees.length) {
     const shown = scores.filter((s) => s !== null && s !== undefined);
     $("scores").textContent =

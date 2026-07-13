@@ -41,6 +41,20 @@ def run_checks():
         code, ctype, body = _get(base, "/api/session")
         st = json.loads(body)["state"]
         assert st["input_file"] is None and st["num_source_trees"] == 0, st
+
+        # viewer endpoint: placeholder before any result, real viewer after a run
+        code, ctype, body = _get(base, "/api/viewer")
+        assert code == 200 and "text/html" in ctype, (code, ctype)
+        assert b"Run a tree command" in body, "expected placeholder"
+
+        app = httpd.clann_app
+        app.last_result_json = ('{"type":"tree","meta":{"dataset":"x"},'
+                                '"trees":[{"name":"S1","tree":{"children":'
+                                '[{"name":"A"},{"name":"B"}]}}]}')
+        code, ctype, body = _get(base, "/api/viewer")
+        html = body.decode()
+        assert "const DATA =" in html and '"S1"' in html, "viewer not wrapped"
+        assert html.count("/*CLANN_DATA_BEGIN*/") == 1, "template markers off"
     finally:
         httpd.clann_app.sandbox.destroy()
         httpd.shutdown()

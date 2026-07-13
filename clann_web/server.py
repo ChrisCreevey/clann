@@ -30,6 +30,7 @@ from .engine import ClannEngine, ClannError, get_shared_engine
 from .sandbox import Sandbox, UnsafePath, sanitize_command
 from .results import RESULT_JSON, is_tree_command, build_results
 from .commands import list_commands
+from .viewer import build_viewer_html, placeholder_html
 
 STATIC_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static")
 
@@ -44,6 +45,7 @@ class _App:
         # The engine may be a process-shared singleton left dirty by a previous
         # server/session; start from a clean baseline.
         self.engine.reset()
+        self.last_result_json = None   # raw JSON of the most recent tree result
         self.session_id = uuid.uuid4().hex
 
     def new_session(self) -> dict:
@@ -52,6 +54,7 @@ class _App:
         self.sandbox = Sandbox()
         self.engine.set_workdir(self.sandbox.dir)
         old.destroy()
+        self.last_result_json = None
         self.session_id = uuid.uuid4().hex
         return {"session_id": self.session_id, "state": self.engine.state(),
                 "files": self.sandbox.list()}
@@ -107,6 +110,15 @@ def make_handler(app: _App):
                                  "files": app.sandbox.list()})
             elif p == "/api/commands":
                 self._send(200, {"commands": list_commands()})
+            elif p == "/api/viewer":
+                html = (build_viewer_html(app.last_result_json)
+                        if app.last_result_json else placeholder_html())
+                body = html.encode()
+                self.send_response(200)
+                self.send_header("Content-Type", "text/html; charset=utf-8")
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
             else:
                 self._send(404, {"ok": False, "error": "not found"})
 
@@ -162,10 +174,13 @@ def make_handler(app: _App):
                             "state": app.engine.state()}
                     if os.path.exists(jpath):
                         try:
+                            with open(jpath, encoding="utf-8") as jf:
+                                app.last_result_json = jf.read()
                             res = build_results(jpath, log)
                             resp["trees"] = res["trees"]
                             resp["scores"] = res["scores"]
                             resp["result_type"] = res["type"]
+                            resp["has_viewer"] = True
                         finally:
                             os.remove(jpath)
                     self._send(200, resp)
