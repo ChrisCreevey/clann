@@ -242,19 +242,25 @@ on a green predecessor. A single Claude instance should take one step.
 - *Done-when:* ✅ demonstrated. The persistent-session engine the web server needs
   already exists and works.
 
-**Step 0.1b — Confirm `clann_reset()` returns to a clean baseline.** `[ ]`
+**Step 0.1b — Confirm `clann_reset()` returns to a clean baseline.** `[x]`
 - *Goal:* the *other* half of §3.1/§3.7 — that ending a session and starting a new
   one in the same process is deterministic (needed for worker reuse / "start
   fresh", not for the persistent path proven in 0.1).
-- *Work:* extend the 0.1 harness: run the scenario, `clann_reset()`, run it again;
-  assert the second run reproduces the first exactly and matches a fresh-process
-  baseline (same `17.0000`, same best tree). Watch for state that `clean_exit()`
-  frees but does not re-null (the API already zeroes a known set — verify no
-  others leak).
-- *Verify:* harness prints `PASS`; two post-reset runs are byte-identical on the
-  score/best-tree lines.
-- *Done-when:* reset determinism is demonstrated, or a specific leak is documented
-  as a bug to fix before Model A worker reuse.
+- *Work / Verify (DONE):* `tools/session_reset_check.py` (committed) runs the full
+  scenario, calls `clann_reset()`, runs it again in the same process, and asserts
+  the timing-independent **result** lines (final supertree score, `total dup+loss
+  score`, per-tree reconstruct scores, "8 source trees") of the two runs are
+  **identical** and both report `17.0000`. Result: run A and run B are byte-for-
+  byte identical (11/11 result lines) — `clann_reset()` leaves no state behind.
+  - *Seeding finding (important for the server):* `hs` has **no** `seed=` option
+    (only the `set seed=` command calls `srand()`, `main.c:4335`), yet `"seed="`
+    is listed in `opts_hs[]` — so `hs seed=42` is *accepted but silently ignored*.
+    Reproducible runs require an explicit **`set seed=<n>`** command **before**
+    `hs`. The web server must seed via `set seed=` (not an `hs` option) whenever it
+    wants determinism, and Step 2.2's schema should not advertise `seed=` on `hs`
+    until the underlying inconsistency is fixed. (Flagged as a separate cleanup
+    task.)
+- *Done-when:* ✅ reset determinism demonstrated; the seeding gotcha is documented.
 
 **Step 0.2 — Server-safe build guard (`CLANN_SERVER_MODE`).** `[ ]`
 - *Goal:* a compile mode with no shell/`system()` reachable and no browser
@@ -426,14 +432,14 @@ on a green predecessor. A single Claude instance should take one step.
 
 ## 8. Suggested next three sessions
 
-**Step 0.1 is already done** (§6) — the persistent in-process engine is proven, so
-the core premise of the whole design is sound. Next:
+**Steps 0.1 and 0.1b are already done** (§6) — the persistent in-process engine is
+proven *and* `clann_reset()` gives a clean, deterministic baseline, so both the
+long-lived-session path and worker reuse are sound. Next:
 
-1. **Step 0.1b** — reset-determinism (small; extends the existing 0.1 harness;
-   confirms the "start fresh" / worker-reuse path).
-2. **Step 0.2** — `CLANN_SERVER_MODE` shell lockdown (unblocks binding a port).
-3. **Step 1.1** — skeleton FastAPI server driving a real, *persistent* session
+1. **Step 0.2** — `CLANN_SERVER_MODE` shell lockdown (unblocks binding a port).
+2. **Step 1.1** — skeleton FastAPI server driving a real, *persistent* session
    over HTTP (load once, then `nj`/`hs`/`reconstruct` against the same engine).
+3. **Step 1.2** — file upload into a per-session sandbox.
 
 After those, the architecture is proven end-to-end (engine ↔ HTTP ↔ real
 multi-command session) and the remaining steps are incremental UI + robustness.
