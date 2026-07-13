@@ -301,15 +301,40 @@ on a green predecessor. A single Claude instance should take one step.
 - *Done-when:* ✅ server lib builds; the shell surface is provably gone at both the
   linker and runtime level; the normal build is unaffected.
 
-**Step 0.3 — Structured tree output from the engine.** `[ ]`
+**Step 0.3 — Structured tree output from the engine.** `[x]`
 - *Goal:* get the viewer's JSON (a tree/reconciliation as in `NOTES_html_viewer.md`
-  §3) as a **string the API can capture**, not only as a full `.html` file.
-- *Work:* factor the JSON-emitting core out of `html_view_*` so it can write to a
-  memory buffer / temp file; add a tiny API (e.g. `clann_last_trees_json(buf)` or
-  a `resultjson=<file>` option on `hs`/`nj`/`reconstruct`/`showtrees`).
-- *Verify:* a harness runs `hs …` then reads back valid JSON whose leaf set equals
-  the input taxa; reconciliation JSON contains `event` fields.
-- *Done-when:* structured results exist without scraping ASCII.
+  §3) as a file the API can read, not only as a full `.html` file.
+- *Work (DONE):* factored the JSON preamble out of `html_view_open` into
+  `hv_write_preamble`, and added `result_json_open`/`result_json_close`
+  (bare-JSON: the same `{type,meta,trees:[…]}` document, no HTML wrapper). Added a
+  combined emitter `hv_out` (reconcile.c/.h) that writes an HTML file and/or a
+  JSON file from the same trees with one set of calls, and converted all four
+  commands (`hs`, `nj`, `showtrees`, `reconstruct`) to it behind a new
+  **`resultjson=<file>`** option (added to the four `opts_*[]` arrays). `resultjson`
+  is already in the sandbox output-path allowlist (Step 1.2).
+- *Verify (DONE):* `hs`/`reconstruct`/`showtrees` with `resultjson=` produce valid
+  JSON — `hs` → `type:"tree"` 1 supertree; `reconstruct` → `type:"reconciliation"`
+  8 trees with `score`/`dups`/`losses` and `event` fields; `showtrees` → 8 gene
+  trees. Simultaneous `htmlview=`+`resultjson=` both emit correctly. Legacy recon
+  regression still `17.0000`; both `clann` and `libclann-server.so` build clean.
+- *Done-when:* ✅ structured results exist without scraping ASCII.
+
+**Step 1.3 — Structured run result.** `[x]`
+- *Goal:* `/api/run` returns JSON `{ ok, log, trees[], scores[], … }`, not raw text.
+- *Work (DONE):* `clann_web/results.py` — the server auto-injects
+  `resultjson=__clann_result__.json` (a reserved sandbox file) for tree-producing
+  commands (`hs`/`nj`/`showtrees`/`reconstruct`/`alltrees`), reads it back, and
+  shapes each tree as `{name, newick, tree(structured), score?, dups?, losses?}`.
+  Newick is derived from the structured node form in Python (`node_to_newick`,
+  with name-quoting); scores come from the JSON for reconciliations and from the
+  log (`Supertree N of M … = X`) for supertree searches. `/api/run` now returns
+  `trees`, `scores`, and `result_type` alongside `log`/`state`.
+- *Verify (DONE):* `clann_web/tests/test_server.py` — after `hs`, `result_type ==
+  "tree"`, `trees[0].newick` ends `;` and contains a real taxon, `trees[0].tree`
+  has the structured children the viewer consumes, and `scores[0] == 17.0`; after
+  `reconstruct`, `result_type == "reconciliation"`, 8 trees each with a `score`,
+  and at least one `"event":"duplication"`. `PASS` (sandbox test still green too).
+- *Done-when:* ✅ the client can consume results without parsing prose.
 
 ### Phase 1 — Minimal vertical slice (single user, Model B)
 
@@ -499,18 +524,18 @@ on a green predecessor. A single Claude instance should take one step.
 
 ## 8. Suggested next three sessions
 
-**Steps 0.1, 0.1b, 0.2, 1.1, and 1.2 are done** (§6) — the persistent in-process
-engine is proven, `clann_reset()` is deterministic, the `CLANN_SERVER_MODE` build
-has provably no shell surface, a stdlib HTTP server drives real persistent
-sessions over loopback, and each session is now confined to its own file sandbox.
-Next:
+**Phase 0 and Phase 1 are complete** (§6): the persistent in-process engine is
+proven and deterministic across reset, the `CLANN_SERVER_MODE` build has provably
+no shell surface, a stdlib HTTP server drives real persistent sessions over
+loopback, each session is confined to its own file sandbox, and `/api/run` now
+returns structured `{trees, scores, result_type}` (Newick + the viewer's node
+JSON) — everything the browser needs. Next is **Phase 2 (the browser client)**:
 
-1. **Step 0.3 / 1.3** — structured JSON run result (trees + scores). Best done by
-   factoring the viewer's JSON emitter (`html_view_*`) to write to a string/file
-   the API can read (Step 0.3), then returning it from `/api/run` (Step 1.3);
-   interim fallback is text-parsing via `pyclann/_commands.py`.
-2. **Step 2.1** — static SPA shell + command palette from `/api/commands`.
-3. **Step 2.2** — command schema → dynamic option forms.
+1. **Step 2.1** — static SPA shell + command palette from `/api/commands`.
+2. **Step 2.2** — command schema → dynamic option forms (author
+   `command_schema.json`; remember `hs seed=` is a no-op until the flagged fix).
+3. **Step 2.4** — embed the interactive viewer, fed by the `trees[].tree` JSON
+   `/api/run` already returns.
 
 After those, the architecture is proven end-to-end (engine ↔ HTTP ↔ real
 multi-command session) and the remaining steps are incremental UI + robustness.

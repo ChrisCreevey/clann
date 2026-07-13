@@ -88,6 +88,29 @@ void  html_view_add_tree(FILE *f, struct taxon *tree, const char *name, float sc
 void  html_view_add_newick(FILE *f, const char *newick, const char *name, int treenum, int first);
 void  html_view_close(FILE *f, const char *filename);
 void  html_view_launch(const char *filename);   /* open file in default browser (interactive terminals only) */
+/* Bare-JSON result file (no HTML wrapper) — same data document as the viewer,
+ * for programmatic consumers (web server resultjson=). Add trees with the
+ * html_view_add_tree/add_newick functions between open and close. */
+FILE *result_json_open(const char *filename, const char *metajson, int recon);
+void  result_json_close(FILE *f);
+
+/* Combined HTML + bare-JSON emitter: hs/nj/showtrees/reconstruct use this to
+ * write an interactive viewer file (htmlview=) and/or a JSON result file
+ * (resultjson=) from the same trees. Either filename may be empty to skip it. */
+typedef struct {
+	FILE *html;
+	FILE *json;
+	char  htmlname[1024];
+	int   html_autoopen;
+	int   htmlfirst;
+	int   jsonfirst;
+} hv_out;
+void hv_out_open(hv_out *o, const char *htmlfile, const char *jsonfile,
+                 const char *meta, int recon, int html_autoopen);
+int  hv_out_active(const hv_out *o);
+void hv_out_add_tree(hv_out *o, struct taxon *tree, const char *name, float score, int recon);
+void hv_out_add_newick(hv_out *o, const char *newick, const char *name, int treenum);
+void hv_out_close(hv_out *o);
 float tree_map(struct taxon *gene_top, struct taxon *species_top, int print);
 void  label_gene_tree(struct taxon *gene_position, struct taxon *species_top, int *presence, int xnum);
 int   reconstruct_map(struct taxon *position, struct taxon *species_top);

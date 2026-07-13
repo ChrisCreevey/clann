@@ -83,7 +83,7 @@ static const char *opts_hs[] = {
     /* recon-criterion options */
     "duplications=", "losses=", "numspeciesrootings=", "numgenerootings=",
     "lossmodel=",
-    "htmlview=", "open=",
+    "htmlview=", "open=", "resultjson=",
     NULL
 };
 static const char *opts_boot[] = {
@@ -91,7 +91,7 @@ static const char *opts_boot[] = {
     "mleta=", "mlscale=", "nthreads=", "seed=", NULL
 };
 static const char *opts_nj[] = {
-    "missing=", "savetrees=", "htmlview=", "open=", NULL
+    "missing=", "savetrees=", "htmlview=", "open=", "resultjson=", NULL
 };
 static const char *opts_usertrees[] = {
     "file=", "criterion=", "mlbeta=", "mleta=", "mlscale=", "normcorrect",
@@ -104,7 +104,7 @@ static const char *opts_set[] = {
 };
 static const char *opts_showtrees[] = {
     "range=", "namecontains=", "savetrees=", "filename=", "display=",
-    "fullnames", "htmlview=", "open=", NULL
+    "fullnames", "htmlview=", "open=", "resultjson=", NULL
 };
 static const char *opts_excludetrees[] = {
     "range=", "size=", "namecontains=", "containstaxa=", "score=",
@@ -119,7 +119,7 @@ static const char *opts_sprdists[]   = { "filename=", "output=", NULL };
 static const char *opts_consensus[]  = { "savetrees=", "filename=", NULL };
 static const char *opts_reconstruct[]= {
     "speciestree=", "showrecon=", "printfiles=", "nhxfile=", "htmlview=",
-    "open=", "dups=", "losses=", "basescore=", "lossmodel=", NULL
+    "open=", "resultjson=", "dups=", "losses=", "basescore=", "lossmodel=", NULL
 };
 static const char *opts_mlscores[]   = {
     "fixbeta=", "mlbeta=", "mleta=", "mlscale=", "scan", "scanmin=",

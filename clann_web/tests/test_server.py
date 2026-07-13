@@ -82,12 +82,26 @@ def run_checks():
         assert h["ok"], h
         assert "17.000000" in h["log"], h["log"][-500:]
         assert h["state"]["trees_in_memory"] >= 1, h["state"]
+        # structured results (Step 1.3): trees + scores returned, not just log
+        assert h.get("result_type") == "tree", h.get("result_type")
+        assert h["trees"], h
+        t0 = h["trees"][0]
+        assert t0["newick"].endswith(";") and "Human" in t0["newick"], t0["newick"]
+        assert t0["tree"]["children"], t0  # structured node form for the viewer
+        assert h["scores"][0] == 17.0, h["scores"]
 
         # reconstruct uses the tree hs just left in memory (state persisted)
         rec = _post(base, "/api/run",
                     {"command": "reconstruct speciestree=memory open=no"})
         assert rec["ok"], rec
         assert "17.0000" in rec["log"], rec["log"][-500:]
+        # reconciliation results carry per-tree events + dup/loss counts
+        assert rec.get("result_type") == "reconciliation", rec.get("result_type")
+        assert len(rec["trees"]) == 8, len(rec["trees"])
+        assert all("score" in t for t in rec["trees"]), rec["trees"][0]
+        # at least one duplication event somewhere in the reconciliations
+        blob = json.dumps(rec["trees"])
+        assert '"event": "duplication"' in blob or '"event":"duplication"' in blob, "no dup events"
 
         # GET session reflects the same live state
         g = _get(base, "/api/session")

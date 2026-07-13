@@ -24,8 +24,11 @@ import uuid
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse, parse_qs
 
+import os
+
 from .engine import ClannEngine, ClannError
 from .sandbox import Sandbox, UnsafePath, sanitize_command
+from .results import RESULT_JSON, is_tree_command, build_results
 
 
 class _App:
@@ -119,9 +122,29 @@ def make_handler(app: _App):
                         self._send(400, {"ok": False, "error": "missing 'command'"})
                         return
                     safe_cmd = sanitize_command(cmd, app.sandbox)  # may raise
-                    log = app.engine.run(safe_cmd)
-                    self._send(200, {"ok": True, "log": log, "command": safe_cmd,
-                                     "state": app.engine.state()})
+
+                    # For tree-producing commands, inject resultjson= so Clann
+                    # writes structured trees we can return (the injected token
+                    # is a controlled bare name inside the sandbox).
+                    run_cmd = safe_cmd
+                    jpath = os.path.join(app.sandbox.dir, RESULT_JSON)
+                    if os.path.exists(jpath):
+                        os.remove(jpath)
+                    if is_tree_command(safe_cmd) and "resultjson=" not in safe_cmd:
+                        run_cmd = f"{safe_cmd} resultjson={RESULT_JSON}"
+
+                    log = app.engine.run(run_cmd)
+                    resp = {"ok": True, "log": log, "command": safe_cmd,
+                            "state": app.engine.state()}
+                    if os.path.exists(jpath):
+                        try:
+                            res = build_results(jpath, log)
+                            resp["trees"] = res["trees"]
+                            resp["scores"] = res["scores"]
+                            resp["result_type"] = res["type"]
+                        finally:
+                            os.remove(jpath)
+                    self._send(200, resp)
 
                 else:
                     self._send(404, {"ok": False, "error": "not found"})
