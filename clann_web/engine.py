@@ -196,3 +196,17 @@ class ClannEngine:
         output files land) at `path` — used to confine a session to its sandbox.
         Applied on the next load/run/reset, all of which chdir to self.workdir."""
         self.workdir = path
+
+
+# One process can hold only ONE Clann engine: the library keeps all analysis
+# state in globals, so a second ClannEngine would share (and corrupt) the first's
+# state. This process-wide singleton enforces that — every server in a process
+# shares it. (True per-session isolation comes with per-process workers, Step 3.3.)
+_SHARED: ClannEngine | None = None
+
+
+def get_shared_engine(lib_path: str | None = None) -> ClannEngine:
+    global _SHARED
+    if _SHARED is None:
+        _SHARED = ClannEngine(lib_path=lib_path)
+    return _SHARED

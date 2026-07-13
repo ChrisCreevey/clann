@@ -26,7 +26,7 @@ from urllib.parse import urlparse, parse_qs
 
 import os
 
-from .engine import ClannEngine, ClannError
+from .engine import ClannEngine, ClannError, get_shared_engine
 from .sandbox import Sandbox, UnsafePath, sanitize_command
 from .results import RESULT_JSON, is_tree_command, build_results
 from .commands import list_commands
@@ -41,6 +41,9 @@ class _App:
         self.engine = engine
         self.sandbox = Sandbox()
         self.engine.set_workdir(self.sandbox.dir)
+        # The engine may be a process-shared singleton left dirty by a previous
+        # server/session; start from a clean baseline.
+        self.engine.reset()
         self.session_id = uuid.uuid4().hex
 
     def new_session(self) -> dict:
@@ -179,7 +182,7 @@ def make_handler(app: _App):
 
 def make_server(host: str = "127.0.0.1", port: int = 8765,
                 engine: ClannEngine | None = None) -> ThreadingHTTPServer:
-    app = _App(engine or ClannEngine())
+    app = _App(engine or get_shared_engine())
     httpd = ThreadingHTTPServer((host, port), make_handler(app))
     httpd.clann_app = app  # expose for tests
     return httpd

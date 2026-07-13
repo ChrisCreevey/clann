@@ -219,6 +219,15 @@ int clann_init(void)
     strcpy(logfile_name, "clann.log");
     system_call[0]      = '\0';
 
+    /* Reset analysis-state scalars so a fresh clann_init() (including the one
+     * clann_reset() performs) really is a clean baseline. clean_exit() frees the
+     * tree/taxon arrays but leaves these counters and the criterion at their last
+     * values, which would otherwise leak into a new session. */
+    number_of_taxa   = 0;
+    Total_fund_trees = 0;
+    trees_in_memory  = 0;
+    criterion        = 0;   /* dfit (Clann's default) */
+
     /* Seed the random-number generator. */
     seed = (int)(time(NULL) / 2);
     srand((unsigned)seed);

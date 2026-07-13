@@ -438,13 +438,27 @@ on a green predecessor. A single Claude instance should take one step.
   consistency test passes.
 - *Done-when:* every command's options are editable from a generated form.
 
-**Step 2.3 — Upload + load + run from the UI.** `[ ]`
+**Step 2.3 — Upload + load + run from the UI.** `[x]`
 - *Goal:* full loop without a terminal (synchronous run is fine here).
-- *Work:* wire file picker → `/api/files`; "Load" → `/api/load`; "Run" → `/api/run`
-  with form values; render the returned `log` and scores.
-- *Verify:* screenshot sequence: upload tutorial → load (panel shows 8 trees,
-  16 taxa) → run `hs` → score `17` shown.
-- *Done-when:* a user can complete an analysis by clicking.
+- *Work (DONE):* extended the SPA with a file picker + Upload (`POST /api/files`),
+  a "Loaded file" dropdown + Load (`POST /api/load`), and a Run control — command
+  dropdown + a free-text options field (the generated form is Step 2.2) that
+  submits `<cmd> <opts>` to `/api/run`. Results render in a panel: a scores/summary
+  line, a table (tree name · score [· dup/loss] · Newick), and a collapsible log.
+  **Two backend fixes surfaced by pytest running all tests in one process** (the
+  §3.1 shared-global-state constraint made concrete — multiple `ClannEngine`s in a
+  process share `dlopen`'d globals): (1) `clann_reset()` didn't clear
+  `number_of_taxa`/`Total_fund_trees`/`trees_in_memory`/`criterion` — fixed in
+  `clann_init` (library-only) so "New session" is a true clean slate; (2) made the
+  engine a **process-wide singleton** (`get_shared_engine`) and each `_App` resets
+  it on creation, enforcing one-engine-per-process.
+- *Verify (DONE):* **live browser** — injected the tutorial as a `File`, then drove
+  Upload → Load ("8 trees, 9 taxa") → `set criterion=recon` → `hs nreps=5
+  nthreads=4` → results table "Supertree 1 · 17 · ((Orangutan,((Human,Chimp)…"; and
+  `reconstruct speciestree=memory` → "8 trees · reconciliation · scores: 0,0,0,2,
+  5,3,3,4" with per-tree `(d/l)` counts. Full `pytest clann_web/tests/` (4 tests,
+  one process) now passes; standalone recon regression still `17.0000`.
+- *Done-when:* ✅ a user can complete an analysis by clicking.
 
 **Step 2.4 — Embed the interactive tree viewer.** `[ ]`
 - *Goal:* results show the existing clannview visualisation, fed by API JSON.
@@ -538,14 +552,16 @@ no shell surface, a stdlib HTTP server drives real persistent sessions over
 loopback, each session is confined to its own file sandbox, and `/api/run` now
 returns structured `{trees, scores, result_type}` (Newick + the viewer's node
 JSON) — everything the browser needs. **Phase 2 (the browser client) is underway** — the
-SPA shell + command palette (Step 2.1) is live. Next:
+SPA shell + palette (2.1) and a clickable upload→load→run loop with a results
+table (2.3) are live. Next:
 
-1. **Step 2.2** — command schema → dynamic option forms (author
-   `command_schema.json`; remember `hs seed=` is a no-op until the flagged fix).
-2. **Step 2.3** — upload + load + run from the UI (wire the palette to
-   `/api/files`, `/api/load`, `/api/run`; render log + scores).
-3. **Step 2.4** — embed the interactive viewer, fed by the `trees[].tree` JSON
-   `/api/run` already returns.
+1. **Step 2.4** — embed the interactive viewer, fed by the `trees[].tree` JSON
+   `/api/run` already returns (the compelling visual; the run path already returns
+   the structured trees it needs).
+2. **Step 2.2** — command schema → dynamic option forms, replacing the free-text
+   options field (author `command_schema.json`; keep `hs seed=` off the form until
+   the flagged fix lands).
+3. **Step 3.1** — async jobs + live log streaming (so long `hs` runs don't block).
 
 After those, the architecture is proven end-to-end (engine ↔ HTTP ↔ real
 multi-command session) and the remaining steps are incremental UI + robustness.
