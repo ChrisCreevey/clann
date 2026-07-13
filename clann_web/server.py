@@ -29,6 +29,9 @@ import os
 from .engine import ClannEngine, ClannError
 from .sandbox import Sandbox, UnsafePath, sanitize_command
 from .results import RESULT_JSON, is_tree_command, build_results
+from .commands import list_commands
+
+STATIC_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static")
 
 
 class _App:
@@ -77,12 +80,30 @@ def make_handler(app: _App):
         def log_message(self, *args):  # keep test output quiet
             pass
 
+        def _send_file(self, relpath: str, content_type: str) -> None:
+            full = os.path.normpath(os.path.join(STATIC_DIR, relpath))
+            if not full.startswith(STATIC_DIR) or not os.path.isfile(full):
+                self._send(404, {"ok": False, "error": "not found"})
+                return
+            with open(full, "rb") as fh:
+                body = fh.read()
+            self.send_response(200)
+            self.send_header("Content-Type", content_type)
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
         # -- routes --------------------------------------------------------
         def do_GET(self):
-            if urlparse(self.path).path == "/api/session":
+            p = urlparse(self.path).path
+            if p in ("/", "/index.html"):
+                self._send_file("index.html", "text/html; charset=utf-8")
+            elif p == "/api/session":
                 self._send(200, {"session_id": app.session_id,
                                  "state": app.engine.state(),
                                  "files": app.sandbox.list()})
+            elif p == "/api/commands":
+                self._send(200, {"commands": list_commands()})
             else:
                 self._send(404, {"ok": False, "error": "not found"})
 

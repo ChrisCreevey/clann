@@ -410,14 +410,22 @@ on a green predecessor. A single Claude instance should take one step.
 
 ### Phase 2 — The browser client
 
-**Step 2.1 — Static SPA shell + command palette.** `[ ]`
+**Step 2.1 — Static SPA shell + command palette.** `[x]`
 - *Goal:* a served single page that lists commands and shows a session panel.
-- *Work:* `GET /api/commands` returns command names (+ one-line blurbs) derived
-  from the `opts_*[]`/help inventory. Client renders a dropdown and a session
-  status area. Serve the bundle from the server.
-- *Verify:* browser screenshot: page loads at `127.0.0.1:PORT`, dropdown lists
-  `hs`, `nj`, `showtrees`, `reconstruct`, …; session panel shows "no file loaded".
-- *Done-when:* the shell renders and talks to `/api/commands`.
+- *Work (DONE):* `clann_web/commands.py` (curated command list + blurbs; full
+  per-command schema is Step 2.2) and `GET /api/commands`. Server now serves a
+  self-contained, theme-aware SPA (`clann_web/static/index.html`) at `/` (path is
+  normalised and confined to the static dir). The page opens a session on load
+  (`POST /api/session`), renders the session panel (input file / taxa / source
+  trees / criterion / in-memory) and a command dropdown whose description updates
+  on change; a "New session" button re-inits.
+- *Verify (DONE):* `clann_web/tests/test_ui.py` — `/` serves the HTML shell,
+  `/api/commands` lists `hs`/`nj`/`showtrees`/`reconstruct` (each with a blurb),
+  fresh session state is empty. **Live browser check** (screenshot): header shows
+  "connected", the session panel shows "no file loaded", the dropdown holds all 11
+  commands and the blurb updates when the selection changes (verified `hs` →
+  `reconstruct`).
+- *Done-when:* ✅ the shell renders and talks to `/api/commands`.
 
 **Step 2.2 — Command schema → dynamic option form.** `[ ]`
 - *Goal:* per-command forms with typed inputs, defaults, and help (§3.6).
@@ -529,11 +537,13 @@ proven and deterministic across reset, the `CLANN_SERVER_MODE` build has provabl
 no shell surface, a stdlib HTTP server drives real persistent sessions over
 loopback, each session is confined to its own file sandbox, and `/api/run` now
 returns structured `{trees, scores, result_type}` (Newick + the viewer's node
-JSON) — everything the browser needs. Next is **Phase 2 (the browser client)**:
+JSON) — everything the browser needs. **Phase 2 (the browser client) is underway** — the
+SPA shell + command palette (Step 2.1) is live. Next:
 
-1. **Step 2.1** — static SPA shell + command palette from `/api/commands`.
-2. **Step 2.2** — command schema → dynamic option forms (author
+1. **Step 2.2** — command schema → dynamic option forms (author
    `command_schema.json`; remember `hs seed=` is a no-op until the flagged fix).
+2. **Step 2.3** — upload + load + run from the UI (wire the palette to
+   `/api/files`, `/api/load`, `/api/run`; render log + scores).
 3. **Step 2.4** — embed the interactive viewer, fed by the `trees[].tree` JSON
    `/api/run` already returns.
 
