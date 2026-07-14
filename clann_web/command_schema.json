@@ -1,0 +1,90 @@
+{
+  "_note": "Typed option schema for the web client's dynamic forms (Step 2.2). Each option: name, type (enum|int|float|text|bool), default, help, and (for enum) values. Option names must match what the C command actually parses (verified against heuristic_search / set_parameters / reconstruct / nj / showtrees). Notably `hs` does NOT parse criterion= or seed= (they are set via the `set` command), so they are deliberately absent from the hs form. htmlview/open/resultjson are handled by the server and omitted.",
+
+  "set": {
+    "summary": "Set global options that persist for the session.",
+    "options": [
+      {"name": "criterion", "type": "enum", "default": "dfit",
+       "values": ["dfit", "sfit", "qfit", "recon", "rf", "ml"],
+       "help": "Optimality criterion used by hs/nj/alltrees. recon = gene-tree reconciliation."},
+      {"name": "seed", "type": "int", "default": "",
+       "help": "Random-number seed. Set this before hs for reproducible searches."}
+    ]
+  },
+
+  "hs": {
+    "summary": "Heuristic search for the best supertree.",
+    "options": [
+      {"name": "nreps", "type": "int", "default": "10",
+       "help": "Independent search replicates."},
+      {"name": "nbest", "type": "int", "default": "",
+       "help": "How many equally-best trees to retain."},
+      {"name": "nthreads", "type": "int", "default": "",
+       "help": "OpenMP threads (one replicate per thread). Default: all CPUs."},
+      {"name": "swap", "type": "enum", "default": "tbr",
+       "values": ["nni", "spr", "tbr"],
+       "help": "Rearrangement operator (ignored when vns=yes)."},
+      {"name": "start", "type": "enum", "default": "nj",
+       "values": ["nj", "random", "memory"],
+       "help": "Starting tree: NJ, random, or the tree currently in memory."},
+      {"name": "nsteps", "type": "int", "default": "",
+       "help": "Improvement steps per replicate before stopping."},
+      {"name": "maxswaps", "type": "int", "default": "",
+       "help": "Max branch swaps per replicate."},
+      {"name": "vns", "type": "enum", "default": "yes", "values": ["yes", "no"],
+       "help": "Variable Neighborhood Descent (NNI→SPR→TBR escalation). The reliable default."},
+      {"name": "ils", "type": "int", "default": "10",
+       "help": "Iterated Local Search kicks without improvement before a replicate stops (0 = off)."},
+      {"name": "strategy", "type": "enum", "default": "first", "values": ["first", "best"],
+       "help": "Take the first improving move, or the best in the neighbourhood."},
+      {"name": "lossmodel", "type": "enum", "default": "legacy", "values": ["legacy", "standard"],
+       "help": "recon only: duplication-loss model. standard = textbook LCA-mapping (changes scores)."},
+      {"name": "numspeciesrootings", "type": "text", "default": "mindup",
+       "help": "recon only: mindup | all | <n> random rootings of the species tree."},
+      {"name": "numgenerootings", "type": "text", "default": "mindup",
+       "help": "recon only: mindup | all | <n> random rootings of each gene tree."},
+      {"name": "duplications", "type": "float", "default": "1.0",
+       "help": "recon only: weight per duplication."},
+      {"name": "losses", "type": "float", "default": "1.0",
+       "help": "recon only: weight per loss."}
+    ]
+  },
+
+  "nj": {
+    "summary": "Neighbour-joining supertree from average-consensus distances.",
+    "options": [
+      {"name": "missing", "type": "enum", "default": "4point",
+       "values": ["4point", "ultrametric"],
+       "help": "Estimate distances for taxon pairs not co-occurring in any source tree."}
+    ]
+  },
+
+  "reconstruct": {
+    "summary": "Reconcile every gene tree onto a species tree (duplications & losses).",
+    "options": [
+      {"name": "speciestree", "type": "enum", "default": "memory",
+       "values": ["memory", "first"],
+       "help": "Species tree to reconcile against: the tree in memory (from hs/nj) or the first source tree."},
+      {"name": "showrecon", "type": "enum", "default": "no", "values": ["no", "yes"],
+       "help": "Print detailed per-node reconciliation information."},
+      {"name": "lossmodel", "type": "enum", "default": "legacy", "values": ["legacy", "standard"],
+       "help": "Duplication-loss model. Match the value used for hs to make totals agree."},
+      {"name": "dups", "type": "float", "default": "1.0",
+       "help": "Weight per duplication."},
+      {"name": "losses", "type": "float", "default": "1.0",
+       "help": "Weight per loss."}
+    ]
+  },
+
+  "showtrees": {
+    "summary": "Display the loaded input gene trees.",
+    "options": [
+      {"name": "display", "type": "enum", "default": "yes", "values": ["yes", "no"],
+       "help": "Print the trees as ASCII to the log (the interactive viewer is shown regardless)."},
+      {"name": "namecontains", "type": "text", "default": "",
+       "help": "Only trees whose name contains this string."},
+      {"name": "range", "type": "text", "default": "",
+       "help": "Tree-number range, e.g. 1-5."}
+    ]
+  }
+}

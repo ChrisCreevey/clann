@@ -427,16 +427,29 @@ on a green predecessor. A single Claude instance should take one step.
   `reconstruct`).
 - *Done-when:* ✅ the shell renders and talks to `/api/commands`.
 
-**Step 2.2 — Command schema → dynamic option form.** `[ ]`
+**Step 2.2 — Command schema → dynamic option form.** `[x]`
 - *Goal:* per-command forms with typed inputs, defaults, and help (§3.6).
-- *Work:* author `command_schema.json` (name, options[type,default,values,help]);
-  `GET /api/commands/<name>/schema`; client renders bool→checkbox, enum→select,
-  int/float→number, filename→file picker, with defaults + tooltips. Add a test
-  asserting schema ⇄ `opts_*[]` consistency.
-- *Verify:* screenshot: selecting `hs criterion=recon` shows `lossmodel`
-  (legacy/standard), `numspeciesrootings`, `htmlview`, etc. with correct widgets;
-  consistency test passes.
-- *Done-when:* every command's options are editable from a generated form.
+- *Work (DONE):* authored `clann_web/command_schema.json` (per option: name, type
+  enum|int|float|text, default, help; enums carry values) for `set`, `hs`, `nj`,
+  `reconstruct`, `showtrees`; `commands.command_schema()` loads it and
+  `GET /api/commands/<name>/schema` serves it. The SPA renders a two-column typed
+  form on command change (enum→`<select>`, int/float→`number`, text→`text`, each
+  with default + help hint), plus a collapsible "Advanced (raw options)" field.
+  `buildCommand()` emits only options whose value **differs from the default**, so
+  commands stay minimal. Deliberately omits `hs seed=`/`hs criterion=` — verified
+  against `heuristic_search`'s actual parser, they are no-ops there (criterion/seed
+  are set via the `set` form).
+- *Verify (DONE):* `clann_web/tests/test_schema.py` — a **schema ⇄ `opts_*[]`
+  consistency** test parses each `opts_<cmd>[]` from `main.c` and asserts every
+  schema option is one the C command accepts (guards the `hs seed=` bug class);
+  shape test; endpoint test (hs schema has `nreps`/`lossmodel`, lacks
+  `seed`/`criterion`; unschema'd command → empty options). **Live browser:** the
+  `hs` form renders typed controls with help; driving `set` (criterion=recon,
+  seed=42) then `hs` (change only nreps/nthreads) built exactly
+  `set criterion=recon seed=42` and `hs nreps=5 nthreads=4` (defaults omitted),
+  scored 17. Full suite green (7 tests).
+- *Done-when:* ✅ every schema'd command's options are editable from a generated
+  form; unschema'd commands keep the raw-options field.
 
 **Step 2.3 — Upload + load + run from the UI.** `[x]`
 - *Goal:* full loop without a terminal (synchronous run is fine here).
@@ -562,16 +575,15 @@ no shell surface, a stdlib HTTP server drives real persistent sessions over
 loopback, each session is confined to its own file sandbox, and `/api/run` now
 returns structured `{trees, scores, result_type}` (Newick + the viewer's node
 JSON) — everything the browser needs. **Phase 2 (the browser client) is underway** — the
-SPA shell + palette (2.1), a clickable upload→load→run loop (2.3), and the
-embedded interactive tree/reconciliation viewer (2.4) are all live — the client
-now does the whole job visually. Remaining polish/robustness:
+All of Phase 2 is done — SPA shell + palette (2.1), typed option forms (2.2),
+clickable upload→load→run (2.3), and the embedded interactive viewer (2.4). The
+client does the whole job visually. Remaining work is robustness/packaging:
 
-1. **Step 2.2** — command schema → dynamic option forms, replacing the free-text
-   options field (author `command_schema.json`; keep `hs seed=` off the form until
-   the flagged fix lands).
-2. **Step 3.1** — async jobs + live log streaming (so long `hs` runs don't block
-   the request; stream per-rep progress via SSE).
-3. **Step 3.3 / 4.x** — per-session worker processes, security pass, packaging.
+1. **Step 3.1** — async jobs + live log streaming (so long `hs` runs don't block
+   the request; stream per-rep progress via SSE). The biggest real-world gap.
+2. **Step 3.2 / 3.3** — cancellation; per-session worker processes (Model A).
+3. **Step 4.x** — security pass, packaging (`pip install` + `clann-web`, ideally a
+   universal/arm64 lib so the `arch -x86_64` prefix goes away).
 
 After those, the architecture is proven end-to-end (engine ↔ HTTP ↔ real
 multi-command session) and the remaining steps are incremental UI + robustness.

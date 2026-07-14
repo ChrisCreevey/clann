@@ -1,12 +1,36 @@
-"""Command registry for the web client (Step 2.1).
+"""Command registry + option schema for the web client (Steps 2.1, 2.2).
 
-A curated list of the analysis commands the UI offers, each with a one-line
-blurb. Step 2.2 adds a full per-command option schema; for now this drives the
-command palette (dropdown + description). Names match Clann's REPL / the
-library dispatch table.
+A curated list of the analysis commands the UI offers (each with a one-line
+blurb) drives the command palette; `command_schema.json` supplies the typed
+option schema that drives the per-command forms. Names match Clann's REPL / the
+library dispatch table and the options each command actually parses.
 """
 
 from __future__ import annotations
+
+import json
+import os
+
+_SCHEMA_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                            "command_schema.json")
+_schema: dict | None = None
+
+
+def _load_schema() -> dict:
+    global _schema
+    if _schema is None:
+        with open(_SCHEMA_PATH, encoding="utf-8") as f:
+            _schema = json.load(f)
+    return _schema
+
+
+def command_schema(name: str) -> dict:
+    """Return {summary, options:[…]} for a command, or {} if it has no form."""
+    entry = _load_schema().get(name)
+    if not entry:
+        return {}
+    return {"summary": entry.get("summary", ""),
+            "options": entry.get("options", [])}
 
 COMMANDS = [
     {"name": "hs",          "blurb": "Heuristic search for the best supertree"},

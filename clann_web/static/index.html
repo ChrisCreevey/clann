@@ -56,6 +56,14 @@
   table.trees th{color:var(--muted);font-weight:600;font-size:11px;text-transform:uppercase;letter-spacing:.05em}
   table.trees td.newick{font-family:ui-monospace,Menlo,monospace;font-size:12px;
     max-width:520px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .form-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px 14px;margin-top:8px}
+  .fitem{display:flex;flex-direction:column;gap:3px}
+  .fitem label{font-size:12px;color:var(--muted)}
+  .fitem .name{color:var(--ink);font-weight:500}
+  .fitem input,.fitem select{padding:7px 9px;border:1px solid var(--line);border-radius:7px;
+    background:var(--bg);color:var(--ink);width:100%}
+  .fitem input[type=checkbox]{width:auto}
+  .fitem .hint{font-size:11px;color:var(--muted);line-height:1.35}
   .msg{margin-top:10px;font-size:13px}
   .msg.err{color:var(--err)} .msg.ok{color:var(--ok)}
   footer{max-width:1000px;margin:0 auto;padding:0 22px 26px;color:var(--muted);font-size:12px}
@@ -103,8 +111,12 @@
     <select id="cmd" aria-label="Command"></select>
     <div class="blurb" id="cmd-blurb"></div>
 
-    <label class="fld">Options <span class="muted">(space-separated, e.g. <code>nreps=10 nthreads=4</code>)</span></label>
-    <input type="text" id="opts" placeholder="options…" />
+    <div id="form"></div>
+
+    <details style="margin-top:10px">
+      <summary class="muted" style="cursor:pointer;font-size:13px">Advanced (extra raw options)</summary>
+      <input type="text" id="opts" placeholder="e.g. maxswaps=500000" style="margin-top:6px" />
+    </details>
 
     <div class="row" style="margin-top:12px">
       <button class="btn primary" id="run">Run</button>
@@ -200,8 +212,70 @@ async function loadCommands() {
   sel.onchange = () => {
     const o = sel.selectedOptions[0];
     $("cmd-blurb").textContent = o ? o.dataset.blurb : "";
+    renderForm(sel.value);
   };
   sel.onchange();
+}
+
+// --- dynamic option form (Step 2.2) --------------------------------------
+let currentSchema = { options: [] };
+
+async function renderForm(cmd) {
+  const { ok, data } = await api("/api/commands/" + encodeURIComponent(cmd) + "/schema");
+  currentSchema = ok ? data : { options: [] };
+  const form = $("form");
+  form.innerHTML = "";
+  const opts = currentSchema.options || [];
+  if (!opts.length) return;
+  const grid = document.createElement("div");
+  grid.className = "form-grid";
+  for (const o of opts) {
+    const item = document.createElement("div");
+    item.className = "fitem";
+    const lab = document.createElement("label");
+    lab.innerHTML = `<span class="name">${o.name}</span>`;
+    let input;
+    if (o.type === "enum") {
+      input = document.createElement("select");
+      for (const v of o.values || []) {
+        const op = document.createElement("option");
+        op.value = op.textContent = v;
+        input.appendChild(op);
+      }
+      input.value = o.default ?? "";
+    } else {
+      input = document.createElement("input");
+      input.type = (o.type === "int" || o.type === "float") ? "number" : "text";
+      if (o.type === "float") input.step = "any";
+      input.value = o.default ?? "";
+      if (o.default === "") input.placeholder = o.type;
+    }
+    input.dataset.name = o.name;
+    input.dataset.default = o.default ?? "";
+    item.appendChild(lab);
+    item.appendChild(input);
+    if (o.help) {
+      const h = document.createElement("div");
+      h.className = "hint";
+      h.textContent = o.help;
+      item.appendChild(h);
+    }
+    grid.appendChild(item);
+  }
+  form.appendChild(grid);
+}
+
+function buildCommand(cmd) {
+  const parts = [cmd];
+  for (const input of $("form").querySelectorAll("[data-name]")) {
+    const val = String(input.value).trim();
+    const def = input.dataset.default ?? "";
+    // include an option only when it has a value that differs from its default
+    if (val !== "" && val !== def) parts.push(`${input.dataset.name}=${val}`);
+  }
+  const extra = $("opts").value.trim();
+  if (extra) parts.push(extra);
+  return parts.join(" ");
 }
 
 $("upload").onclick = async () => {
@@ -234,9 +308,7 @@ $("load").onclick = async () => {
 };
 
 $("run").onclick = async () => {
-  const cmd = $("cmd").value;
-  const opts = $("opts").value.trim();
-  const command = opts ? cmd + " " + opts : cmd;
+  const command = buildCommand($("cmd").value);
   $("run-cmd").textContent = "clann> " + command;
   $("run").disabled = true;
   msg("run-msg", "Running…");

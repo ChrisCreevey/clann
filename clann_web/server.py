@@ -29,7 +29,7 @@ import os
 from .engine import ClannEngine, ClannError, get_shared_engine
 from .sandbox import Sandbox, UnsafePath, sanitize_command
 from .results import RESULT_JSON, is_tree_command, build_results
-from .commands import list_commands
+from .commands import list_commands, command_schema
 from .viewer import build_viewer_html, placeholder_html
 
 STATIC_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static")
@@ -110,6 +110,9 @@ def make_handler(app: _App):
                                  "files": app.sandbox.list()})
             elif p == "/api/commands":
                 self._send(200, {"commands": list_commands()})
+            elif p.startswith("/api/commands/") and p.endswith("/schema"):
+                name = p[len("/api/commands/"):-len("/schema")]
+                self._send(200, {"name": name, **command_schema(name)})
             elif p == "/api/viewer":
                 html = (build_viewer_html(app.last_result_json)
                         if app.last_result_json else placeholder_html())
