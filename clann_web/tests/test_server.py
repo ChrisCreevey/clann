@@ -52,6 +52,23 @@ def _get(base, path):
         return json.loads(r.read())
 
 
+def _run(base, command):
+    """POST /api/run (async) then poll the job to completion; returns a dict
+    shaped like the old synchronous response (ok, log, trees, scores, state…)."""
+    import time
+    r = _post(base, "/api/run", {"command": command})
+    if not r.get("job_id"):
+        return r
+    jid = r["job_id"]
+    for _ in range(1200):
+        j = _get(base, f"/api/jobs/{jid}")
+        if j.get("status") in ("done", "error"):
+            j["ok"] = j["status"] == "done"
+            return j
+        time.sleep(0.1)
+    raise AssertionError("job did not finish in time")
+
+
 def run_checks():
     httpd = make_server("127.0.0.1", 0)  # port 0 = ephemeral
     host, port = httpd.server_address
@@ -73,12 +90,12 @@ def run_checks():
         assert r["state"]["num_source_trees"] == 8, r["state"]
         assert r["state"]["num_taxa"] == 9, r["state"]
 
-        # persistent session: set criterion, then hs, then reconstruct
-        _post(base, "/api/run", {"command": "set seed=42"})
-        c = _post(base, "/api/run", {"command": "set criterion=recon"})
+        # persistent session (async jobs): set criterion, then hs, then reconstruct
+        _run(base, "set seed=42")
+        c = _run(base, "set criterion=recon")
         assert c["state"]["criterion"] == "recon", c["state"]
 
-        h = _post(base, "/api/run", {"command": "hs nreps=5 nthreads=1"})
+        h = _run(base, "hs nreps=5 nthreads=1")
         assert h["ok"], h
         assert "17.000000" in h["log"], h["log"][-500:]
         assert h["state"]["trees_in_memory"] >= 1, h["state"]
@@ -91,8 +108,7 @@ def run_checks():
         assert h["scores"][0] == 17.0, h["scores"]
 
         # reconstruct uses the tree hs just left in memory (state persisted)
-        rec = _post(base, "/api/run",
-                    {"command": "reconstruct speciestree=memory open=no"})
+        rec = _run(base, "reconstruct speciestree=memory open=no")
         assert rec["ok"], rec
         assert "17.0000" in rec["log"], rec["log"][-500:]
         # reconciliation results carry per-tree events + dup/loss counts

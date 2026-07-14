@@ -44,6 +44,20 @@ def _upload(base, name, data):
         return e.code, json.loads(e.read())
 
 
+def _run(base, command):
+    """POST /api/run (async) and poll the job to completion; returns the job."""
+    import time
+    _, r = _post(base, "/api/run", {"command": command})
+    jid = r["job_id"]
+    for _ in range(600):
+        with urllib.request.urlopen(base + f"/api/jobs/{jid}") as resp:
+            j = json.loads(resp.read())
+        if j.get("status") in ("done", "error"):
+            return j
+        time.sleep(0.1)
+    raise AssertionError("job did not finish")
+
+
 def test_sanitizer_unit():
     sb = Sandbox()
     try:
@@ -98,10 +112,9 @@ def test_server_sandbox():
         _post(base, "/api/load", {"file": "trees.ph"})
 
         # an output path that tries to escape is relocated into the sandbox
-        _post(base, "/api/run", {"command": "set criterion=dfit"})
-        code, r = _post(base, "/api/run",
-                        {"command": "showtrees display=no htmlview=/tmp/escape.html"})
-        assert code == 200 and r["ok"], (code, r)
+        _run(base, "set criterion=dfit")
+        r = _run(base, "showtrees display=no htmlview=/tmp/escape.html")
+        assert r["status"] == "done", r
         assert r["command"].endswith("htmlview=escape.html"), r["command"]
         assert not os.path.exists("/tmp/escape.html"), "output escaped the sandbox!"
         assert os.path.isfile(os.path.join(sandbox_dir, "escape.html")), r

@@ -135,7 +135,7 @@
       <summary class="muted" style="cursor:pointer">Trees (Newick)</summary>
       <div id="trees-wrap"></div>
     </details>
-    <details style="margin-top:12px">
+    <details style="margin-top:12px" id="logbox">
       <summary class="muted" style="cursor:pointer">Log</summary>
       <pre class="log" id="log"></pre>
     </details>
@@ -307,30 +307,56 @@ $("load").onclick = async () => {
   }
 };
 
+let currentES = null;
+
 $("run").onclick = async () => {
   const command = buildCommand($("cmd").value);
   $("run-cmd").textContent = "clann> " + command;
   $("run").disabled = true;
   msg("run-msg", "Running…");
-  try {
-    const { ok, data } = await jpost("/api/run", { command });
-    if (!ok || data.ok === false) {
-      msg("run-msg", data.error || "Command failed.", "err");
+
+  // show the results card with a live log while the job runs
+  $("results-card").style.display = "";
+  $("viewer").style.display = "none";
+  $("scores").textContent = "";
+  $("trees-wrap").innerHTML = "";
+  $("log").textContent = "";
+  $("logbox").open = true;
+
+  const { ok, status, data } = await jpost("/api/run", { command });
+  if (status === 409) { msg("run-msg", data.error || "Busy.", "err"); $("run").disabled = false; return; }
+  if (!ok || data.ok === false) { msg("run-msg", data.error || "Command failed.", "err"); $("run").disabled = false; return; }
+
+  if (currentES) currentES.close();
+  const es = new EventSource(`/api/jobs/${data.job_id}/stream`);
+  currentES = es;
+  es.onmessage = (ev) => {
+    const d = JSON.parse(ev.data);
+    if (d.log) { $("log").textContent += d.log; $("log").scrollTop = $("log").scrollHeight; }
+  };
+  es.addEventListener("done", (ev) => {
+    es.close(); currentES = null;
+    const d = JSON.parse(ev.data);
+    if (d.status === "error") {
+      msg("run-msg", d.error || "Command failed.", "err");
     } else {
       msg("run-msg", "Done.", "ok");
-      renderState(data.state);
-      renderResults(data);
+      if (d.state) renderState(d.state);
+      renderResults(d);
     }
-  } catch (e) {
-    msg("run-msg", String(e), "err");
-  } finally {
     $("run").disabled = false;
-  }
+  });
+  es.onerror = () => {
+    es.close(); currentES = null;
+    $("run").disabled = false;
+    msg("run-msg", "Connection to the run stream was lost.", "err");
+  };
 };
 
 function renderResults(data) {
   $("results-card").style.display = "";
-  $("log").textContent = data.log || "(no output)";
+  // the log is streamed live during the run; only overwrite if a full log is given
+  if (data.log != null) $("log").textContent = data.log;
 
   const trees = data.trees || [];
   const scores = data.scores || [];

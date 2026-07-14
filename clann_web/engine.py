@@ -63,6 +63,7 @@ class ClannEngine:
 
         self._buf: list[str] = []
         self._input_file: str | None = None
+        self._live = None    # optional per-run callback(str) for incremental output
         self._lib = None
         self._cb = None  # strong ref to the ctypes callback
 
@@ -107,7 +108,13 @@ class ClannEngine:
 
     # -- internals (all run on the worker thread) --------------------------
     def _on_output(self, msg: bytes, _userdata) -> None:
-        self._buf.append(msg.decode(errors="replace"))
+        text = msg.decode(errors="replace")
+        self._buf.append(text)
+        if self._live is not None:      # forward incrementally for live streaming
+            try:
+                self._live(text)
+            except Exception:           # a broken listener must never break Clann
+                pass
 
     def _load_and_init(self) -> None:
         try:
@@ -151,10 +158,14 @@ class ClannEngine:
         self._input_file = filename
         return self._drain()
 
-    def _do_run(self, command: str) -> str:
+    def _do_run(self, command: str, on_line=None) -> str:
         os.chdir(self.workdir)
         self._buf.clear()
-        self._lib.clann_run_command(command.encode())
+        self._live = on_line
+        try:
+            self._lib.clann_run_command(command.encode())
+        finally:
+            self._live = None
         return self._drain()
 
     def _do_reset(self) -> None:
@@ -179,9 +190,15 @@ class ClannEngine:
         """Load source trees (equivalent to `exe <filename>`). Returns log text."""
         return self._submit(lambda: self._do_load(filename, parse_opts))
 
-    def run(self, command: str) -> str:
-        """Run one Clann command against the live session. Returns log text."""
-        return self._submit(lambda: self._do_run(command))
+    def run(self, command: str, on_line=None) -> str:
+        """Run one Clann command against the live session. Returns log text.
+
+        If `on_line` is given it is called with each output chunk as it is
+        produced (on the engine worker thread) — used for live log streaming.
+        Blocks until the command finishes, so callers wanting async behaviour
+        should invoke this from a background thread (see the server's job runner).
+        """
+        return self._submit(lambda: self._do_run(command, on_line))
 
     def reset(self) -> None:
         """Return the engine to a clean baseline (new session)."""

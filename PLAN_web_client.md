@@ -495,14 +495,39 @@ on a green predecessor. A single Claude instance should take one step.
 
 ### Phase 3 — Long-running jobs & robustness
 
-**Step 3.1 — Async job model + live log stream.** `[ ]`
+**Step 3.1 — Async job model + live log stream.** `[x]`
 - *Goal:* non-blocking `hs`; progress in the UI (§3.2).
-- *Work:* `/api/run` returns `job_id`; run the engine in a worker thread/process;
-  stream `printf2` lines over SSE (`/api/jobs/<id>/stream`); `GET /api/jobs/<id>`
-  for status/result. Client shows a live log and a spinner.
-- *Verify:* browser + `curl`: a long `hs nreps=50` streams per-rep lines and
-  finishes with a result; the UI stays responsive.
-- *Done-when:* long runs report progress and don't block the server.
+- *Work (DONE):* `/api/run` now returns **202 + `job_id`** immediately and runs the
+  command on a background thread (`_App.start_job`/`_run_job`, `Job` class). The
+  engine gained an `on_line` callback (`ClannEngine.run(cmd, on_line=…)`) that
+  forwards each `printf2` chunk as it is produced; `_run_job` feeds it to the
+  job's live log. `GET /api/jobs/<id>` returns status/log/result (read from the
+  Job, never the engine, so polling never blocks behind a running search);
+  `GET /api/jobs/<id>/stream` is **Server-Sent Events** — live `data:` log chunks
+  then a final `event: done` with the structured result. Only one job runs at a
+  time (single engine) → a second `/api/run` while busy returns **409**. The SPA
+  posts the run, opens an `EventSource`, appends log chunks live (auto-scrolling),
+  and on `done` renders scores + the viewer.
+- *Verify (DONE):* `clann_web/tests/test_jobs.py` — `/api/run` returns 202+job_id;
+  the SSE stream delivers live chunks containing `17.000000` and a `done` event
+  whose `scores[0]==17.0` and `has_viewer`; the job stays queryable afterwards.
+  **Live browser:** the log **grows incrementally over time** during an `hs` run
+  (proving streaming, not a single dump), then shows scores 17 and the embedded
+  viewer. Full suite green (8 tests).
+- *Done-when:* ✅ long runs report progress incrementally and don't block the
+  server.
+
+> **Robustness discovery (pre-existing Clann bug, flagged as a task).** While
+> stress-testing, found that running `hs` a **second** time with high `nreps`
+> (e.g. `nreps=40`) under `criterion=recon` **hangs** — reproducible in the
+> **standalone binary** (`hs nreps=40` twice in one session), single-threaded, so
+> it is a core search bug (leftover state between hs runs), not the web layer. A
+> single high-nreps run and repeated small-nreps runs are fine. Consequences for
+> the client: it does not affect Step 3.1's correctness, but it means a wedged job
+> can pin the single in-process engine — which **elevates Step 3.3 (per-session
+> worker processes, Model A) from "nice isolation" to a real robustness need**,
+> since a killable worker process is the only clean way to recover a hung
+> in-Clann search. Pairs with **Step 3.2 (cancellation)**. Tracked separately.
 
 **Step 3.2 — Cancellation.** `[ ]`
 - *Goal:* stop a running search from the UI.
@@ -575,15 +600,18 @@ no shell surface, a stdlib HTTP server drives real persistent sessions over
 loopback, each session is confined to its own file sandbox, and `/api/run` now
 returns structured `{trees, scores, result_type}` (Newick + the viewer's node
 JSON) — everything the browser needs. **Phase 2 (the browser client) is underway** — the
-All of Phase 2 is done — SPA shell + palette (2.1), typed option forms (2.2),
-clickable upload→load→run (2.3), and the embedded interactive viewer (2.4). The
-client does the whole job visually. Remaining work is robustness/packaging:
+Phase 2 is done, and Step 3.1 (async jobs + live SSE log streaming) is complete.
+The client does the whole job visually and long runs stream progress. Remaining:
 
-1. **Step 3.1** — async jobs + live log streaming (so long `hs` runs don't block
-   the request; stream per-rep progress via SSE). The biggest real-world gap.
-2. **Step 3.2 / 3.3** — cancellation; per-session worker processes (Model A).
+1. **Step 3.3 — per-session worker processes (Model A).** Elevated in priority: a
+   pre-existing core hang (repeated high-`nreps` `hs`, see Step 3.1 note) can pin
+   the single in-process engine, and a separate killable worker process is the
+   only clean recovery. Also unlocks concurrent sessions.
+2. **Step 3.2 — cancellation** (SIGINT the worker; a Stop button). Natural pair
+   with 3.3.
 3. **Step 4.x** — security pass, packaging (`pip install` + `clann-web`, ideally a
    universal/arm64 lib so the `arch -x86_64` prefix goes away).
+4. *(separate, flagged)* fix the core repeated-`hs` hang in `heuristic_search`.
 
 After those, the architecture is proven end-to-end (engine ↔ HTTP ↔ real
 multi-command session) and the remaining steps are incremental UI + robustness.

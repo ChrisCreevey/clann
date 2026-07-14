@@ -20,11 +20,12 @@ Binds 127.0.0.1 only.
 from __future__ import annotations
 
 import json
+import os
+import threading
+import time
 import uuid
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse, parse_qs
-
-import os
 
 from .engine import ClannEngine, ClannError, get_shared_engine
 from .sandbox import Sandbox, UnsafePath, sanitize_command
@@ -33,6 +34,40 @@ from .commands import list_commands, command_schema
 from .viewer import build_viewer_html, placeholder_html
 
 STATIC_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static")
+
+
+class Job:
+    """One asynchronous command run: accumulates log lines live and, on
+    completion, a structured result. Read from the HTTP thread without touching
+    the engine, so status/log polling never blocks behind a running search."""
+
+    def __init__(self, job_id: str, command: str):
+        self.id = job_id
+        self.command = command
+        self.status = "running"        # running | done | error
+        self._lines: list[str] = []
+        self._lock = threading.Lock()
+        self.result: dict | None = None
+        self.error: str | None = None
+        self.done = threading.Event()
+
+    def append(self, text: str) -> None:
+        with self._lock:
+            self._lines.append(text)
+
+    def log(self) -> str:
+        with self._lock:
+            return "".join(self._lines)
+
+    def to_dict(self, include_log: bool = True) -> dict:
+        d = {"id": self.id, "command": self.command, "status": self.status}
+        if include_log:
+            d["log"] = self.log()
+        if self.result is not None:
+            d.update(self.result)
+        if self.error:
+            d["error"] = self.error
+        return d
 
 
 class _App:
@@ -46,6 +81,9 @@ class _App:
         # server/session; start from a clean baseline.
         self.engine.reset()
         self.last_result_json = None   # raw JSON of the most recent tree result
+        self.jobs: dict[str, Job] = {}
+        self.current_job: Job | None = None
+        self._job_lock = threading.Lock()
         self.session_id = uuid.uuid4().hex
 
     def new_session(self) -> dict:
@@ -55,9 +93,58 @@ class _App:
         self.engine.set_workdir(self.sandbox.dir)
         old.destroy()
         self.last_result_json = None
+        with self._job_lock:
+            self.jobs.clear()
+            self.current_job = None
         self.session_id = uuid.uuid4().hex
         return {"session_id": self.session_id, "state": self.engine.state(),
                 "files": self.sandbox.list()}
+
+    def start_job(self, safe_cmd: str) -> Job:
+        """Begin an async run of `safe_cmd` (already sandbox-sanitised).
+
+        Raises RuntimeError('busy') if a job is still running — the engine can
+        only run one analysis at a time. Returns the new Job immediately; the
+        actual work happens on a background thread.
+        """
+        with self._job_lock:
+            if self.current_job is not None and not self.current_job.done.is_set():
+                raise RuntimeError("busy")
+            job = Job(uuid.uuid4().hex, safe_cmd)
+            self.jobs[job.id] = job
+            self.current_job = job
+        threading.Thread(target=self._run_job, args=(job,), daemon=True).start()
+        return job
+
+    def _run_job(self, job: Job) -> None:
+        # Inject resultjson= for tree-producing commands (controlled bare name).
+        jpath = os.path.join(self.sandbox.dir, RESULT_JSON)
+        if os.path.exists(jpath):
+            os.remove(jpath)
+        run_cmd = job.command
+        if is_tree_command(job.command) and "resultjson=" not in job.command:
+            run_cmd = f"{job.command} resultjson={RESULT_JSON}"
+        try:
+            self.engine.run(run_cmd, on_line=job.append)   # blocks this thread
+            result = {"state": self.engine.state()}
+            if os.path.exists(jpath):
+                try:
+                    with open(jpath, encoding="utf-8") as jf:
+                        self.last_result_json = jf.read()
+                    res = build_results(jpath, job.log())
+                    result["trees"] = res["trees"]
+                    result["scores"] = res["scores"]
+                    result["result_type"] = res["type"]
+                    result["has_viewer"] = True
+                finally:
+                    os.remove(jpath)
+            job.result = result
+            job.status = "done"
+        except Exception as e:                              # noqa: BLE001
+            job.error = str(e)
+            job.status = "error"
+        finally:
+            job.done.set()
 
 
 def make_handler(app: _App):
@@ -122,8 +209,46 @@ def make_handler(app: _App):
                 self.send_header("Content-Length", str(len(body)))
                 self.end_headers()
                 self.wfile.write(body)
+            elif p.startswith("/api/jobs/") and p.endswith("/stream"):
+                job = app.jobs.get(p[len("/api/jobs/"):-len("/stream")])
+                if job is None:
+                    self._send(404, {"ok": False, "error": "no such job"})
+                else:
+                    self._stream_job(job)
+            elif p.startswith("/api/jobs/"):
+                job = app.jobs.get(p[len("/api/jobs/"):])
+                if job is None:
+                    self._send(404, {"ok": False, "error": "no such job"})
+                else:
+                    self._send(200, {"ok": True, **job.to_dict()})
             else:
                 self._send(404, {"ok": False, "error": "not found"})
+
+        def _stream_job(self, job) -> None:
+            """Server-Sent Events: live log chunks, then a final 'done' event."""
+            self.send_response(200)
+            self.send_header("Content-Type", "text/event-stream")
+            self.send_header("Cache-Control", "no-cache")
+            self.send_header("Connection", "close")
+            self.end_headers()
+            sent = 0
+            try:
+                while True:
+                    full = job.log()
+                    if len(full) > sent:
+                        chunk = full[sent:]
+                        sent = len(full)
+                        payload = json.dumps({"log": chunk})
+                        self.wfile.write(f"data: {payload}\n\n".encode())
+                        self.wfile.flush()
+                    if job.done.is_set() and len(job.log()) == sent:
+                        payload = json.dumps(job.to_dict(include_log=False))
+                        self.wfile.write(f"event: done\ndata: {payload}\n\n".encode())
+                        self.wfile.flush()
+                        break
+                    time.sleep(0.15)
+            except (BrokenPipeError, ConnectionResetError):
+                pass   # client disconnected
 
         def do_POST(self):
             path = urlparse(self.path).path
@@ -161,32 +286,14 @@ def make_handler(app: _App):
                         self._send(400, {"ok": False, "error": "missing 'command'"})
                         return
                     safe_cmd = sanitize_command(cmd, app.sandbox)  # may raise
-
-                    # For tree-producing commands, inject resultjson= so Clann
-                    # writes structured trees we can return (the injected token
-                    # is a controlled bare name inside the sandbox).
-                    run_cmd = safe_cmd
-                    jpath = os.path.join(app.sandbox.dir, RESULT_JSON)
-                    if os.path.exists(jpath):
-                        os.remove(jpath)
-                    if is_tree_command(safe_cmd) and "resultjson=" not in safe_cmd:
-                        run_cmd = f"{safe_cmd} resultjson={RESULT_JSON}"
-
-                    log = app.engine.run(run_cmd)
-                    resp = {"ok": True, "log": log, "command": safe_cmd,
-                            "state": app.engine.state()}
-                    if os.path.exists(jpath):
-                        try:
-                            with open(jpath, encoding="utf-8") as jf:
-                                app.last_result_json = jf.read()
-                            res = build_results(jpath, log)
-                            resp["trees"] = res["trees"]
-                            resp["scores"] = res["scores"]
-                            resp["result_type"] = res["type"]
-                            resp["has_viewer"] = True
-                        finally:
-                            os.remove(jpath)
-                    self._send(200, resp)
+                    try:
+                        job = app.start_job(safe_cmd)
+                    except RuntimeError:
+                        self._send(409, {"ok": False, "error": "a command is "
+                                         "already running in this session"})
+                        return
+                    self._send(202, {"ok": True, "job_id": job.id,
+                                     "command": safe_cmd, "status": "running"})
 
                 else:
                     self._send(404, {"ok": False, "error": "not found"})
