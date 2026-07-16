@@ -189,6 +189,16 @@ port the styling into the real `index.html` (and the viewer template).
 > `.mock-viewer` stand-in are **preview-only** — they must not end up in the real
 > `index.html`. In the real app the viewer is a live `<iframe id="viewer">`.
 
+**The tree viewer, populated.** `tools/clannview.mock.html` is a data-populated
+standalone render of the viewer (`tools/clannview.template.html`) — open it
+directly to design the viewer with real content: a 4-tree reconciliation dataset
+exercising every event type (speciation dots, red duplication squares, dashed
+loss branches), plus support values, branch lengths, the tree navigator, and all
+the controls. It is a faithful render; the only baked-in difference is the
+`const DATA = {…}` object the server fills at runtime. **Do your styling in
+`clannview.template.html` and re-preview via the mock** — don't ship edits made
+only to the mock.
+
 **Full fidelity — the real app.** To see live data and the real interactive
 viewer, run the server:
 
@@ -207,9 +217,11 @@ viewer, run the server:
 - `tools/clannview.template.html` — the interactive tree viewer shown in the
   results `<iframe>` (in scope — see §6). Its own self-contained page to finesse.
 
-**Preview / canvas:**
-- `clann_web/static/index.mock.html` — data-populated standalone mock with a state
-  switcher; open in a browser, no server needed. Your working preview (see §8).
+**Preview / canvas (open directly, no server):**
+- `clann_web/static/index.mock.html` — data-populated standalone mock of the SPA
+  with a state switcher. Preview canvas for `index.html` (see §8).
+- `tools/clannview.mock.html` — data-populated standalone render of the tree
+  viewer. Preview canvas for `clannview.template.html` (see §8).
 
 **For understanding (read-only context):**
 - `clann_web/DESIGN_BRIEF.md` — this document.
