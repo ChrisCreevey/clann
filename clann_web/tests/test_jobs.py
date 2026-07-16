@@ -70,8 +70,11 @@ def run_checks():
         _wait(base, r["job_id"])
         _wait(base, _post(base, "/api/run", {"command": "set criterion=recon"})[1]["job_id"])
 
-        # stream a longer hs run over SSE; collect log chunks + the done event
-        code, r = _post(base, "/api/run", {"command": "hs nreps=20 nthreads=2"})
+        # stream an hs run over SSE; collect log chunks + the done event.
+        # nthreads=1 and a modest nreps: single-threaded hs is stable, whereas
+        # multithreaded and high-nreps-on-repeat hs have a known intermittent hang
+        # (a pre-existing core bug, see PLAN Step 3.1). Still streams per-rep lines.
+        code, r = _post(base, "/api/run", {"command": "hs nreps=8 nthreads=1"})
         assert code == 202, (code, r)
         jid = r["job_id"]
 

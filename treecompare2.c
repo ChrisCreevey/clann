@@ -434,11 +434,13 @@ void alltrees_search(int user)
     {
     int i = 0, j=0, all = TRUE, start = 0, end = 0, error = FALSE, keep = 0;
     char *tree = NULL, *best_tree = NULL, outfilename[100];
+    char htmlfilename[10000], resultjsonfile[10000], htmlmeta[10100]; hv_out hvo = {0}; int htmlopen = TRUE;
     float score = 0, best_score = 0, worst = 0;
     FILE *treesfile = NULL, *userfile = NULL;
     int *saved_tags = NULL;  /* for single-copy auto-filter */
-    
-    
+
+    htmlfilename[0] = '\0';
+    resultjsonfile[0] = '\0';
     outfilename[0] = '\0';
     strcpy(outfilename, "alltrees.ph");
     
@@ -475,6 +477,17 @@ void alltrees_search(int user)
                     error = TRUE;
                     }
                 }
+            if(strcmp(parsed_command[i], "htmlview") == 0)
+                {
+                if(strcmp(parsed_command[i+1], "yes") == 0)
+                    { strncpy(htmlfilename, inputfilename, sizeof(htmlfilename)-15); strncat(htmlfilename, ".alltrees.html", sizeof(htmlfilename)-strlen(htmlfilename)-1); }
+                else
+                    strncpy(htmlfilename, parsed_command[i+1], sizeof(htmlfilename)-1);
+                }
+            if(strcmp(parsed_command[i], "open") == 0 && strcmp(parsed_command[i+1], "no") == 0)
+                htmlopen = FALSE;
+            if(strcmp(parsed_command[i], "resultjson") == 0)
+                strncpy(resultjsonfile, parsed_command[i+1], sizeof(resultjsonfile)-1);
             if(strcmp(parsed_command[i], "savetrees") == 0 && criterion != 1)
              {
                 if((userfile = fopen(parsed_command[i+1], "w")) == NULL)
@@ -801,6 +814,13 @@ void alltrees_search(int user)
                 j++;
                 }
             
+            if(htmlfilename[0] != '\0' || resultjsonfile[0] != '\0')
+                {
+                const char *cn = (criterion==0)?"dfit":(criterion==2)?"sfit":(criterion==3)?"qfit":(criterion==5)?"recon":(criterion==6)?"rf":(criterion==7)?"ml":"supertree";
+                snprintf(htmlmeta, sizeof(htmlmeta), "{\"dataset\":\"%s\",\"criterion\":\"%s\"}", inputfilename, cn);
+                hv_out_open(&hvo, htmlfilename, resultjsonfile, htmlmeta, 0, htmlopen);
+                }
+
             while(scores_retained_supers[i] != -1)
                 {
                 if(tree_top != NULL)
@@ -822,8 +842,14 @@ void alltrees_search(int user)
 
                 tree_coordinates(best_tree, FALSE, TRUE, FALSE, -1);
                 printf2("\nSupertree %d of %d %s = %f\n", i+1, j, ml_score_label(), ml_display_score(scores_retained_supers[i]) );
+                if(hv_out_active(&hvo))
+                    {
+                    char nm[64]; snprintf(nm, sizeof(nm), "Supertree %d", i+1);
+                    hv_out_add_newick(&hvo, retained_supers[i], nm, -1);
+                    }
                 i++;
                 }
+            hv_out_close(&hvo);
 
             /* Keep retained_supers[] in memory (like hs/nj) so 'reconstruct speciestree memory'
                can use the alltrees result. Set trees_in_memory to the count of best trees found. */
@@ -1430,6 +1456,7 @@ void bootstrap_search(void)
     int Nreps = 100, search = 1, allpresent = TRUE, num_results = 0;
     int nthreads = 1;
     char filename[1000], **bootstrap_results = NULL, consensusfilename[1000];
+    char bs_htmlfile[1000], bs_jsonfile[1000], bs_meta[1200]; hv_out bs_hvo = {0}; int bs_htmlopen = TRUE;
     FILE *bootfile = NULL, *temp = NULL, *consensusfile = NULL;
 	float percentage = .5;
 #ifdef _OPENMP
@@ -1437,6 +1464,8 @@ void bootstrap_search(void)
 #endif
 
 	consensusfilename[0] = '\0';
+	bs_htmlfile[0] = '\0';
+	bs_jsonfile[0] = '\0';
     filename[0] = '\0';
     strcpy(filename, "bootstrap.txt");
 	strcpy(consensusfilename, "consensus.ph");
@@ -1527,6 +1556,18 @@ void bootstrap_search(void)
                 strcpy(filename, "consensus.ph");
                 }
             }
+
+        if(strcmp(parsed_command[i], "htmlview") == 0)
+            {
+            if(strcmp(parsed_command[i+1], "yes") == 0)
+                { strncpy(bs_htmlfile, inputfilename, sizeof(bs_htmlfile)-16); strncat(bs_htmlfile, ".bootstrap.html", sizeof(bs_htmlfile)-strlen(bs_htmlfile)-1); }
+            else
+                strncpy(bs_htmlfile, parsed_command[i+1], sizeof(bs_htmlfile)-1);
+            }
+        if(strcmp(parsed_command[i], "open") == 0 && strcmp(parsed_command[i+1], "no") == 0)
+            bs_htmlopen = FALSE;
+        if(strcmp(parsed_command[i], "resultjson") == 0)
+            strncpy(bs_jsonfile, parsed_command[i+1], sizeof(bs_jsonfile)-1);
 			
         if(strcmp(parsed_command[i], "treefile") == 0)
             {
@@ -2055,6 +2096,25 @@ void bootstrap_search(void)
 			consensusfile = fopen(consensusfilename, "w");
 			consensus(num_results, bootstrap_results, Nreps, percentage, consensusfile, NULL);
 			fclose(consensusfile);
+
+			/* Emit the bootstrap consensus tree to the interactive viewer / JSON. */
+			if(bs_htmlfile[0] != '\0' || bs_jsonfile[0] != '\0')
+				{
+				FILE *cf = fopen(consensusfilename, "r");
+				if(cf != NULL)
+					{
+					char *cbuf = malloc(TREE_LENGTH * sizeof(char));
+					if(cbuf != NULL && fgets(cbuf, TREE_LENGTH, cf) != NULL)
+						{
+						snprintf(bs_meta, sizeof(bs_meta), "{\"dataset\":\"%s\",\"criterion\":\"bootstrap\"}", inputfilename);
+						hv_out_open(&bs_hvo, bs_htmlfile, bs_jsonfile, bs_meta, 0, bs_htmlopen);
+						hv_out_add_newick(&bs_hvo, cbuf, "Bootstrap consensus", -1);
+						hv_out_close(&bs_hvo);
+						}
+					if(cbuf != NULL) free(cbuf);
+					fclose(cf);
+					}
+				}
 			}
 
 		/* copy back the arrays to their original places */

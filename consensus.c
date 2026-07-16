@@ -19,6 +19,7 @@
  *  59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  */
 #include "consensus.h"
+#include "reconcile.h"   /* hv_out for consensus htmlview=/resultjson= */
 
 int average_consensus(int nrep, int missing_method, char * useroutfile, FILE *paupfile)
 	{
@@ -770,11 +771,14 @@ void condense_coding(void)
 void do_consensus(void)
 	{
 	int tree_type = 0, i, j, k, l,m, numtrees = 0, present = TRUE, number, error = FALSE, useguide = FALSE;
-	char **temptrees = NULL, c, tempname[1000], consensusfilename[1000], guidetreename[1000]; 
+	char **temptrees = NULL, c, tempname[1000], consensusfilename[1000], guidetreename[1000];
+	char htmlfilename[1000], resultjsonfile[1000], htmlmeta[1200]; hv_out hvo = {0}; int htmlopen = TRUE;
 	float percentage = 0;
 	FILE *consensusfile = NULL, *guidetreefile = NULL;
-	
+
 	guidetreename[0] = '\0';
+	htmlfilename[0] = '\0';
+	resultjsonfile[0] = '\0';
 	consensusfilename[0] = '\0';
 	strcpy(consensusfilename, "consensus.ph");
 	 for(i=0; i<num_commands; i++)
@@ -783,6 +787,17 @@ void do_consensus(void)
 			{
 			strcpy(consensusfilename, parsed_command[i+1]);
 			}
+		if(strcmp(parsed_command[i], "htmlview") == 0)
+			{
+			if(strcmp(parsed_command[i+1], "yes") == 0)
+				{ strncpy(htmlfilename, inputfilename, sizeof(htmlfilename)-16); strncat(htmlfilename, ".consensus.html", sizeof(htmlfilename)-strlen(htmlfilename)-1); }
+			else
+				strncpy(htmlfilename, parsed_command[i+1], sizeof(htmlfilename)-1);
+			}
+		if(strcmp(parsed_command[i], "open") == 0 && strcmp(parsed_command[i+1], "no") == 0)
+			htmlopen = FALSE;
+		if(strcmp(parsed_command[i], "resultjson") == 0)
+			strncpy(resultjsonfile, parsed_command[i+1], sizeof(resultjsonfile)-1);
 		if(strcmp(parsed_command[i], "guidetree") == 0)
 			{
 			strcpy(guidetreename, parsed_command[i+1]);
@@ -962,10 +977,29 @@ void do_consensus(void)
 				printf2("\tConsensus file = %s\n", consensusfilename);
 				
 				consensusfile = fopen(consensusfilename, "w");
-				
+
 				consensus(numtrees, temptrees, numtrees, percentage, consensusfile, guidetreefile);
-				
+
 				fclose(consensusfile);
+
+				/* Emit the consensus tree to the interactive viewer / JSON result. */
+				if(htmlfilename[0] != '\0' || resultjsonfile[0] != '\0')
+					{
+					FILE *cf = fopen(consensusfilename, "r");
+					if(cf != NULL)
+						{
+						char *cbuf = malloc(TREE_LENGTH * sizeof(char));
+						if(cbuf != NULL && fgets(cbuf, TREE_LENGTH, cf) != NULL)
+							{
+							snprintf(htmlmeta, sizeof(htmlmeta), "{\"dataset\":\"%s\",\"criterion\":\"consensus\"}", inputfilename);
+							hv_out_open(&hvo, htmlfilename, resultjsonfile, htmlmeta, 0, htmlopen);
+							hv_out_add_newick(&hvo, cbuf, "Consensus", -1);
+							hv_out_close(&hvo);
+							}
+						if(cbuf != NULL) free(cbuf);
+						fclose(cf);
+						}
+					}
 				}
 			else
 				printf2("There are no tress that contain all the taxa, unable to construct a consensus tree\n");

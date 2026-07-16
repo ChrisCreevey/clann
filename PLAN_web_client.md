@@ -492,6 +492,14 @@ on a green predecessor. A single Claude instance should take one step.
   `/api/viewer` returns a placeholder before a result and a correctly-wrapped
   viewer (single marker pair, injected data) after. Full suite green (4 tests).
 - *Done-when:* ✅ the visualisation the user asked for is live in the client.
+- *Follow-up (DONE):* only `hs`, `nj`, `showtrees`, `reconstruct` initially emitted
+  the viewer JSON. Wired `resultjson=`/`htmlview=` into **`alltrees_search`,
+  `do_consensus`, and `bootstrap_search`** (each reads back the tree it writes and
+  emits via `hv_out`), and added `consensus`/`bootstrap`/`alltrees` to the server's
+  `TREE_COMMANDS`. This also fixes **`hs` on small datasets**, where it falls back
+  to the exhaustive `alltrees_search` path (recon disables that fallback, which is
+  why recon-`hs` already worked but dfit/etc. `hs` showed only the log). Verified:
+  all four now produce a tree in the viewer.
 
 ### Phase 3 — Long-running jobs & robustness
 

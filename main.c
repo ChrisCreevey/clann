@@ -88,7 +88,8 @@ static const char *opts_hs[] = {
 };
 static const char *opts_boot[] = {
     "nreps=", "nbest=", "savetrees=", "criterion=", "missing=", "mlbeta=",
-    "mleta=", "mlscale=", "nthreads=", "seed=", NULL
+    "mleta=", "mlscale=", "nthreads=", "seed=",
+    "consensusfile=", "htmlview=", "open=", "resultjson=", NULL
 };
 static const char *opts_nj[] = {
     "missing=", "savetrees=", "htmlview=", "open=", "resultjson=", NULL
@@ -116,7 +117,8 @@ static const char *opts_includetrees[] = {
 static const char *opts_deletetaxa[] = { "mintaxa=", NULL };
 static const char *opts_rfdists[]    = { "filename=", "output=", "missing=", NULL };
 static const char *opts_sprdists[]   = { "filename=", "output=", NULL };
-static const char *opts_consensus[]  = { "savetrees=", "filename=", NULL };
+static const char *opts_consensus[]  = { "savetrees=", "filename=", "method=",
+    "data=", "guidetree=", "htmlview=", "open=", "resultjson=", NULL };
 static const char *opts_reconstruct[]= {
     "speciestree=", "showrecon=", "printfiles=", "nhxfile=", "htmlview=",
     "open=", "resultjson=", "dups=", "losses=", "basescore=", "lossmodel=", NULL

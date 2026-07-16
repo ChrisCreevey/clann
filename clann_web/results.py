@@ -18,7 +18,8 @@ import re
 RESULT_JSON = "__clann_result__.json"
 
 # Commands that produce trees we can serialise.
-TREE_COMMANDS = {"hs", "hsearch", "nj", "showtrees", "reconstruct", "alltrees"}
+TREE_COMMANDS = {"hs", "hsearch", "nj", "showtrees", "reconstruct", "alltrees",
+                 "consensus", "bootstrap", "boot"}
 
 
 def is_tree_command(command: str) -> bool:
