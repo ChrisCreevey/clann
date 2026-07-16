@@ -32,8 +32,9 @@
     --ring:0 0 0 3px rgba(20,149,137,.30);
     --ease:cubic-bezier(.2,0,0,1);
   }
+  /* dark palette: auto (OS) when no manual override, and when toggled to dark */
   @media (prefers-color-scheme:dark){
-    :root{
+    :root:not([data-theme]){
       --bg:var(--stone-900); --panel:var(--stone-800); --ink:var(--stone-50); --muted:var(--stone-400);
       --line:var(--stone-700); --accent:var(--clay-400); --accent-hover:var(--clay-300);
       --accent-ink:#1A160F; --chip:#16302C; --chip-ink:var(--compute-200);
@@ -42,7 +43,18 @@
       --shadow-sm:0 1px 3px rgba(0,0,0,.30),0 1px 2px rgba(0,0,0,.20);
       --shadow-md:0 4px 14px rgba(0,0,0,.36);
     }
+    :root:not([data-theme]) a{color:var(--compute-200)}
   }
+  :root[data-theme="dark"]{
+    --bg:var(--stone-900); --panel:var(--stone-800); --ink:var(--stone-50); --muted:var(--stone-400);
+    --line:var(--stone-700); --accent:var(--clay-400); --accent-hover:var(--clay-300);
+    --accent-ink:#1A160F; --chip:#16302C; --chip-ink:var(--compute-200);
+    --ok:var(--moss-300); --warn:var(--amber-400); --err:#EF5B54;
+    --logbg:#12211F; --logink:#CFEAE3;
+    --shadow-sm:0 1px 3px rgba(0,0,0,.30),0 1px 2px rgba(0,0,0,.20);
+    --shadow-md:0 4px 14px rgba(0,0,0,.36);
+  }
+  :root[data-theme="dark"] a{color:var(--compute-200)}
   *{box-sizing:border-box}
   body{margin:0;background:var(--bg);color:var(--ink);
     font:15px/1.55 var(--font-sans);-webkit-font-smoothing:antialiased;text-wrap:pretty;}
@@ -124,13 +136,32 @@
     margin-top:12px;background:var(--bg)}
   footer{max-width:1080px;margin:0 auto;padding:6px 24px 28px;color:var(--muted);font-size:11.5px;
     font-family:var(--font-mono);text-transform:uppercase;letter-spacing:.04em}
+  .spin{display:inline-block;width:14px;height:14px;vertical-align:-2px;
+    border:2px solid var(--line);border-top-color:var(--accent);border-radius:50%;
+    animation:spin .7s linear infinite}
+  @keyframes spin{to{transform:rotate(360deg)}}
+  #theme-btn{margin-left:auto;padding:6px 10px;line-height:1;font-size:15px}
+  .files{display:flex;flex-direction:column;gap:6px;margin-top:6px}
+  .files a.dl{font-family:var(--font-mono);font-size:12.5px;color:var(--chip-ink);
+    background:var(--chip);border:1px solid var(--line);border-radius:var(--radius-sm);
+    padding:5px 9px;text-decoration:none;display:flex;align-items:center;gap:8px}
+  .files a.dl:hover{border-color:var(--accent);color:var(--accent)}
+  .files a.dl::before{content:"↓";opacity:.7}
+  .path{font-family:var(--font-mono);font-size:11px;color:var(--muted);
+    word-break:break-all;margin-top:8px}
   @media (max-width:760px){ main{grid-template-columns:1fr} }
 </style>
+<script>
+  // apply saved theme before first paint to avoid a flash
+  try { const t = localStorage.getItem("clann-theme");
+        if (t) document.documentElement.dataset.theme = t; } catch (e) {}
+</script>
 </head>
 <body>
 <header>
   <h1>Clann</h1>
   <span class="sub">web client · <span id="conn" class="chip">connecting…</span></span>
+  <button class="btn" id="theme-btn" title="Toggle light / dark" aria-label="Toggle light or dark theme">◐</button>
 </header>
 
 <main>
@@ -140,6 +171,8 @@
       <dt>Input file</dt><dd id="s-file">—</dd>
       <dt>Taxa</dt><dd id="s-taxa">—</dd>
       <dt>Source trees</dt><dd id="s-trees">—</dd>
+      <dt>Single-copy</dt><dd id="s-single">—</dd>
+      <dt>Multi-copy</dt><dd id="s-multi">—</dd>
       <dt>Criterion</dt><dd id="s-crit">—</dd>
       <dt>In memory</dt><dd id="s-mem">—</dd>
     </dl>
@@ -153,14 +186,22 @@
     <label class="fld">Loaded file</label>
     <div class="row">
       <select id="files"><option value="">— no files uploaded —</option></select>
-      <button class="btn" id="load">Load</button>
+      <button class="btn primary" id="load">exe</button>
     </div>
+    <details style="margin-top:8px">
+      <summary class="muted" style="cursor:pointer;font-size:13px">exe options (name parsing, multicopy handling)</summary>
+      <div id="exe-form"></div>
+    </details>
 
     <div class="row" style="margin-top:14px">
       <button class="btn" id="new-session">New session</button>
       <span class="muted" id="s-id"></span>
     </div>
     <div class="msg" id="data-msg"></div>
+
+    <label class="fld">Session output files</label>
+    <div class="files" id="outputs"><span class="muted">No output files yet.</span></div>
+    <div class="path" id="workdir" title="All command outputs are written here"></div>
   </section>
 
   <section class="card" data-domain="run">
@@ -179,6 +220,7 @@
     <div class="row" style="margin-top:12px">
       <button class="btn primary" id="run">Run</button>
       <button class="btn" id="stop" style="display:none">Stop</button>
+      <span class="spin" id="spin" style="display:none"></span>
       <span class="muted" id="run-cmd"></span>
     </div>
     <div class="msg" id="run-msg"></div>
@@ -215,11 +257,24 @@ const jpost = (path, body) =>
 
 function renderState(state) {
   if (!state) return;
-  $("s-file").textContent  = state.input_file || "no file loaded";
-  $("s-taxa").textContent  = state.num_taxa ?? "—";
-  $("s-trees").textContent = state.num_source_trees ?? "—";
-  $("s-crit").textContent  = state.criterion || "—";
-  $("s-mem").textContent   = state.trees_in_memory ?? "—";
+  $("s-file").textContent   = state.input_file || "no file loaded";
+  $("s-taxa").textContent   = state.num_taxa ?? "—";
+  $("s-trees").textContent  = state.num_source_trees ?? "—";
+  $("s-single").textContent = state.num_single_copy ?? "—";
+  $("s-multi").textContent  = state.num_multicopy ?? "—";
+  $("s-crit").textContent   = state.criterion || "—";
+  $("s-mem").textContent    = state.trees_in_memory ?? "—";
+}
+
+function renderOutputs(files) {
+  const el = $("outputs");
+  if (!files || !files.length) {
+    el.innerHTML = '<span class="muted">No output files yet.</span>';
+    return;
+  }
+  el.innerHTML = files.map((f) =>
+    `<a class="dl" href="/api/download/${encodeURIComponent(f)}" download>${esc(f)}</a>`
+  ).join("");
 }
 
 function renderFiles(files, selectName) {
@@ -243,18 +298,24 @@ function msg(id, text, kind) {
   el.className = "msg" + (kind ? " " + kind : "");
 }
 
+function renderSession(data) {
+  renderState(data.state);
+  renderFiles(data.files);
+  renderOutputs(data.output_files);
+  if (data.workdir) $("workdir").textContent = "output folder: " + data.workdir;
+}
+
 async function refreshSession() {
   // re-read state after a cancel (worker was respawned → analysis state cleared,
   // but the sandbox and its uploaded files survive).
   const { ok, data } = await api("/api/session");
-  if (ok) { renderState(data.state); renderFiles(data.files); }
+  if (ok) renderSession(data);
 }
 
 async function newSession() {
   const { ok, data } = await jpost("/api/session");
   if (ok) {
-    renderState(data.state);
-    renderFiles(data.files);
+    renderSession(data);
     $("s-id").textContent = "session " + (data.session_id || "").slice(0, 8);
     $("conn").textContent = "connected";
     $("conn").style.color = "var(--ok)";
@@ -282,15 +343,17 @@ async function loadCommands() {
 }
 
 // --- dynamic option form (Step 2.2) --------------------------------------
-let currentSchema = { options: [] };
-
-async function renderForm(cmd) {
+async function renderForm(cmd, containerId = "form") {
   const { ok, data } = await api("/api/commands/" + encodeURIComponent(cmd) + "/schema");
-  currentSchema = ok ? data : { options: [] };
-  const form = $("form");
+  const schema = ok ? data : { options: [] };
+  const form = $(containerId);
   form.innerHTML = "";
-  const opts = currentSchema.options || [];
-  if (!opts.length) return;
+  const opts = schema.options || [];
+  if (!opts.length) {
+    if (containerId === "exe-form")
+      form.innerHTML = '<span class="muted" style="font-size:12px">no options</span>';
+    return;
+  }
   const grid = document.createElement("div");
   grid.className = "form-grid";
   for (const o of opts) {
@@ -329,14 +392,21 @@ async function renderForm(cmd) {
   form.appendChild(grid);
 }
 
-function buildCommand(cmd) {
-  const parts = [cmd];
-  for (const input of $("form").querySelectorAll("[data-name]")) {
+function buildOpts(containerId) {
+  // include an option only when it has a value that differs from its default
+  const parts = [];
+  for (const input of $(containerId).querySelectorAll("[data-name]")) {
     const val = String(input.value).trim();
     const def = input.dataset.default ?? "";
-    // include an option only when it has a value that differs from its default
     if (val !== "" && val !== def) parts.push(`${input.dataset.name}=${val}`);
   }
+  return parts.join(" ");
+}
+
+function buildCommand(cmd) {
+  const parts = [cmd];
+  const opts = buildOpts("form");
+  if (opts) parts.push(opts);
   const extra = $("opts").value.trim();
   if (extra) parts.push(extra);
   return parts.join(" ");
@@ -360,14 +430,20 @@ $("upload").onclick = async () => {
 $("load").onclick = async () => {
   const file = $("files").value;
   if (!file) { msg("data-msg", "Upload a file first.", "err"); return; }
-  msg("data-msg", "Loading " + file + "…");
-  const { ok, data } = await jpost("/api/load", { file });
+  const options = buildOpts("exe-form");
+  msg("data-msg", "Running exe " + file + "…");
+  const { ok, data } = await jpost("/api/load", { file, options });
   if (ok && data.ok) {
     renderState(data.state);
-    msg("data-msg", "Loaded " + file + " — " +
-        data.state.num_source_trees + " trees, " + data.state.num_taxa + " taxa.", "ok");
+    renderOutputs(data.output_files);
+    const st = data.state;
+    msg("data-msg", "exe " + file + " — " + st.num_source_trees + " trees, " +
+        st.num_taxa + " taxa" +
+        (st.num_single_copy != null
+          ? " (" + st.num_single_copy + " single-copy, " + st.num_multicopy + " multi-copy)"
+          : "") + ".", "ok");
   } else {
-    msg("data-msg", data.error || "Load failed.", "err");
+    msg("data-msg", data.error || "exe failed.", "err");
   }
 };
 
@@ -378,7 +454,23 @@ function runFinished() {
   $("run").disabled = false;
   $("stop").style.display = "none";
   $("stop").disabled = false;
+  $("spin").style.display = "none";
   currentJob = null;
+}
+
+// Terminal-like log rendering: Clann's progress lines use carriage returns
+// (e.g. bootstrap's "\r  N running…") to update in place, which a <pre> can't
+// show as an overwrite. Keep the raw buffer and collapse each line to the text
+// after its last \r so progress indicators render as a single updating line.
+let logBuffer = "";
+function resetLog() { logBuffer = ""; $("log").textContent = ""; }
+function appendLog(chunk) {
+  logBuffer += chunk;
+  $("log").textContent = logBuffer.split("\n").map((line) => {
+    const i = line.lastIndexOf("\r");
+    return i >= 0 ? line.slice(i + 1) : line;
+  }).join("\n");
+  $("log").scrollTop = $("log").scrollHeight;
 }
 
 $("stop").onclick = async () => {
@@ -394,6 +486,7 @@ $("run").onclick = async () => {
   $("run-cmd").textContent = "clann> " + command;
   $("run").disabled = true;
   $("stop").style.display = "";
+  $("spin").style.display = "";
   msg("run-msg", "Running…");
 
   // show the results card with a live log while the job runs
@@ -401,7 +494,7 @@ $("run").onclick = async () => {
   $("viewer").style.display = "none";
   $("scores").textContent = "";
   $("trees-wrap").innerHTML = "";
-  $("log").textContent = "";
+  resetLog();
   $("logbox").open = true;
 
   const { ok, status, data } = await jpost("/api/run", { command });
@@ -414,7 +507,7 @@ $("run").onclick = async () => {
   currentES = es;
   es.onmessage = (ev) => {
     const d = JSON.parse(ev.data);
-    if (d.log) { $("log").textContent += d.log; $("log").scrollTop = $("log").scrollHeight; }
+    if (d.log) appendLog(d.log);
   };
   es.addEventListener("done", (ev) => {
     es.close(); currentES = null;
@@ -427,6 +520,7 @@ $("run").onclick = async () => {
     } else {
       msg("run-msg", "Done.", "ok");
       if (d.state) renderState(d.state);
+      if (d.output_files) renderOutputs(d.output_files);
       renderResults(d);
     }
     runFinished();
@@ -482,7 +576,21 @@ function esc(s) {
 
 $("new-session").onclick = newSession;
 
-(async () => { await newSession(); await loadCommands(); })();
+// light/dark toggle (mirrors the tree viewer's) — persisted in localStorage
+$("theme-btn").onclick = () => {
+  const root = document.documentElement;
+  const cur = root.dataset.theme ||
+    (matchMedia("(prefers-color-scheme:dark)").matches ? "dark" : "light");
+  const next = cur === "dark" ? "light" : "dark";
+  root.dataset.theme = next;
+  try { localStorage.setItem("clann-theme", next); } catch (e) {}
+};
+
+(async () => {
+  await newSession();
+  await loadCommands();
+  await renderForm("exe", "exe-form");   // exe options form in the session card
+})();
 </script>
 </body>
 </html>

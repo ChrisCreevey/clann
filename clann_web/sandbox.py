@@ -123,17 +123,29 @@ def sanitize_command(command: str, sandbox: Sandbox) -> str:
         i = 2
 
     for tok in tokens[i:]:
-        if "=" not in tok:
-            out.append(tok)
-            continue
-        key, val = tok.split("=", 1)
-        kl = key.lower()
-        if val.lower() in _SENTINELS or val == "":
-            out.append(tok)
-        elif kl in _INPUT_OPTS:
-            out.append(f"{key}={sandbox.confine_input(val)}")
-        elif kl in _OUTPUT_OPTS:
-            out.append(f"{key}={sandbox.confine_output(val)}")
-        else:
-            out.append(tok)
+        out.append(_confine_token(tok, sandbox))
     return " ".join(out)
+
+
+def _confine_token(tok: str, sandbox: Sandbox) -> str:
+    """Confine a single `key=value` token to the sandbox (or pass it through)."""
+    if "=" not in tok:
+        return tok
+    key, val = tok.split("=", 1)
+    kl = key.lower()
+    if val.lower() in _SENTINELS or val == "":
+        return tok
+    if kl in _INPUT_OPTS:
+        return f"{key}={sandbox.confine_input(val)}"
+    if kl in _OUTPUT_OPTS:
+        return f"{key}={sandbox.confine_output(val)}"
+    return tok
+
+
+def sanitize_options(options: str, sandbox: Sandbox) -> str:
+    """Confine file paths in a bare option string (no leading command word).
+
+    Used for `exe` load-time options (`clanfile=`, …) which are passed to
+    clann_load_trees as parse options rather than through a full command.
+    """
+    return " ".join(_confine_token(t, sandbox) for t in options.split())

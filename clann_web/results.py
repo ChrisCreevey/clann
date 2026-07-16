@@ -52,6 +52,27 @@ def _escape(name: str) -> str:
     return name
 
 
+_SINGLE_COPY = re.compile(r"single copy trees:\s*(\d+)", re.IGNORECASE)
+_MULTI_COPY = re.compile(r"multicopy trees:\s*(\d+)", re.IGNORECASE)
+
+
+def parse_tree_counts(log: str) -> dict:
+    """Extract single-/multi-copy tree counts Clann prints on `exe` (load).
+
+    Returns {"num_single_copy": N, "num_multicopy": M} for whichever it found,
+    or {} if the log doesn't carry those lines. Mirrors tree_io.c's
+    "Number of single copy trees" / "number of multicopy trees" output.
+    """
+    out = {}
+    s = _SINGLE_COPY.search(log)
+    m = _MULTI_COPY.search(log)
+    if s:
+        out["num_single_copy"] = int(s.group(1))
+    if m:
+        out["num_multicopy"] = int(m.group(1))
+    return out
+
+
 _SUPERTREE_SCORE = re.compile(r"Supertree\s+\d+\s+of\s+\d+.*?=\s*([-\d.]+)")
 
 

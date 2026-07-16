@@ -1,6 +1,24 @@
 {
   "_note": "Typed option schema for the web client's dynamic forms (Step 2.2). Each option: name, type (enum|int|float|text|bool), default, help, and (for enum) values. Option names must match what the C command actually parses (verified against heuristic_search / set_parameters / reconstruct / nj / showtrees). Notably `hs` does NOT parse criterion= or seed= (they are set via the `set` command), so they are deliberately absent from the hs form. htmlview/open/resultjson are handled by the server and omitted.",
 
+  "exe": {
+    "summary": "Load source-tree files (options control name parsing and multicopy-tree handling at load time).",
+    "options": [
+      {"name": "maxnamelen", "type": "text", "default": "",
+       "help": "Max taxon-name length before delimiter mode kicks in, or 'full' to keep whole names (disables delimiter mode)."},
+      {"name": "delimiter_char", "type": "text", "default": "",
+       "help": "Character that separates gene id from species name in tip labels (delimiter mode)."},
+      {"name": "summary", "type": "enum", "default": "short", "values": ["short", "full"],
+       "help": "Amount of load-time summary printed."},
+      {"name": "autoprunemono", "type": "enum", "default": "no", "values": ["no", "yes"],
+       "help": "Prune monophyletic same-species clades from multicopy trees at load; trees that become single-copy join the supertree pool."},
+      {"name": "autodecompose", "type": "enum", "default": "no", "values": ["no", "yes"],
+       "help": "Decompose multi-copy gene-family trees into ortholog subtree fragments at load (pristine trees kept for reconstruct)."},
+      {"name": "autoweight", "type": "enum", "default": "", "values": ["clan", "splitviol", "bootstrap"],
+       "help": "Automatically weight source trees by the chosen scheme."}
+    ]
+  },
+
   "set": {
     "summary": "Set global options that persist for the session.",
     "options": [

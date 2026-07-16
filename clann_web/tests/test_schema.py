@@ -24,6 +24,7 @@ MAIN_C = os.path.join(REPO, "main.c")
 _OPTS_ARRAY = {
     "set": "opts_set", "hs": "opts_hs", "nj": "opts_nj",
     "reconstruct": "opts_reconstruct", "showtrees": "opts_showtrees",
+    "exe": "opts_exe",
 }
 
 

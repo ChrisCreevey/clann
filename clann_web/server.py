@@ -25,12 +25,13 @@ import threading
 import time
 import uuid
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from urllib.parse import urlparse, parse_qs
+from urllib.parse import urlparse, parse_qs, unquote
 
 from .engine import ClannError
 from .worker_client import WorkerEngine
-from .sandbox import Sandbox, UnsafePath, sanitize_command
-from .results import RESULT_JSON, is_tree_command, build_results
+from .sandbox import (Sandbox, UnsafePath, safe_basename,
+                      sanitize_command, sanitize_options)
+from .results import RESULT_JSON, is_tree_command, build_results, parse_tree_counts
 from .commands import list_commands, command_schema
 from .viewer import build_viewer_html, placeholder_html
 
@@ -94,10 +95,23 @@ class _App:
         self.engine = engine or WorkerEngine(workdir=self.sandbox.dir)
         self.engine.set_workdir(self.sandbox.dir)
         self.last_result_json = None   # raw JSON of the most recent tree result
+        self.tree_counts: dict = {}     # single-/multi-copy counts parsed from exe
         self.jobs: dict[str, Job] = {}
         self.current_job: Job | None = None
         self._job_lock = threading.Lock()
         self.session_id = uuid.uuid4().hex
+
+    def state(self) -> dict:
+        """Engine state augmented with the single-/multi-copy counts Clann
+        reports at load time (not held in engine globals, so tracked here)."""
+        s = self.engine.state()
+        s.update(self.tree_counts)
+        return s
+
+    def output_files(self) -> list:
+        """Files in the session sandbox the user may want to download (every
+        file except the reserved result-JSON scratch file)."""
+        return [f for f in self.sandbox.list() if f != RESULT_JSON]
 
     def _respawn_engine(self) -> None:
         """Start a fresh worker on the same sandbox and kill the old one.
@@ -125,11 +139,12 @@ class _App:
             pass
         old_sandbox.destroy()
         self.last_result_json = None
+        self.tree_counts = {}
         with self._job_lock:
             self.jobs.clear()
             self.current_job = None
         self.session_id = uuid.uuid4().hex
-        return {"session_id": self.session_id, "state": self.engine.state(),
+        return {"session_id": self.session_id, "state": self.state(),
                 "files": self.sandbox.list()}
 
     def cancel_current(self, job_id: str | None = None) -> Job | None:
@@ -176,7 +191,7 @@ class _App:
         engine = self.engine          # bind now; a cancel may swap self.engine
         try:
             engine.run(run_cmd, on_line=job.append)        # blocks this thread
-            result = {"state": self.engine.state()}
+            result = {"state": self.state()}
             if os.path.exists(jpath):
                 try:
                     with open(jpath, encoding="utf-8") as jf:
@@ -188,6 +203,8 @@ class _App:
                     result["has_viewer"] = True
                 finally:
                     os.remove(jpath)
+            # surface any output files the command wrote into the sandbox
+            result["output_files"] = self.output_files()
             job.result = result
             job.status = "cancelled" if job.cancel_requested else "done"
         except Exception as e:                              # noqa: BLE001
@@ -243,6 +260,27 @@ def make_handler(app: _App):
             self.end_headers()
             self.wfile.write(body)
 
+        def _download(self, raw_name: str) -> None:
+            """Serve a file from the session sandbox as a download."""
+            try:
+                base = safe_basename(unquote(raw_name))   # rejects traversal
+            except UnsafePath:
+                self._send(400, {"ok": False, "error": "bad filename"})
+                return
+            full = os.path.join(app.sandbox.dir, base)
+            if not os.path.isfile(full):
+                self._send(404, {"ok": False, "error": "no such file"})
+                return
+            with open(full, "rb") as fh:
+                body = fh.read()
+            self.send_response(200)
+            self.send_header("Content-Type", "application/octet-stream")
+            self.send_header("Content-Disposition",
+                             f'attachment; filename="{base}"')
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
         # -- routes --------------------------------------------------------
         def do_GET(self):
             p = urlparse(self.path).path
@@ -250,8 +288,12 @@ def make_handler(app: _App):
                 self._send_file("index.html", "text/html; charset=utf-8")
             elif p == "/api/session":
                 self._send(200, {"session_id": app.session_id,
-                                 "state": app.engine.state(),
-                                 "files": app.sandbox.list()})
+                                 "state": app.state(),
+                                 "files": app.sandbox.list(),
+                                 "output_files": app.output_files(),
+                                 "workdir": app.sandbox.dir})
+            elif p.startswith("/api/download/"):
+                self._download(p[len("/api/download/"):])
             elif p == "/api/commands":
                 self._send(200, {"commands": list_commands()})
             elif p.startswith("/api/commands/") and p.endswith("/schema"):
@@ -337,9 +379,15 @@ def make_handler(app: _App):
                         self._send(400, {"ok": False, "error": "missing 'file'"})
                         return
                     safe = app.sandbox.confine_input(fname)  # may raise UnsafePath
-                    log = app.engine.load(safe)
+                    # optional `exe` options (name parsing, autoprune/decompose…);
+                    # file paths within them are confined to the sandbox.
+                    opts = sanitize_options(body.get("options", ""), app.sandbox)
+                    log = app.engine.load(safe, opts)
+                    app.tree_counts = parse_tree_counts(log)  # single/multi copy
                     self._send(200, {"ok": True, "log": log,
-                                     "state": app.engine.state()})
+                                     "state": app.state(),
+                                     "files": app.sandbox.list(),
+                                     "output_files": app.output_files()})
 
                 elif path.startswith("/api/jobs/") and path.endswith("/cancel"):
                     jid = path[len("/api/jobs/"):-len("/cancel")]
