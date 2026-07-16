@@ -36,6 +36,15 @@ from .viewer import build_viewer_html, placeholder_html
 
 STATIC_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static")
 
+# Request-size caps (Step 4.1): reject oversized bodies up front rather than
+# reading an attacker-chosen amount into memory. Tree files are small.
+MAX_UPLOAD_BYTES = 64 * 1024 * 1024   # 64 MiB per uploaded file
+MAX_JSON_BYTES = 256 * 1024           # 256 KiB per JSON request body
+
+
+class RequestTooLarge(ValueError):
+    """Raised when a request body exceeds its configured cap."""
+
 
 class Job:
     """One asynchronous command run: accumulates log lines live and, on
@@ -207,6 +216,9 @@ def make_handler(app: _App):
 
         def _read_json(self) -> dict:
             length = int(self.headers.get("Content-Length", 0) or 0)
+            if length > MAX_JSON_BYTES:
+                raise RequestTooLarge(
+                    f"request body {length} bytes exceeds {MAX_JSON_BYTES}")
             if length == 0:
                 return {}
             raw = self.rfile.read(length)
@@ -308,6 +320,11 @@ def make_handler(app: _App):
                         self._send(400, {"ok": False, "error": "missing ?name="})
                         return
                     length = int(self.headers.get("Content-Length", 0) or 0)
+                    if length > MAX_UPLOAD_BYTES:
+                        self._send(413, {"ok": False, "error": f"upload "
+                                         f"{length} bytes exceeds "
+                                         f"{MAX_UPLOAD_BYTES}"})
+                        return
                     data = self.rfile.read(length) if length else b""
                     stored = app.sandbox.put(name, data)   # may raise UnsafePath
                     self._send(200, {"ok": True, "stored": stored,
@@ -352,6 +369,8 @@ def make_handler(app: _App):
 
                 else:
                     self._send(404, {"ok": False, "error": "not found"})
+            except RequestTooLarge as e:
+                self._send(413, {"ok": False, "error": str(e)})
             except UnsafePath as e:
                 self._send(400, {"ok": False, "error": f"unsafe path: {e}"})
             except ClannError as e:

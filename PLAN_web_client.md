@@ -584,14 +584,24 @@ on a green predecessor. A single Claude instance should take one step.
 
 ### Phase 4 — Hardening & packaging
 
-**Step 4.1 — Security pass.** `[ ]`
+**Step 4.1 — Security pass.** `[x]`
 - *Goal:* safe defaults before anyone binds beyond loopback (§3.5).
-- *Work:* confirm server build has no shell reachability; enforce sandbox on every
-  path option; loopback-only default with an explicit `--host 0.0.0.0` warning;
-  request size limits; per-session temp cleanup.
-- *Verify:* a `pytest` security suite: `!` refused; path traversal blocked; output
-  paths confined; default bind is `127.0.0.1`.
-- *Done-when:* the security suite is green.
+- *Work (DONE):* added **request-size caps** (`MAX_UPLOAD_BYTES` 64 MiB,
+  `MAX_JSON_BYTES` 256 KiB) enforced on the declared `Content-Length` before the
+  body is read (`413` + `RequestTooLarge`). The other guarantees already held and
+  are now pinned by tests: server build has no `system` reachability (linker + the
+  `clann_shell` choke point), sandbox confinement on every path option (Step 1.2),
+  loopback-only default with a non-loopback `--host` warning (`__main__`), and
+  per-session temp cleanup (`new_session`/`serve` teardown).
+- *Verify (DONE):* `clann_web/tests/test_security.py` consolidates them:
+  `nm -u libclann-server.so` has no `system` reference; `set criterion=mrp` → `hs`
+  is **refused** at runtime (`Refused…` in the log, PAUP\* never spawned); upload
+  and load traversal (`../evil.ph`, `../../etc/hosts`) → `400` and nothing written
+  outside; a non-uploaded input is rejected; `showtrees htmlview=/tmp/…` is
+  relocated into the sandbox and the escape path is never created; oversized upload
+  (by `Content-Length`) and oversized JSON → `413`; default bind is `127.0.0.1`;
+  the session temp dir is cleaned up with no `/tmp/clannweb-*` leak. `PASS`.
+- *Done-when:* ✅ the security suite is green.
 
 **Step 4.2 — Packaging & one-command launch.** `[ ]`
 - *Goal:* `pip install` + `clann-web` opens the app.
@@ -630,7 +640,7 @@ on a green predecessor. A single Claude instance should take one step.
 
 ## 8. Suggested next three sessions
 
-**Phases 0–3 are complete** (§6). The persistent engine is proven and
+**Phases 0–3 and Step 4.1 are complete** (§6). The persistent engine is proven and
 deterministic across reset; the `CLANN_SERVER_MODE` build has provably no shell
 surface; a stdlib HTTP server drives real sessions over loopback; each session is
 confined to its own sandbox; `/api/run` is async (202 + `job_id`) with live SSE
@@ -639,22 +649,20 @@ client does the whole job visually including the embedded interactive viewer; an
 **each session now owns its own killable worker process (Model A)** giving
 isolation + cross-session parallelism, with a **Stop button** that cancels a run
 by killing and respawning that worker. The architecture is proven end-to-end.
-Remaining work is hardening and packaging:
+A green **security suite** (Step 4.1) now pins the safe defaults: no shell
+reachability, sandbox-confined paths, request-size caps, loopback default, temp
+cleanup. Remaining work is packaging and coverage:
 
-1. **Step 4.1 — security pass.** Turn the ad-hoc guarantees into a `pytest`
-   security suite: no shell reachability in the server build, sandbox enforced on
-   every path option, loopback-only default with an explicit `--host 0.0.0.0`
-   warning, request-size limits, per-session temp cleanup.
-2. **Step 4.2 — packaging & one-command launch.** `pip install .` + a `clann-web`
+1. **Step 4.2 — packaging & one-command launch.** `pip install .` + a `clann-web`
    entry point that starts the server and opens the URL; **ideally a
    universal/arm64 `libclann-server.so`** so the `arch -x86_64` worker prefix (now
    in `worker_client._worker_command`) can go away. Document in `USER_MANUAL.md` /
    a new `NOTES_web_client.md`.
-3. **Step 4.3 — command coverage & polish.** Schema + result handling for the
+2. **Step 4.3 — command coverage & polish.** Schema + result handling for the
    commands beyond the core set (`bootstrap`, `consensus`, `alltrees`, `usertrees`,
    `rfdists`, `mlscores`, `excludetrees`/`includetrees`), surfacing output files
    for download and showing `set` state.
-4. *(separate, flagged)* fix the core repeated-high-`nreps` `hs` hang in
+3. *(separate, flagged)* fix the core repeated-high-`nreps` `hs` hang in
    `heuristic_search` — the web layer now contains it (killable worker), but the
    underlying core bug remains.
 
