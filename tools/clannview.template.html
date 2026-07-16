@@ -6,49 +6,71 @@
 <title>Clann tree viewer</title>
 <style>
   :root{
-    --bg:#f7f7f8; --panel:#ffffff; --ink:#1c1d20; --muted:#6a6d75; --line:#c9ccd2;
-    --branch:#3a3d44; --accent:#2f6df6; --dup:#d9482b; --spec:#3a3d44; --loss:#9aa0aa;
-    --sel:#2f6df6; --hl:#ffd24d;
+    --font-sans:system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;
+    --font-mono:ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,'Liberation Mono',monospace;
+
+    --stone-50:#FAF6EE; --stone-100:#F3ECDF; --stone-200:#E7DBC6; --stone-300:#D5C4A6;
+    --stone-400:#B7A283; --stone-500:#8E7A5E; --stone-600:#6A5A43; --stone-700:#4B4031;
+    --stone-800:#2E2820; --stone-900:#1A160F;
+    --clay-400:#C56347; --clay-500:#A94B2E; --clay-600:#8C3A22;
+    --moss-300:#9CAA6A; --moss-500:#5F6E33;
+    --compute-200:#7FCFC4; --compute-400:#149589; --compute-500:#0B7268; --compute-glow:#36E0C8;
+    --amber-400:#D99A2B; --amber-500:#B97E1C;
+
+    --bg:var(--stone-50); --panel:#ffffff; --ink:var(--stone-900); --muted:var(--stone-600); --line:var(--stone-300);
+    --branch:var(--stone-700); --accent:var(--compute-500); --dup:var(--clay-500); --spec:var(--stone-700);
+    --loss:var(--stone-400); --sel:var(--compute-500); --hl:var(--amber-400);
+    --shadow-sm:0 1px 3px rgba(46,40,32,.08),0 1px 2px rgba(46,40,32,.05);
+    --shadow-md:0 8px 22px rgba(46,40,32,.16);
   }
   :root[data-theme="dark"]{
-    --bg:#16171a; --panel:#1f2126; --ink:#e9eaee; --muted:#9a9ea8; --line:#3a3d44;
-    --branch:#c4c8d0; --accent:#6ea0ff; --dup:#ff6b4a; --spec:#c4c8d0; --loss:#6b7079;
-    --sel:#6ea0ff; --hl:#b9902a;
+    --bg:var(--stone-900); --panel:var(--stone-800); --ink:var(--stone-50); --muted:var(--stone-400); --line:var(--stone-700);
+    --branch:var(--stone-300); --accent:var(--compute-glow); --dup:var(--clay-400); --spec:var(--stone-300);
+    --loss:var(--stone-500); --sel:var(--compute-glow); --hl:var(--amber-400);
+    --shadow-sm:0 1px 3px rgba(0,0,0,.35); --shadow-md:0 10px 26px rgba(0,0,0,.42);
   }
   *{box-sizing:border-box}
   html,body{height:100%;margin:0}
-  body{font:13px/1.4 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
-       color:var(--ink);background:var(--bg);display:flex;flex-direction:column}
-  header{display:flex;align-items:center;gap:14px;padding:8px 12px;border-bottom:1px solid var(--line);background:var(--panel)}
-  header .title{font-weight:600}
-  header .meta{color:var(--muted);font-size:12px}
+  body{font:13px/1.45 var(--font-sans);
+       color:var(--ink);background:var(--bg);display:flex;flex-direction:column;-webkit-font-smoothing:antialiased}
+  header{display:flex;align-items:center;gap:14px;padding:9px 14px;border-bottom:1px solid var(--line);
+    background:var(--panel);border-top:3px solid var(--clay-500)}
+  header .title{font-weight:700;text-transform:uppercase;letter-spacing:.01em;font-size:13px}
+  header .meta{color:var(--muted);font-size:12px;font-family:var(--font-mono)}
   header .meta b{color:var(--ink);font-weight:600}
   .spacer{flex:1}
   #nav{display:none;align-items:center;gap:5px}
-  #nav button{border:1px solid var(--line);background:var(--bg);color:var(--ink);border-radius:6px;
+  #nav button{border:1px solid var(--line);background:var(--bg);color:var(--ink);border-radius:5px;
               width:26px;height:24px;cursor:pointer;font-size:11px;line-height:1}
-  #nav button:hover{border-color:var(--accent)}
-  #nav select{border:1px solid var(--line);background:var(--bg);color:var(--ink);border-radius:6px;
-              padding:3px 6px;font:inherit;max-width:220px}
-  #nav input[type=search]{border:1px solid var(--line);background:var(--bg);color:var(--ink);border-radius:6px;
+  #nav button:hover{border-color:var(--accent);color:var(--accent)}
+  #nav select{border:1px solid var(--line);background:var(--bg);color:var(--ink);border-radius:5px;
+              padding:3px 6px;font:inherit;font-family:var(--font-mono);font-size:12px;max-width:220px}
+  #nav input[type=search]{border:1px solid var(--line);background:var(--bg);color:var(--ink);border-radius:5px;
               padding:3px 7px;font:inherit;width:130px}
   #nav input[type=search].hit{border-color:var(--accent)}
   #nav input[type=search].miss{border-color:var(--dup)}
   main{flex:1;display:flex;min-height:0}
-  #side{width:230px;flex:none;border-right:1px solid var(--line);background:var(--panel);
-        overflow:auto;padding:10px}
-  #side h4{margin:12px 0 6px;font-size:11px;text-transform:uppercase;letter-spacing:.04em;color:var(--muted)}
+  #side{width:236px;flex:none;border-right:1px solid var(--line);background:var(--panel);
+        overflow:auto;padding:12px}
+  #side h4{margin:16px 0 7px;font-size:10.5px;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);
+    font-family:var(--font-mono);font-weight:500}
   #side h4:first-child{margin-top:0}
-  .row{display:flex;align-items:center;gap:8px;margin:5px 0}
+  .row{display:flex;align-items:center;gap:8px;margin:6px 0;font-size:12.5px}
   .row label{flex:1;user-select:none}
   .seg{display:flex;border:1px solid var(--line);border-radius:6px;overflow:hidden}
-  .seg button{flex:1;border:0;background:transparent;color:var(--ink);padding:4px 6px;cursor:pointer;font:inherit}
+  .seg button{flex:1;border:0;background:transparent;color:var(--ink);padding:5px 6px;cursor:pointer;font:inherit;font-size:12px}
   .seg button.on{background:var(--accent);color:#fff}
-  input[type=range]{width:100%}
-  input[type=search]{width:100%;padding:4px 6px;border:1px solid var(--line);border-radius:6px;background:var(--bg);color:var(--ink)}
-  button.act{width:100%;padding:5px 8px;border:1px solid var(--line);border-radius:6px;background:var(--bg);color:var(--ink);cursor:pointer;margin:3px 0;font:inherit}
+  :root[data-theme="dark"] .seg button.on{color:var(--stone-900)}
+  input[type=range]{width:100%;accent-color:var(--accent)}
+  input[type=search]{width:100%;padding:5px 7px;border:1px solid var(--line);border-radius:6px;background:var(--bg);color:var(--ink)}
+  input[type=search]:focus-visible,select:focus-visible,button:focus-visible{outline:none;
+    box-shadow:0 0 0 3px color-mix(in srgb, var(--compute-400) 35%, transparent);border-color:var(--compute-400)}
+  button.act{width:100%;padding:6px 9px;border:1px solid var(--line);border-radius:6px;background:var(--bg);
+    color:var(--ink);cursor:pointer;margin:4px 0;font:inherit;font-size:12.5px;transition:border-color 140ms,transform 80ms}
   button.act:hover{border-color:var(--accent)}
-  button.act.warn{color:var(--dup)}
+  button.act:active{transform:translateY(1px)}
+  button.act.warn{color:var(--dup);border-color:var(--dup)}
+  button.act.warn:hover{background:var(--dup);color:#fff}
   #wrap{flex:1;position:relative;overflow:hidden}
   svg{width:100%;height:100%;display:block;cursor:grab;background:var(--bg)}
   svg.grab{cursor:grabbing}
@@ -57,23 +79,25 @@
   .branch.hit{stroke:transparent;stroke-width:9;cursor:pointer}
   .branch.sel{stroke:var(--sel);stroke-width:2.5}
   .lossbranch{stroke:var(--loss);stroke-width:1.4;stroke-dasharray:3 3;fill:none}
-  .leaflabel{fill:var(--ink);cursor:default}
+  .leaflabel{fill:var(--ink);cursor:default;font-family:var(--font-mono)}
   .leaflabel.dim{fill:var(--muted)}
-  .leaflabel.hl{fill:#000}
-  .intlabel{fill:var(--muted);font-size:10px}
-  .support{fill:var(--muted);font-size:10px}
+  .leaflabel.hl{fill:var(--clay-600)}
+  :root[data-theme="dark"] .leaflabel.hl{fill:var(--amber-400)}
+  .intlabel{fill:var(--muted);font-size:10px;font-family:var(--font-mono)}
+  .support{fill:var(--muted);font-size:10px;font-family:var(--font-mono)}
   .nodeglyph{cursor:pointer}
   .hlbox{fill:var(--hl);opacity:.35}
-  .collapsed{fill:var(--branch);opacity:.8;cursor:pointer}
+  .collapsed{fill:var(--branch);opacity:.85;cursor:pointer}
   .tip{position:absolute;pointer-events:none;background:var(--panel);border:1px solid var(--line);
-       border-radius:6px;padding:6px 8px;font-size:12px;box-shadow:0 4px 14px rgba(0,0,0,.18);max-width:280px;display:none;z-index:5}
-  .tip b{color:var(--ink)} .tip .ev{font-weight:600}
-  .legend{position:absolute;left:10px;bottom:10px;background:var(--panel);border:1px solid var(--line);
-          border-radius:8px;padding:8px 10px;font-size:12px;box-shadow:0 3px 10px rgba(0,0,0,.12)}
-  .legend div{display:flex;align-items:center;gap:7px;margin:3px 0}
-  .sw{width:14px;height:14px;flex:none;display:inline-block}
-  .hint{color:var(--muted);font-size:11px;margin-top:6px}
-  kbd{border:1px solid var(--line);border-bottom-width:2px;border-radius:4px;padding:0 4px;font-size:11px;background:var(--bg)}
+       border-radius:8px;padding:7px 9px;font-size:12px;box-shadow:var(--shadow-md);max-width:280px;display:none;z-index:5}
+  .tip b{color:var(--ink)} .tip .ev{font-weight:700;font-family:var(--font-mono)}
+  .legend{position:absolute;left:12px;bottom:12px;background:var(--panel);border:1px solid var(--line);
+          border-radius:8px;padding:9px 11px;font-size:12px;box-shadow:var(--shadow-sm)}
+  .legend div{display:flex;align-items:center;gap:8px;margin:4px 0}
+  .sw{width:13px;height:13px;flex:none;display:inline-block}
+  .hint{color:var(--muted);font-size:11px;margin-top:7px;line-height:1.45}
+  kbd{border:1px solid var(--line);border-bottom-width:2px;border-radius:4px;padding:0 4px;font-size:11px;
+    background:var(--bg);font-family:var(--font-mono)}
 </style>
 </head>
 <body>
@@ -137,38 +161,328 @@
    { type:"tree"|"reconciliation", meta:{...},
      tree:{ name, length, support, event, species, children:[...] } }
    event ∈ {null|"speciation"|"duplication"|"loss"}; species = mapped species name. */
-const DATA = /*CLANN_DATA_BEGIN*/ {
-  type:"reconciliation",
-  meta:{dataset:"tutorial_multicopy.ph", criterion:"recon", lossmodel:"standard"},
-  trees:[
-   {name:"tree_1", score:1, dups:0, losses:1, tree:{
-     name:"", event:"speciation", children:[
-       {name:"Human.1", species:"Human", length:0.05},
-       {name:"", event:"speciation", children:[
-         {name:"Chimp.1", species:"Chimp", length:0.04},
-         {name:"", event:"loss", species:"Gorilla"}]}]}},
-   {name:"tree_7", score:13, dups:3, losses:10, tree:{
-   name:"", event:"duplication", children:[
-    {name:"", event:"speciation", children:[
-      {name:"", event:"duplication", children:[
-        {name:"Human.1", species:"Human", length:0.05},
-        {name:"Human.2", species:"Human", length:0.06}]},
-      {name:"", event:"speciation", children:[
-        {name:"Chimp.1", species:"Chimp", length:0.04},
-        {name:"", event:"loss", species:"Gorilla"}]}]},
-    {name:"", event:"speciation", children:[
-      {name:"", event:"speciation", children:[
-        {name:"", event:"loss", species:"(Mouse,Rat)"},
-        {name:"", event:"speciation", children:[
-          {name:"Dog.1", species:"Dog", length:0.08, support:98},
-          {name:"Cat.1", species:"Cat", length:0.07, support:98}]}]},
-      {name:"", event:"duplication", children:[
-        {name:"Orangutan.1", species:"Orangutan", length:0.06},
-        {name:"", event:"speciation", children:[
-          {name:"Orangutan.2", species:"Orangutan", length:0.05},
-          {name:"", event:"loss", species:"Macaque"}]}]}]}]}}
-  ]
-} /*CLANN_DATA_END*/;
+const DATA = /*CLANN_DATA_BEGIN*/
+{
+ "type": "reconciliation",
+ "meta": {
+  "dataset": "tutorial_multicopy.ph",
+  "criterion": "recon",
+  "lossmodel": "standard"
+ },
+ "trees": [
+  {
+   "name": "tree_1",
+   "score": 0,
+   "dups": 0,
+   "losses": 0,
+   "tree": {
+    "name": "",
+    "event": "speciation",
+    "children": [
+     {
+      "name": "",
+      "event": "speciation",
+      "children": [
+       {
+        "name": "",
+        "event": "speciation",
+        "children": [
+         {
+          "name": "",
+          "event": "speciation",
+          "children": [
+           {
+            "name": "Human.1",
+            "species": "Human",
+            "length": 0.05,
+            "support": 99
+           },
+           {
+            "name": "Chimp.1",
+            "species": "Chimp",
+            "length": 0.04,
+            "support": 99
+           }
+          ],
+          "support": 88
+         },
+         {
+          "name": "Gorilla.1",
+          "species": "Gorilla",
+          "length": 0.06
+         }
+        ],
+        "support": 95
+       },
+       {
+        "name": "",
+        "event": "speciation",
+        "children": [
+         {
+          "name": "Orangutan.1",
+          "species": "Orangutan",
+          "length": 0.07
+         },
+         {
+          "name": "Macaque.1",
+          "species": "Macaque",
+          "length": 0.08
+         }
+        ],
+        "support": 72
+       }
+      ],
+      "support": 90
+     },
+     {
+      "name": "",
+      "event": "speciation",
+      "children": [
+       {
+        "name": "",
+        "event": "speciation",
+        "children": [
+         {
+          "name": "Mouse.1",
+          "species": "Mouse",
+          "length": 0.11
+         },
+         {
+          "name": "Rat.1",
+          "species": "Rat",
+          "length": 0.1
+         }
+        ],
+        "support": 100
+       },
+       {
+        "name": "",
+        "event": "speciation",
+        "children": [
+         {
+          "name": "Dog.1",
+          "species": "Dog",
+          "length": 0.08,
+          "support": 98
+         },
+         {
+          "name": "Cat.1",
+          "species": "Cat",
+          "length": 0.07,
+          "support": 98
+         }
+        ],
+        "support": 98
+       }
+      ],
+      "support": 84
+     }
+    ]
+   }
+  },
+  {
+   "name": "tree_2",
+   "score": 1,
+   "dups": 1,
+   "losses": 1,
+   "tree": {
+    "name": "",
+    "event": "speciation",
+    "children": [
+     {
+      "name": "",
+      "event": "duplication",
+      "children": [
+       {
+        "name": "Human.1",
+        "species": "Human",
+        "length": 0.05
+       },
+       {
+        "name": "Human.2",
+        "species": "Human",
+        "length": 0.06
+       }
+      ]
+     },
+     {
+      "name": "",
+      "event": "speciation",
+      "children": [
+       {
+        "name": "Chimp.1",
+        "species": "Chimp",
+        "length": 0.04
+       },
+       {
+        "name": "",
+        "event": "loss",
+        "species": "Gorilla"
+       }
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "name": "tree_7",
+   "score": 13,
+   "dups": 3,
+   "losses": 10,
+   "tree": {
+    "name": "",
+    "event": "duplication",
+    "children": [
+     {
+      "name": "",
+      "event": "speciation",
+      "children": [
+       {
+        "name": "",
+        "event": "duplication",
+        "children": [
+         {
+          "name": "Human.1",
+          "species": "Human",
+          "length": 0.05
+         },
+         {
+          "name": "Human.2",
+          "species": "Human",
+          "length": 0.06
+         }
+        ]
+       },
+       {
+        "name": "",
+        "event": "speciation",
+        "children": [
+         {
+          "name": "Chimp.1",
+          "species": "Chimp",
+          "length": 0.04
+         },
+         {
+          "name": "",
+          "event": "loss",
+          "species": "Gorilla"
+         }
+        ]
+       }
+      ]
+     },
+     {
+      "name": "",
+      "event": "speciation",
+      "children": [
+       {
+        "name": "",
+        "event": "speciation",
+        "children": [
+         {
+          "name": "",
+          "event": "loss",
+          "species": "(Mouse,Rat)"
+         },
+         {
+          "name": "",
+          "event": "speciation",
+          "children": [
+           {
+            "name": "Dog.1",
+            "species": "Dog",
+            "length": 0.08,
+            "support": 98
+           },
+           {
+            "name": "Cat.1",
+            "species": "Cat",
+            "length": 0.07,
+            "support": 98
+           }
+          ]
+         }
+        ]
+       },
+       {
+        "name": "",
+        "event": "duplication",
+        "children": [
+         {
+          "name": "Orangutan.1",
+          "species": "Orangutan",
+          "length": 0.06
+         },
+         {
+          "name": "",
+          "event": "speciation",
+          "children": [
+           {
+            "name": "Orangutan.2",
+            "species": "Orangutan",
+            "length": 0.05
+           },
+           {
+            "name": "",
+            "event": "loss",
+            "species": "Macaque"
+           }
+          ]
+         }
+        ]
+       }
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "name": "tree_8",
+   "score": 4,
+   "dups": 0,
+   "losses": 2,
+   "tree": {
+    "name": "",
+    "event": "speciation",
+    "children": [
+     {
+      "name": "",
+      "event": "speciation",
+      "children": [
+       {
+        "name": "Mouse.1",
+        "species": "Mouse",
+        "length": 0.11
+       },
+       {
+        "name": "Rat.1",
+        "species": "Rat",
+        "length": 0.1
+       }
+      ]
+     },
+     {
+      "name": "",
+      "event": "speciation",
+      "children": [
+       {
+        "name": "",
+        "event": "loss",
+        "species": "Dog"
+       },
+       {
+        "name": "Cat.1",
+        "species": "Cat",
+        "length": 0.07
+       }
+      ]
+     }
+    ]
+   }
+  }
+ ]
+}
+/*CLANN_DATA_END*/;
 /* ====================================================================== */
 
 // ---------- model ----------

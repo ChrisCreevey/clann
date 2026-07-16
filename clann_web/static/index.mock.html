@@ -18,84 +18,141 @@
 -->
 <style>
   :root{
-    --bg:#f6f7f9; --panel:#ffffff; --ink:#1a1c1f; --muted:#6b7280;
-    --line:#e4e7eb; --accent:#2563eb; --accent-ink:#ffffff; --chip:#eef2ff;
-    --ok:#15803d; --warn:#b45309; --err:#b91c1c; --logbg:#0f1419; --logink:#d7dde3;
+    --font-sans:system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;
+    --font-mono:ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,'Liberation Mono',monospace;
+
+    --stone-50:#FAF6EE; --stone-100:#F3ECDF; --stone-200:#E7DBC6; --stone-300:#D5C4A6;
+    --stone-400:#B7A283; --stone-500:#8E7A5E; --stone-600:#6A5A43; --stone-700:#4B4031;
+    --stone-800:#2E2820; --stone-900:#1A160F;
+    --clay-50:#FBEEE9; --clay-100:#F4D8CD; --clay-300:#D98970; --clay-400:#C56347;
+    --clay-500:#A94B2E; --clay-600:#8C3A22;
+    --moss-50:#EFF1E6; --moss-300:#9CAA6A; --moss-400:#7C8C49; --moss-500:#5F6E33; --moss-600:#485827;
+    --compute-50:#E2F4F1; --compute-200:#7FCFC4; --compute-400:#149589; --compute-500:#0B7268; --compute-600:#085951;
+    --amber-400:#D99A2B; --amber-500:#B97E1C;
+    --qub-red:#D6000D;
+
+    --bg:var(--stone-50); --panel:#ffffff; --ink:var(--stone-900); --muted:var(--stone-600);
+    --line:var(--stone-300); --accent:var(--clay-500); --accent-hover:var(--clay-600);
+    --accent-ink:#ffffff; --chip:var(--compute-50); --chip-ink:var(--compute-600);
+    --ok:var(--moss-500); --warn:var(--amber-500); --err:var(--qub-red);
+    --logbg:#16201E; --logink:#E7DBC6;
+    --run-domain:var(--compute-500); --session-domain:var(--moss-500); --results-domain:var(--clay-500);
+
+    --radius-sm:5px; --radius-md:8px; --radius-lg:12px;
+    --shadow-sm:0 1px 3px rgba(46,40,32,.08),0 1px 2px rgba(46,40,32,.05);
+    --shadow-md:0 4px 12px rgba(46,40,32,.10),0 2px 4px rgba(46,40,32,.06);
+    --ring:0 0 0 3px rgba(20,149,137,.30);
+    --ease:cubic-bezier(.2,0,0,1);
   }
   @media (prefers-color-scheme:dark){
-    :root{ --bg:#0f1113; --panel:#181b1f; --ink:#e8eaed; --muted:#9aa1ab;
-      --line:#2a2f36; --accent:#3b82f6; --accent-ink:#ffffff; --chip:#1e293b;
-      --ok:#4ade80; --warn:#fbbf24; --err:#f87171; --logbg:#0b0e11; --logink:#cbd5e1; }
+    :root{
+      --bg:var(--stone-900); --panel:var(--stone-800); --ink:var(--stone-50); --muted:var(--stone-400);
+      --line:var(--stone-700); --accent:var(--clay-400); --accent-hover:var(--clay-300);
+      --accent-ink:#1A160F; --chip:#16302C; --chip-ink:var(--compute-200);
+      --ok:var(--moss-300); --warn:var(--amber-400); --err:#EF5B54;
+      --logbg:#12211F; --logink:#CFEAE3;
+      --shadow-sm:0 1px 3px rgba(0,0,0,.30),0 1px 2px rgba(0,0,0,.20);
+      --shadow-md:0 4px 14px rgba(0,0,0,.36);
+    }
   }
   *{box-sizing:border-box}
   body{margin:0;background:var(--bg);color:var(--ink);
-    font:15px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;}
-  header{display:flex;align-items:baseline;gap:12px;padding:16px 22px;
-    border-bottom:1px solid var(--line);background:var(--panel);}
-  header h1{font-size:18px;margin:0;font-weight:700;letter-spacing:.2px}
-  header .sub{color:var(--muted);font-size:13px}
-  main{max-width:1000px;margin:0 auto;padding:22px;display:grid;gap:18px;
+    font:15px/1.55 var(--font-sans);-webkit-font-smoothing:antialiased;text-wrap:pretty;}
+  a{color:var(--compute-500)} a:hover{color:var(--accent)}
+  @media (prefers-color-scheme:dark){ a{color:var(--compute-200)} }
+
+  header{display:flex;align-items:center;gap:12px;padding:16px 24px;
+    border-bottom:1px solid var(--line);background:var(--panel);position:sticky;top:0;z-index:5;}
+  header h1{display:flex;align-items:center;gap:9px;font-size:19px;margin:0;font-weight:700;
+    letter-spacing:-.01em;text-transform:uppercase;font-family:var(--font-sans)}
+  header h1::before{content:"";width:11px;height:11px;border-radius:3px;background:
+    linear-gradient(135deg,var(--clay-500) 0 50%,var(--moss-500) 50% 100%);flex:none}
+  header .sub{color:var(--muted);font-size:12.5px;font-family:var(--font-mono);
+    text-transform:uppercase;letter-spacing:.06em}
+
+  main{max-width:1080px;margin:0 auto;padding:24px;display:grid;gap:20px;
     grid-template-columns:1fr 1fr;}
-  .card{background:var(--panel);border:1px solid var(--line);border-radius:10px;
-    padding:16px 18px;}
-  .card h2{font-size:12px;text-transform:uppercase;letter-spacing:.08em;
-    color:var(--muted);margin:0 0 12px;font-weight:600}
+  .card{background:var(--panel);border:1px solid var(--line);border-top:3px solid var(--session-domain);
+    border-radius:var(--radius-lg);padding:18px 20px;box-shadow:var(--shadow-sm);}
+  .card[data-domain="run"]{border-top-color:var(--run-domain)}
+  .card[data-domain="results"]{border-top-color:var(--results-domain)}
+  .card h2{font-size:11.5px;text-transform:uppercase;letter-spacing:.1em;font-family:var(--font-mono);
+    color:var(--muted);margin:0 0 14px;font-weight:500}
   .full{grid-column:1 / -1}
-  .kv{display:grid;grid-template-columns:auto 1fr;gap:6px 14px;font-size:14px}
+  .kv{display:grid;grid-template-columns:auto 1fr;gap:7px 14px;font-size:14px}
   .kv dt{color:var(--muted)}
-  .kv dd{margin:0;font-variant-numeric:tabular-nums}
-  select,button,input[type=text]{font:inherit}
-  select,input[type=text]{width:100%;padding:9px 10px;border:1px solid var(--line);
-    border-radius:8px;background:var(--bg);color:var(--ink)}
-  label.fld{display:block;font-size:12px;color:var(--muted);margin:10px 0 4px}
-  .blurb{margin:8px 0 0;color:var(--muted);font-size:14px;min-height:1.4em}
-  .btn{padding:8px 14px;border:1px solid var(--line);border-radius:8px;
-    background:var(--bg);color:var(--ink);cursor:pointer}
+  .kv dd{margin:0;font-variant-numeric:tabular-nums;font-family:var(--font-mono);font-size:13.5px}
+  select,button,input[type=text],input[type=number]{font:inherit}
+  select,input[type=text]{width:100%;padding:9px 11px;border:1px solid var(--line);
+    border-radius:var(--radius-sm);background:var(--bg);color:var(--ink);transition:border-color 160ms var(--ease)}
+  select:focus-visible,input:focus-visible,button:focus-visible{outline:none;box-shadow:var(--ring);
+    border-color:var(--compute-400)}
+  label.fld{display:block;font-size:11.5px;color:var(--muted);margin:14px 0 5px;
+    text-transform:uppercase;letter-spacing:.06em;font-family:var(--font-mono)}
+  .blurb{margin:8px 0 0;color:var(--muted);font-size:13.5px;min-height:1.4em;line-height:1.5}
+  .btn{padding:9px 16px;border:1px solid var(--line);border-radius:var(--radius-md);
+    background:var(--panel);color:var(--ink);cursor:pointer;font-weight:500;
+    transition:background 160ms var(--ease),border-color 160ms var(--ease),transform 80ms var(--ease)}
   .btn:hover{border-color:var(--accent)}
-  .btn:disabled{opacity:.5;cursor:default}
-  .btn.primary{background:var(--accent);color:var(--accent-ink);border-color:var(--accent)}
-  .chip{display:inline-block;background:var(--chip);border-radius:999px;
-    padding:2px 10px;font-size:12px;color:var(--accent)}
+  .btn:active{transform:translateY(1px)}
+  .btn:disabled{opacity:.5;cursor:default;transform:none}
+  .btn.primary{background:var(--accent);color:var(--accent-ink);border-color:var(--accent);font-weight:600}
+  .btn.primary:hover{background:var(--accent-hover);border-color:var(--accent-hover)}
+  #stop{color:var(--err);border-color:var(--err)}
+  #stop:hover{background:var(--err);color:#fff}
+  .chip{display:inline-flex;align-items:center;gap:6px;background:var(--chip);border-radius:var(--radius-sm);
+    padding:3px 10px;font-size:12px;color:var(--chip-ink);font-family:var(--font-mono);
+    text-transform:uppercase;letter-spacing:.05em}
+  .chip::before{content:"";width:6px;height:6px;border-radius:50%;background:currentColor;opacity:.85}
   .muted{color:var(--muted)}
   .row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
-  code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:13px}
-  pre.log{background:var(--logbg);color:var(--logink);border-radius:8px;padding:12px 14px;
-    max-height:340px;overflow:auto;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;
-    font-size:12.5px;line-height:1.45;white-space:pre-wrap;margin:0}
+  code{font-family:var(--font-mono);font-size:13px}
+  #run-cmd{font-family:var(--font-mono);font-size:12.5px;background:var(--chip);color:var(--chip-ink);
+    padding:3px 9px;border-radius:var(--radius-sm)}
+  details summary{cursor:pointer;color:var(--muted);font-size:13px;user-select:none}
+  details summary:hover{color:var(--ink)}
+  pre.log{background:var(--logbg);color:var(--logink);border-radius:var(--radius-md);padding:14px 16px;
+    max-height:340px;overflow:auto;font-family:var(--font-mono);
+    font-size:12.5px;line-height:1.6;white-space:pre-wrap;margin:0;border:1px solid rgba(255,255,255,.06)}
   table.trees{width:100%;border-collapse:collapse;font-size:13px;margin-top:12px}
-  table.trees th,table.trees td{text-align:left;padding:6px 8px;border-bottom:1px solid var(--line);
+  table.trees th,table.trees td{text-align:left;padding:8px 9px;border-bottom:1px solid var(--line);
     vertical-align:top}
-  table.trees th{color:var(--muted);font-weight:600;font-size:11px;text-transform:uppercase;letter-spacing:.05em}
-  table.trees td.newick{font-family:ui-monospace,Menlo,monospace;font-size:12px;
+  table.trees tbody tr:hover{background:color-mix(in srgb, var(--accent) 6%, transparent)}
+  table.trees th{color:var(--muted);font-weight:500;font-size:11px;text-transform:uppercase;
+    letter-spacing:.06em;font-family:var(--font-mono)}
+  table.trees td.newick{font-family:var(--font-mono);font-size:12px;
     max-width:520px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-  .form-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px 14px;margin-top:8px}
-  .fitem{display:flex;flex-direction:column;gap:3px}
+  .form-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px 16px;margin-top:8px}
+  .fitem{display:flex;flex-direction:column;gap:4px}
   .fitem label{font-size:12px;color:var(--muted)}
-  .fitem .name{color:var(--ink);font-weight:500}
-  .fitem input,.fitem select{padding:7px 9px;border:1px solid var(--line);border-radius:7px;
-    background:var(--bg);color:var(--ink);width:100%}
+  .fitem .name{color:var(--ink);font-weight:500;font-family:var(--font-mono);font-size:12.5px}
+  .fitem input,.fitem select{padding:7px 9px;border:1px solid var(--line);border-radius:var(--radius-sm);
+    background:var(--bg);color:var(--ink);width:100%;font-family:var(--font-mono);font-size:13px}
   .fitem input[type=checkbox]{width:auto}
-  .fitem .hint{font-size:11px;color:var(--muted);line-height:1.35}
+  .fitem .hint{font-size:11.5px;color:var(--muted);line-height:1.4;font-family:var(--font-sans)}
   .msg{margin-top:10px;font-size:13px}
   .msg.err{color:var(--err)} .msg.ok{color:var(--ok)}
-  footer{max-width:1000px;margin:0 auto;padding:0 22px 26px;color:var(--muted);font-size:12px}
+  footer{max-width:1080px;margin:0 auto;padding:6px 24px 28px;color:var(--muted);font-size:11.5px;
+    font-family:var(--font-mono);text-transform:uppercase;letter-spacing:.04em}
+  @media (max-width:760px){ main{grid-template-columns:1fr} }
 
   /* ---- mock-only chrome (data-mock): remove for the real app ---- */
-  #mock-controls{position:fixed;top:10px;right:12px;z-index:99;display:flex;gap:6px;
+  #mock-controls{position:fixed;top:12px;right:14px;z-index:99;display:flex;gap:6px;
     align-items:center;background:var(--panel);border:1px solid var(--line);
-    border-radius:999px;padding:5px 8px;font-size:12px;box-shadow:0 2px 8px rgba(0,0,0,.12)}
-  #mock-controls span{color:var(--muted);padding:0 4px}
+    border-radius:var(--radius-md);padding:5px 8px;font-size:12px;box-shadow:var(--shadow-md);
+    font-family:var(--font-mono)}
+  #mock-controls span{color:var(--muted);padding:0 4px;text-transform:uppercase;letter-spacing:.05em;font-size:11px}
   #mock-controls button{border:1px solid transparent;background:transparent;color:var(--ink);
-    border-radius:999px;padding:3px 9px;cursor:pointer;font-size:12px}
+    border-radius:var(--radius-sm);padding:3px 9px;cursor:pointer;font-size:12px}
   #mock-controls button[aria-pressed=true]{background:var(--accent);color:var(--accent-ink)}
-  .mock-viewer{width:100%;height:560px;border:1px solid var(--line);border-radius:10px;
+  .mock-viewer{width:100%;height:560px;border:1px solid var(--line);border-radius:var(--radius-lg);
     margin-top:12px;background:var(--bg);position:relative;overflow:hidden}
-  .mock-viewer .mv-bar{position:absolute;top:0;left:0;right:0;padding:8px 12px;
+  .mock-viewer .mv-bar{position:absolute;top:0;left:0;right:0;padding:9px 14px;
     border-bottom:1px solid var(--line);background:var(--panel);font-size:12px;color:var(--muted);
-    display:flex;gap:14px;align-items:center}
+    display:flex;gap:14px;align-items:center;font-family:var(--font-mono)}
   .mock-viewer .mv-bar strong{color:var(--ink);font-weight:600}
   .mock-viewer svg{position:absolute;top:44px;left:0;right:0;bottom:0;width:100%;height:calc(100% - 44px)}
-  .mock-viewer .mv-note{position:absolute;bottom:8px;right:12px;font-size:11px;color:var(--muted)}
+  .mock-viewer .mv-note{position:absolute;bottom:8px;right:12px;font-size:11px;color:var(--muted);font-family:var(--font-mono)}
 </style>
 </head>
 <body data-mockstate="results">
@@ -116,7 +173,7 @@
 </header>
 
 <main>
-  <section class="card">
+  <section class="card" data-domain="session">
     <h2>Session &amp; data</h2>
     <dl class="kv">
       <dt>Input file</dt><dd id="s-file">tutorial_multicopy.ph</dd>
@@ -147,7 +204,7 @@
     <div class="msg ok" id="data-msg">Loaded tutorial_multicopy.ph — 8 trees, 9 taxa.</div>
   </section>
 
-  <section class="card">
+  <section class="card" data-domain="run">
     <h2>Run a command</h2>
     <label class="fld">Command</label>
     <select id="cmd" aria-label="Command">
@@ -192,7 +249,7 @@
     <div class="msg ok" id="run-msg">Done.</div>
   </section>
 
-  <section class="card full" id="results-card">
+  <section class="card full" id="results-card" data-domain="results">
     <h2>Results</h2>
     <div id="scores" class="muted">1 tree · tree · scores: 17</div>
 
@@ -220,7 +277,7 @@
           <line x1="350" y1="227" x2="350" y2="295"/> <line x1="350" y1="261" x2="270" y2="261"/>
           <line x1="270" y1="144" x2="270" y2="261"/> <line x1="270" y1="202" x2="240" y2="202"/>
         </g>
-        <g fill="var(--ink)" font-size="13" font-family="-apple-system,Segoe UI,Roboto,sans-serif" dominant-baseline="middle">
+        <g fill="var(--ink)" font-size="13" font-family="var(--font-mono)" dominant-baseline="middle">
           <text x="508" y="40">Human</text>     <text x="508" y="74">Chimp</text>
           <text x="508" y="108">Gorilla</text>  <text x="508" y="142">Orangutan</text>
           <text x="508" y="176">Macaque</text>  <text x="508" y="210">Mouse</text>
