@@ -13,6 +13,7 @@ See COPYING.txt for full licence terms.
 
 1. [Overview](#1-overview)
 2. [Installation and Startup](#2-installation-and-startup)
+   - [Web client (browser interface)](#web-client-browser-interface)
 3. [Input File Formats](#3-input-file-formats)
 4. [Key Concepts](#4-key-concepts)
    - 4.1 [Optimality Criteria](#41-optimality-criteria)
@@ -153,6 +154,35 @@ begin clann;
   hs nreps=10;
 end;
 ```
+
+### Web client (browser interface)
+
+Clann also ships with **`clann-web`**, a local browser interface that lets you
+upload trees, choose commands from menus, set options through per-command forms,
+run analyses with a live progress log, and explore the results in the interactive
+tree/reconciliation viewer — all without using the terminal. It is a **local,
+single-user tool**: the server binds to loopback (`127.0.0.1`) and there is no
+authentication, so it is not meant to be exposed to a network.
+
+Quick start (from the repository root):
+
+```bash
+make libclann-server.so                       # one-time: build the hardened library
+
+arch -x86_64 /usr/bin/python3 -m venv venv     # on Apple Silicon; a normal venv on Linux
+./venv/bin/pip install .
+./venv/bin/clann-web                           # starts the server and opens your browser
+```
+
+You will see `clann-web serving on http://127.0.0.1:8765` and a browser tab open
+there; stop it with `Ctrl+C`. Use `--port N` to change the port and `--no-browser`
+to skip opening a browser. Then, in the page: **Upload** a source-tree file,
+**Load** it, choose a command (e.g. `set criterion=recon`, then `hs`), and **Run**
+— long searches stream progress and can be interrupted with **Stop**.
+
+The web client is documented in full — including the one-command launch, the
+Apple-Silicon `arch -x86_64` note, browser usage, and the scripting HTTP API — in
+[`clann_web/README.md`](clann_web/README.md).
 
 ---
 
