@@ -1,0 +1,319 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Clann — web client (design mock)</title>
+<!--
+  ────────────────────────────────────────────────────────────────────────────
+  STATIC DESIGN MOCK — not the real app.
+  A data-populated copy of clann_web/static/index.html so a designer can see
+  every state without running the server. Content is hardcoded; the small
+  "mock state" switcher (top-right) and everything marked data-mock are
+  PREVIEW-ONLY and must not appear in the real index.html.
+
+  Restyle freely, but preserve the element ids / classes / CSS-variable names
+  the real app's JavaScript depends on (see clann_web/DESIGN_BRIEF.md §7).
+  ────────────────────────────────────────────────────────────────────────────
+-->
+<style>
+  :root{
+    --bg:#f6f7f9; --panel:#ffffff; --ink:#1a1c1f; --muted:#6b7280;
+    --line:#e4e7eb; --accent:#2563eb; --accent-ink:#ffffff; --chip:#eef2ff;
+    --ok:#15803d; --warn:#b45309; --err:#b91c1c; --logbg:#0f1419; --logink:#d7dde3;
+  }
+  @media (prefers-color-scheme:dark){
+    :root{ --bg:#0f1113; --panel:#181b1f; --ink:#e8eaed; --muted:#9aa1ab;
+      --line:#2a2f36; --accent:#3b82f6; --accent-ink:#ffffff; --chip:#1e293b;
+      --ok:#4ade80; --warn:#fbbf24; --err:#f87171; --logbg:#0b0e11; --logink:#cbd5e1; }
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);
+    font:15px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;}
+  header{display:flex;align-items:baseline;gap:12px;padding:16px 22px;
+    border-bottom:1px solid var(--line);background:var(--panel);}
+  header h1{font-size:18px;margin:0;font-weight:700;letter-spacing:.2px}
+  header .sub{color:var(--muted);font-size:13px}
+  main{max-width:1000px;margin:0 auto;padding:22px;display:grid;gap:18px;
+    grid-template-columns:1fr 1fr;}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:10px;
+    padding:16px 18px;}
+  .card h2{font-size:12px;text-transform:uppercase;letter-spacing:.08em;
+    color:var(--muted);margin:0 0 12px;font-weight:600}
+  .full{grid-column:1 / -1}
+  .kv{display:grid;grid-template-columns:auto 1fr;gap:6px 14px;font-size:14px}
+  .kv dt{color:var(--muted)}
+  .kv dd{margin:0;font-variant-numeric:tabular-nums}
+  select,button,input[type=text]{font:inherit}
+  select,input[type=text]{width:100%;padding:9px 10px;border:1px solid var(--line);
+    border-radius:8px;background:var(--bg);color:var(--ink)}
+  label.fld{display:block;font-size:12px;color:var(--muted);margin:10px 0 4px}
+  .blurb{margin:8px 0 0;color:var(--muted);font-size:14px;min-height:1.4em}
+  .btn{padding:8px 14px;border:1px solid var(--line);border-radius:8px;
+    background:var(--bg);color:var(--ink);cursor:pointer}
+  .btn:hover{border-color:var(--accent)}
+  .btn:disabled{opacity:.5;cursor:default}
+  .btn.primary{background:var(--accent);color:var(--accent-ink);border-color:var(--accent)}
+  .chip{display:inline-block;background:var(--chip);border-radius:999px;
+    padding:2px 10px;font-size:12px;color:var(--accent)}
+  .muted{color:var(--muted)}
+  .row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+  code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:13px}
+  pre.log{background:var(--logbg);color:var(--logink);border-radius:8px;padding:12px 14px;
+    max-height:340px;overflow:auto;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;
+    font-size:12.5px;line-height:1.45;white-space:pre-wrap;margin:0}
+  table.trees{width:100%;border-collapse:collapse;font-size:13px;margin-top:12px}
+  table.trees th,table.trees td{text-align:left;padding:6px 8px;border-bottom:1px solid var(--line);
+    vertical-align:top}
+  table.trees th{color:var(--muted);font-weight:600;font-size:11px;text-transform:uppercase;letter-spacing:.05em}
+  table.trees td.newick{font-family:ui-monospace,Menlo,monospace;font-size:12px;
+    max-width:520px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .form-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px 14px;margin-top:8px}
+  .fitem{display:flex;flex-direction:column;gap:3px}
+  .fitem label{font-size:12px;color:var(--muted)}
+  .fitem .name{color:var(--ink);font-weight:500}
+  .fitem input,.fitem select{padding:7px 9px;border:1px solid var(--line);border-radius:7px;
+    background:var(--bg);color:var(--ink);width:100%}
+  .fitem input[type=checkbox]{width:auto}
+  .fitem .hint{font-size:11px;color:var(--muted);line-height:1.35}
+  .msg{margin-top:10px;font-size:13px}
+  .msg.err{color:var(--err)} .msg.ok{color:var(--ok)}
+  footer{max-width:1000px;margin:0 auto;padding:0 22px 26px;color:var(--muted);font-size:12px}
+
+  /* ---- mock-only chrome (data-mock): remove for the real app ---- */
+  #mock-controls{position:fixed;top:10px;right:12px;z-index:99;display:flex;gap:6px;
+    align-items:center;background:var(--panel);border:1px solid var(--line);
+    border-radius:999px;padding:5px 8px;font-size:12px;box-shadow:0 2px 8px rgba(0,0,0,.12)}
+  #mock-controls span{color:var(--muted);padding:0 4px}
+  #mock-controls button{border:1px solid transparent;background:transparent;color:var(--ink);
+    border-radius:999px;padding:3px 9px;cursor:pointer;font-size:12px}
+  #mock-controls button[aria-pressed=true]{background:var(--accent);color:var(--accent-ink)}
+  .mock-viewer{width:100%;height:560px;border:1px solid var(--line);border-radius:10px;
+    margin-top:12px;background:var(--bg);position:relative;overflow:hidden}
+  .mock-viewer .mv-bar{position:absolute;top:0;left:0;right:0;padding:8px 12px;
+    border-bottom:1px solid var(--line);background:var(--panel);font-size:12px;color:var(--muted);
+    display:flex;gap:14px;align-items:center}
+  .mock-viewer .mv-bar strong{color:var(--ink);font-weight:600}
+  .mock-viewer svg{position:absolute;top:44px;left:0;right:0;bottom:0;width:100%;height:calc(100% - 44px)}
+  .mock-viewer .mv-note{position:absolute;bottom:8px;right:12px;font-size:11px;color:var(--muted)}
+</style>
+</head>
+<body data-mockstate="results">
+
+<!-- MOCK-ONLY: state switcher. Delete this block in the real app. -->
+<div id="mock-controls" data-mock>
+  <span>mock state</span>
+  <button data-state="idle">Idle</button>
+  <button data-state="running">Running</button>
+  <button data-state="results" aria-pressed="true">Results</button>
+  <button data-state="error">Error</button>
+  <button data-state="cancelled">Cancelled</button>
+</div>
+
+<header>
+  <h1>Clann</h1>
+  <span class="sub">web client · <span id="conn" class="chip" style="color:var(--ok)">connected</span></span>
+</header>
+
+<main>
+  <section class="card">
+    <h2>Session &amp; data</h2>
+    <dl class="kv">
+      <dt>Input file</dt><dd id="s-file">tutorial_multicopy.ph</dd>
+      <dt>Taxa</dt><dd id="s-taxa">9</dd>
+      <dt>Source trees</dt><dd id="s-trees">8</dd>
+      <dt>Criterion</dt><dd id="s-crit">recon</dd>
+      <dt>In memory</dt><dd id="s-mem">1</dd>
+    </dl>
+
+    <label class="fld">Upload a source-tree file</label>
+    <div class="row">
+      <input type="file" id="file" />
+      <button class="btn" id="upload">Upload</button>
+    </div>
+
+    <label class="fld">Loaded file</label>
+    <div class="row">
+      <select id="files">
+        <option value="tutorial_multicopy.ph" selected>tutorial_multicopy.ph</option>
+      </select>
+      <button class="btn" id="load">Load</button>
+    </div>
+
+    <div class="row" style="margin-top:14px">
+      <button class="btn" id="new-session">New session</button>
+      <span class="muted" id="s-id">session 44bd8e1a</span>
+    </div>
+    <div class="msg ok" id="data-msg">Loaded tutorial_multicopy.ph — 8 trees, 9 taxa.</div>
+  </section>
+
+  <section class="card">
+    <h2>Run a command</h2>
+    <label class="fld">Command</label>
+    <select id="cmd" aria-label="Command">
+      <option>hs</option><option>nj</option><option>reconstruct</option>
+      <option>showtrees</option><option>bootstrap</option><option>consensus</option>
+      <option>alltrees</option><option>usertrees</option><option>rfdists</option>
+      <option>mlscores</option><option>set</option>
+    </select>
+    <div class="blurb" id="cmd-blurb">Heuristic search for the best supertree</div>
+
+    <!-- Generated by renderForm() from the command schema; hardcoded here. -->
+    <div id="form">
+      <div class="form-grid">
+        <div class="fitem"><label><span class="name">nreps</span></label>
+          <input type="number" value="10"><div class="hint">Independent search replicates.</div></div>
+        <div class="fitem"><label><span class="name">nbest</span></label>
+          <input type="number" placeholder="int"><div class="hint">How many equally-best trees to retain.</div></div>
+        <div class="fitem"><label><span class="name">nthreads</span></label>
+          <input type="number" placeholder="int"><div class="hint">OpenMP threads (one replicate per thread). Default: all CPUs.</div></div>
+        <div class="fitem"><label><span class="name">swap</span></label>
+          <select><option>nni</option><option>spr</option><option selected>tbr</option></select>
+          <div class="hint">Rearrangement operator (ignored when vns=yes).</div></div>
+        <div class="fitem"><label><span class="name">start</span></label>
+          <select><option selected>nj</option><option>random</option><option>memory</option></select>
+          <div class="hint">Starting tree: NJ, random, or the tree currently in memory.</div></div>
+        <div class="fitem"><label><span class="name">vns</span></label>
+          <select><option selected>yes</option><option>no</option></select>
+          <div class="hint">Variable Neighborhood Descent (NNI→SPR→TBR). The reliable default.</div></div>
+      </div>
+    </div>
+
+    <details style="margin-top:10px">
+      <summary class="muted" style="cursor:pointer;font-size:13px">Advanced (extra raw options)</summary>
+      <input type="text" id="opts" placeholder="e.g. maxswaps=500000" style="margin-top:6px" />
+    </details>
+
+    <div class="row" style="margin-top:12px">
+      <button class="btn primary" id="run">Run</button>
+      <button class="btn" id="stop" style="display:none">Stop</button>
+      <span class="muted" id="run-cmd">clann&gt; hs nreps=10</span>
+    </div>
+    <div class="msg ok" id="run-msg">Done.</div>
+  </section>
+
+  <section class="card full" id="results-card">
+    <h2>Results</h2>
+    <div id="scores" class="muted">1 tree · tree · scores: 17</div>
+
+    <!-- Real app: <iframe id="viewer" src="/api/viewer">. Here a representative
+         stand-in (the live viewer renders an interactive tree in its place). -->
+    <div class="mock-viewer" id="viewer" data-mock-standin>
+      <div class="mv-bar"><strong>Supertree 1</strong> · tutorial_multicopy.ph · criterion: recon
+        <span style="margin-left:auto">Cladogram · Phylogram</span></div>
+      <svg viewBox="0 0 640 360" xmlns="http://www.w3.org/2000/svg" role="img"
+           aria-label="Representative supertree">
+        <g fill="none" stroke="var(--muted)" stroke-width="1.6" stroke-linecap="round">
+          <!-- tips -->
+          <line x1="430" y1="40"  x2="500" y2="40"/>  <line x1="430" y1="74"  x2="500" y2="74"/>
+          <line x1="390" y1="108" x2="500" y2="108"/> <line x1="350" y1="142" x2="500" y2="142"/>
+          <line x1="310" y1="176" x2="500" y2="176"/> <line x1="430" y1="210" x2="500" y2="210"/>
+          <line x1="430" y1="244" x2="500" y2="244"/> <line x1="430" y1="278" x2="500" y2="278"/>
+          <line x1="430" y1="312" x2="500" y2="312"/>
+          <!-- internal connectors -->
+          <line x1="430" y1="40"  x2="430" y2="74"/>  <line x1="430" y1="57"  x2="390" y2="57"/>
+          <line x1="390" y1="57"  x2="390" y2="108"/> <line x1="390" y1="82"  x2="350" y2="82"/>
+          <line x1="350" y1="82"  x2="350" y2="142"/> <line x1="350" y1="112" x2="310" y2="112"/>
+          <line x1="310" y1="112" x2="310" y2="176"/> <line x1="310" y1="144" x2="270" y2="144"/>
+          <line x1="430" y1="210" x2="430" y2="244"/> <line x1="430" y1="227" x2="350" y2="227"/>
+          <line x1="430" y1="278" x2="430" y2="312"/> <line x1="430" y1="295" x2="350" y2="295"/>
+          <line x1="350" y1="227" x2="350" y2="295"/> <line x1="350" y1="261" x2="270" y2="261"/>
+          <line x1="270" y1="144" x2="270" y2="261"/> <line x1="270" y1="202" x2="240" y2="202"/>
+        </g>
+        <g fill="var(--ink)" font-size="13" font-family="-apple-system,Segoe UI,Roboto,sans-serif" dominant-baseline="middle">
+          <text x="508" y="40">Human</text>     <text x="508" y="74">Chimp</text>
+          <text x="508" y="108">Gorilla</text>  <text x="508" y="142">Orangutan</text>
+          <text x="508" y="176">Macaque</text>  <text x="508" y="210">Mouse</text>
+          <text x="508" y="244">Rat</text>       <text x="508" y="278">Dog</text>
+          <text x="508" y="312">Cat</text>
+        </g>
+      </svg>
+      <div class="mv-note">representative — the live viewer is interactive (pan / zoom / reroot)</div>
+    </div>
+
+    <details style="margin-top:12px" open>
+      <summary class="muted" style="cursor:pointer">Trees (Newick)</summary>
+      <div id="trees-wrap">
+        <table class="trees"><thead><tr><th>Tree</th><th>Score</th>
+          <th>Newick (current rooting)</th></tr></thead>
+          <tbody>
+            <tr><td>Supertree 1</td><td>17</td>
+              <td class="newick" title="((Orangutan,((Human,Chimp),Gorilla),Macaque),((Mouse,Rat),(Dog,Cat)));">((Orangutan,((Human,Chimp),Gorilla),Macaque),((Mouse,Rat),(Dog,Cat)));</td></tr>
+          </tbody></table>
+      </div>
+    </details>
+
+    <details style="margin-top:12px" id="logbox">
+      <summary class="muted" style="cursor:pointer">Log</summary>
+      <pre class="log" id="log">Heuristic search settings:
+  Criterion            = reconciliation (duplication + loss)
+  Replicates           = 10
+  Starting tree        = neighbour-joining
+  Swapping             = TBR (via variable neighbourhood descent)
+  OpenMP threads       = 8
+
+Rep   1 of 10   best score = 19.0000
+Rep   2 of 10   best score = 18.0000
+Rep   3 of 10   best score = 17.0000  *
+Rep   4 of 10   best score = 17.0000
+...
+Rep  10 of 10   best score = 17.0000
+
+Supertree 1 of 1   score = 17.000000
+</pre>
+    </details>
+  </section>
+</main>
+
+<footer>Local session · bound to loopback · per-session Clann worker process.</footer>
+
+<!-- MOCK-ONLY script: drives the state switcher so a designer can preview each
+     run state. The real app has its own script (network + streaming); this one
+     is purely for the mock and should be deleted with #mock-controls. -->
+<script data-mock>
+(function () {
+  const body = document.body;
+  const btns = [...document.querySelectorAll('#mock-controls button')];
+  const runMsg = document.getElementById('run-msg');
+  const dataMsg = document.getElementById('data-msg');
+  const results = document.getElementById('results-card');
+  const stop = document.getElementById('stop');
+  const run = document.getElementById('run');
+  const conn = document.getElementById('conn');
+  const log = document.getElementById('log');
+
+  const RUNNING_LOG =
+`Heuristic search settings:
+  Criterion            = reconciliation (duplication + loss)
+  Replicates           = 10
+  OpenMP threads       = 8
+
+Rep   1 of 10   best score = 19.0000
+Rep   2 of 10   best score = 18.0000
+Rep   3 of 10   best score = 17.0000  *
+Rep   4 of 10   best score = 17.0000
+Rep   5 of 10   … searching …`;
+
+  const DONE_LOG = log.textContent;
+
+  function apply(state) {
+    body.dataset.mockstate = state;
+    btns.forEach(b => b.setAttribute('aria-pressed', String(b.dataset.state === state)));
+    results.style.display = (state === 'results') ? '' : 'none';
+    stop.style.display = (state === 'running') ? '' : 'none';
+    run.disabled = (state === 'running');
+    conn.textContent = 'connected'; conn.style.color = 'var(--ok)';
+
+    runMsg.className = 'msg';
+    if (state === 'idle')      { runMsg.textContent = ''; }
+    if (state === 'running')   { runMsg.textContent = 'Running…'; log.textContent = RUNNING_LOG; }
+    if (state === 'results')   { runMsg.textContent = 'Done.'; runMsg.classList.add('ok'); log.textContent = DONE_LOG; }
+    if (state === 'error')     { runMsg.textContent = 'Command failed: reconstruct requires a species tree in memory.'; runMsg.classList.add('err'); }
+    if (state === 'cancelled') { runMsg.textContent = 'Stopped — the session was reset; reload your file to continue.'; runMsg.classList.add('err'); }
+  }
+  btns.forEach(b => b.addEventListener('click', () => apply(b.dataset.state)));
+  apply('results');
+})();
+</script>
+</body>
+</html>
