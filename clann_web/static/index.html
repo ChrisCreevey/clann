@@ -120,6 +120,7 @@
 
     <div class="row" style="margin-top:12px">
       <button class="btn primary" id="run">Run</button>
+      <button class="btn" id="stop" style="display:none">Stop</button>
       <span class="muted" id="run-cmd"></span>
     </div>
     <div class="msg" id="run-msg"></div>
@@ -142,7 +143,7 @@
   </section>
 </main>
 
-<footer>Local session · bound to loopback · one live Clann engine.</footer>
+<footer>Local session · bound to loopback · per-session Clann worker process.</footer>
 
 <script>
 const $ = (id) => document.getElementById(id);
@@ -184,6 +185,13 @@ function msg(id, text, kind) {
   const el = $(id);
   el.textContent = text || "";
   el.className = "msg" + (kind ? " " + kind : "");
+}
+
+async function refreshSession() {
+  // re-read state after a cancel (worker was respawned → analysis state cleared,
+  // but the sandbox and its uploaded files survive).
+  const { ok, data } = await api("/api/session");
+  if (ok) { renderState(data.state); renderFiles(data.files); }
 }
 
 async function newSession() {
@@ -308,11 +316,28 @@ $("load").onclick = async () => {
 };
 
 let currentES = null;
+let currentJob = null;
+
+function runFinished() {
+  $("run").disabled = false;
+  $("stop").style.display = "none";
+  $("stop").disabled = false;
+  currentJob = null;
+}
+
+$("stop").onclick = async () => {
+  if (!currentJob) return;
+  $("stop").disabled = true;
+  msg("run-msg", "Stopping…");
+  await jpost(`/api/jobs/${currentJob}/cancel`);
+  // the SSE 'done' event (status: cancelled) will finalise the UI
+};
 
 $("run").onclick = async () => {
   const command = buildCommand($("cmd").value);
   $("run-cmd").textContent = "clann> " + command;
   $("run").disabled = true;
+  $("stop").style.display = "";
   msg("run-msg", "Running…");
 
   // show the results card with a live log while the job runs
@@ -324,9 +349,10 @@ $("run").onclick = async () => {
   $("logbox").open = true;
 
   const { ok, status, data } = await jpost("/api/run", { command });
-  if (status === 409) { msg("run-msg", data.error || "Busy.", "err"); $("run").disabled = false; return; }
-  if (!ok || data.ok === false) { msg("run-msg", data.error || "Command failed.", "err"); $("run").disabled = false; return; }
+  if (status === 409) { msg("run-msg", data.error || "Busy.", "err"); runFinished(); return; }
+  if (!ok || data.ok === false) { msg("run-msg", data.error || "Command failed.", "err"); runFinished(); return; }
 
+  currentJob = data.job_id;
   if (currentES) currentES.close();
   const es = new EventSource(`/api/jobs/${data.job_id}/stream`);
   currentES = es;
@@ -337,18 +363,21 @@ $("run").onclick = async () => {
   es.addEventListener("done", (ev) => {
     es.close(); currentES = null;
     const d = JSON.parse(ev.data);
-    if (d.status === "error") {
+    if (d.status === "cancelled") {
+      msg("run-msg", "Stopped — the session was reset; reload your file to continue.", "err");
+      refreshSession();
+    } else if (d.status === "error") {
       msg("run-msg", d.error || "Command failed.", "err");
     } else {
       msg("run-msg", "Done.", "ok");
       if (d.state) renderState(d.state);
       renderResults(d);
     }
-    $("run").disabled = false;
+    runFinished();
   });
   es.onerror = () => {
     es.close(); currentES = null;
-    $("run").disabled = false;
+    runFinished();
     msg("run-msg", "Connection to the run stream was lost.", "err");
   };
 };

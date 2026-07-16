@@ -27,7 +27,8 @@ import uuid
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse, parse_qs
 
-from .engine import ClannEngine, ClannError, get_shared_engine
+from .engine import ClannError
+from .worker_client import WorkerEngine
 from .sandbox import Sandbox, UnsafePath, sanitize_command
 from .results import RESULT_JSON, is_tree_command, build_results
 from .commands import list_commands, command_schema
@@ -44,7 +45,8 @@ class Job:
     def __init__(self, job_id: str, command: str):
         self.id = job_id
         self.command = command
-        self.status = "running"        # running | done | error
+        self.status = "running"        # running | done | error | cancelled
+        self.cancel_requested = False
         self._lines: list[str] = []
         self._lock = threading.Lock()
         self.result: dict | None = None
@@ -71,27 +73,48 @@ class Job:
 
 
 class _App:
-    """Holds the single engine + session id + sandbox (one session for now)."""
+    """One session: its own worker process (Model A) + sandbox.
 
-    def __init__(self, engine: ClannEngine):
-        self.engine = engine
+    Each session owns a separate :class:`WorkerEngine` — a distinct process with
+    its own copy of Clann's globals — so sessions are isolated and a runaway or
+    wedged search in one can be killed without touching the others.
+    """
+
+    def __init__(self, engine: WorkerEngine | None = None):
         self.sandbox = Sandbox()
+        self.engine = engine or WorkerEngine(workdir=self.sandbox.dir)
         self.engine.set_workdir(self.sandbox.dir)
-        # The engine may be a process-shared singleton left dirty by a previous
-        # server/session; start from a clean baseline.
-        self.engine.reset()
         self.last_result_json = None   # raw JSON of the most recent tree result
         self.jobs: dict[str, Job] = {}
         self.current_job: Job | None = None
         self._job_lock = threading.Lock()
         self.session_id = uuid.uuid4().hex
 
+    def _respawn_engine(self) -> None:
+        """Start a fresh worker on the same sandbox and kill the old one.
+
+        Used to cancel a search (Step 3.2). Session analysis state (loaded trees,
+        `set` options) is lost — inherent to a kill. The new engine is installed
+        BEFORE the old is killed so `self.engine` is never a dead/None handle.
+        """
+        old = self.engine
+        self.engine = WorkerEngine(workdir=self.sandbox.dir)
+        self.last_result_json = None
+        try:
+            old.terminate()   # in-flight run unblocks via EOF; job -> cancelled
+        except Exception:      # noqa: BLE001
+            pass
+
     def new_session(self) -> dict:
-        self.engine.reset()
-        old = self.sandbox
+        old_engine = self.engine
+        old_sandbox = self.sandbox
         self.sandbox = Sandbox()
-        self.engine.set_workdir(self.sandbox.dir)
-        old.destroy()
+        self.engine = WorkerEngine(workdir=self.sandbox.dir)
+        try:
+            old_engine.terminate()
+        except Exception:      # noqa: BLE001
+            pass
+        old_sandbox.destroy()
         self.last_result_json = None
         with self._job_lock:
             self.jobs.clear()
@@ -99,6 +122,23 @@ class _App:
         self.session_id = uuid.uuid4().hex
         return {"session_id": self.session_id, "state": self.engine.state(),
                 "files": self.sandbox.list()}
+
+    def cancel_current(self, job_id: str | None = None) -> Job | None:
+        """Cancel the running search by killing its worker and respawning a fresh
+        one. Clann's own SIGINT handlers are interactive (they prompt Y/N on
+        stdin, which in server mode is the worker's protocol pipe), so a graceful
+        in-process stop isn't possible — a killable worker process is the only
+        clean recovery, which is exactly why each session owns one. This also
+        recovers the known repeated-high-`nreps` `hs` hang."""
+        with self._job_lock:
+            job = self.current_job
+            if job is None or job.done.is_set():
+                return None
+            if job_id is not None and job.id != job_id:
+                return None
+            job.cancel_requested = True
+        self._respawn_engine()
+        return job
 
     def start_job(self, safe_cmd: str) -> Job:
         """Begin an async run of `safe_cmd` (already sandbox-sanitised).
@@ -124,8 +164,9 @@ class _App:
         run_cmd = job.command
         if is_tree_command(job.command) and "resultjson=" not in job.command:
             run_cmd = f"{job.command} resultjson={RESULT_JSON}"
+        engine = self.engine          # bind now; a cancel may swap self.engine
         try:
-            self.engine.run(run_cmd, on_line=job.append)   # blocks this thread
+            engine.run(run_cmd, on_line=job.append)        # blocks this thread
             result = {"state": self.engine.state()}
             if os.path.exists(jpath):
                 try:
@@ -139,10 +180,14 @@ class _App:
                 finally:
                     os.remove(jpath)
             job.result = result
-            job.status = "done"
+            job.status = "cancelled" if job.cancel_requested else "done"
         except Exception as e:                              # noqa: BLE001
-            job.error = str(e)
-            job.status = "error"
+            if job.cancel_requested:
+                job.status = "cancelled"
+                job.error = "search cancelled; session was reset"
+            else:
+                job.error = str(e)
+                job.status = "error"
         finally:
             job.done.set()
 
@@ -279,6 +324,16 @@ def make_handler(app: _App):
                     self._send(200, {"ok": True, "log": log,
                                      "state": app.engine.state()})
 
+                elif path.startswith("/api/jobs/") and path.endswith("/cancel"):
+                    jid = path[len("/api/jobs/"):-len("/cancel")]
+                    job = app.cancel_current(jid)
+                    if job is None:
+                        self._send(404, {"ok": False,
+                                         "error": "no running job to cancel"})
+                    else:
+                        self._send(202, {"ok": True, "job_id": job.id,
+                                         "status": "cancelling"})
+
                 elif path == "/api/run":
                     body = self._read_json()
                     cmd = body.get("command")
@@ -306,8 +361,8 @@ def make_handler(app: _App):
 
 
 def make_server(host: str = "127.0.0.1", port: int = 8765,
-                engine: ClannEngine | None = None) -> ThreadingHTTPServer:
-    app = _App(engine or get_shared_engine())
+                engine: WorkerEngine | None = None) -> ThreadingHTTPServer:
+    app = _App(engine)
     httpd = ThreadingHTTPServer((host, port), make_handler(app))
     httpd.clann_app = app  # expose for tests
     return httpd
@@ -322,5 +377,9 @@ def serve(host: str = "127.0.0.1", port: int = 8765) -> None:
     except KeyboardInterrupt:
         pass
     finally:
+        try:
+            httpd.clann_app.engine.terminate()
+        except Exception:      # noqa: BLE001
+            pass
         httpd.clann_app.sandbox.destroy()
         httpd.server_close()

@@ -537,22 +537,50 @@ on a green predecessor. A single Claude instance should take one step.
 > since a killable worker process is the only clean way to recover a hung
 > in-Clann search. Pairs with **Step 3.2 (cancellation)**. Tracked separately.
 
-**Step 3.2 — Cancellation.** `[ ]`
-- *Goal:* stop a running search from the UI.
-- *Work:* `POST /api/jobs/<id>/cancel`. (Model A: SIGINT to the worker via the
-  existing `controlc` handler.) A "Stop" button in the UI.
-- *Verify:* start `hs nreps=100`, cancel mid-run; server returns partial/best-so-
-  far cleanly and accepts the next command.
-- *Done-when:* runaway searches are interruptible.
-
-**Step 3.3 — Migrate to per-session worker processes (Model A).** `[ ]`
+**Step 3.3 — Migrate to per-session worker processes (Model A).** `[x]`
 - *Goal:* isolation, cross-session parallelism, crash containment (§2.1, §3.1).
-- *Work:* replace the in-process global-lock engine with a worker-process pool,
-  one per session, speaking a small line/JSON protocol (load/run/reset/cancel).
-  Server routes by session id. API unchanged.
-- *Verify:* two sessions run `hs` **concurrently** with independent state; killing
-  one worker leaves the other healthy; the Phase 1–3 tests still pass unchanged.
-- *Done-when:* multi-user isolation holds and nothing above regressed.
+- *Work (DONE):* `clann_web/worker.py` — a subprocess entry point
+  (`python -m clann_web.worker`) that owns ONE in-process `ClannEngine` and speaks
+  a newline-delimited JSON protocol on stdin/stdout
+  (`load`/`run`/`reset`/`state`/`set_workdir`/`quit`; replies
+  `ready`/`line`/`result`/`error`, where `line` carries live output for streaming).
+  `clann_web/worker_client.py` — `WorkerEngine`, an API-compatible drop-in for
+  `ClannEngine` that spawns and drives that process, plus `terminate()`/`is_alive()`.
+  `_App` now owns **one `WorkerEngine` per session** (a distinct process → a
+  distinct copy of Clann's globals); `new_session` kills + respawns it. On macOS
+  the worker is launched under `arch -x86_64` (overridable via `CLANN_WORKER_CMD`)
+  so it can load the x86_64 `libclann-server.so`. This retires the in-process
+  process-wide singleton and the shared-global-state hacks.
+- *Verify (DONE):* `clann_web/tests/test_worker.py` — **two servers (two worker
+  processes) run `hs` concurrently**, both score 17 with independent state; killing
+  one session's worker (`new_session`) leaves the other's 8 source trees intact.
+  All Phase 1–3 suites still pass unchanged (now genuinely isolated across
+  processes rather than relying on the singleton). `PASS`.
+- *Done-when:* ✅ per-session isolation + cross-session parallelism hold; nothing
+  above regressed.
+
+**Step 3.2 — Cancellation.** `[x]`
+- *Goal:* stop a running search from the UI.
+- *Work (DONE):* `POST /api/jobs/<id>/cancel` → `_App.cancel_current` marks the job
+  cancelled and **kills + respawns the session's worker** (`_respawn_engine`: new
+  worker installed before the old is killed, so `self.engine` is never dead). The
+  in-flight `_run_job` unblocks via the worker's EOF and finalises the job as
+  `cancelled`; `/api/jobs/<id>/stream`'s `done` event carries `status:"cancelled"`.
+  A **"Stop" button** in the SPA appears while a run is active, posts the cancel,
+  and on the cancelled event tells the user the session was reset (uploaded files
+  survive; loaded trees / `set` state are cleared) and refreshes state.
+  - *Design note:* Clann's own `controlc` SIGINT handlers are **interactive** —
+    they `xgets()` a Y/N answer on stdin, which in server mode IS the worker's
+    protocol pipe — so a graceful in-process SIGINT stop is unusable. Killing the
+    worker process is the clean recovery, and is also the **only** way to recover
+    the known repeated-high-`nreps` `hs` hang (Step 3.1 note) — which is exactly
+    why each session owning a killable process (Step 3.3) was the prerequisite.
+- *Verify (DONE):* `test_worker.py` starts `hs nreps=4000`, cancels mid-search,
+  asserts the job reaches `cancelled` and the session then runs `set
+  criterion=recon` to `done`. **Live browser:** ran `hs nreps=5000` (log streaming),
+  clicked **Stop** → "Stopped — the session was reset…", Run re-enabled, state
+  cleared; reloading `t.ph` + a fresh `hs` completed normally. `PASS`.
+- *Done-when:* ✅ runaway searches are interruptible and the session recovers.
 
 ### Phase 4 — Hardening & packaging
 
@@ -602,24 +630,32 @@ on a green predecessor. A single Claude instance should take one step.
 
 ## 8. Suggested next three sessions
 
-**Phase 0 and Phase 1 are complete** (§6): the persistent in-process engine is
-proven and deterministic across reset, the `CLANN_SERVER_MODE` build has provably
-no shell surface, a stdlib HTTP server drives real persistent sessions over
-loopback, each session is confined to its own file sandbox, and `/api/run` now
-returns structured `{trees, scores, result_type}` (Newick + the viewer's node
-JSON) — everything the browser needs. **Phase 2 (the browser client) is underway** — the
-Phase 2 is done, and Step 3.1 (async jobs + live SSE log streaming) is complete.
-The client does the whole job visually and long runs stream progress. Remaining:
+**Phases 0–3 are complete** (§6). The persistent engine is proven and
+deterministic across reset; the `CLANN_SERVER_MODE` build has provably no shell
+surface; a stdlib HTTP server drives real sessions over loopback; each session is
+confined to its own sandbox; `/api/run` is async (202 + `job_id`) with live SSE
+log streaming and structured `{trees, scores, result_type}` results; the browser
+client does the whole job visually including the embedded interactive viewer; and
+**each session now owns its own killable worker process (Model A)** giving
+isolation + cross-session parallelism, with a **Stop button** that cancels a run
+by killing and respawning that worker. The architecture is proven end-to-end.
+Remaining work is hardening and packaging:
 
-1. **Step 3.3 — per-session worker processes (Model A).** Elevated in priority: a
-   pre-existing core hang (repeated high-`nreps` `hs`, see Step 3.1 note) can pin
-   the single in-process engine, and a separate killable worker process is the
-   only clean recovery. Also unlocks concurrent sessions.
-2. **Step 3.2 — cancellation** (SIGINT the worker; a Stop button). Natural pair
-   with 3.3.
-3. **Step 4.x** — security pass, packaging (`pip install` + `clann-web`, ideally a
-   universal/arm64 lib so the `arch -x86_64` prefix goes away).
-4. *(separate, flagged)* fix the core repeated-`hs` hang in `heuristic_search`.
+1. **Step 4.1 — security pass.** Turn the ad-hoc guarantees into a `pytest`
+   security suite: no shell reachability in the server build, sandbox enforced on
+   every path option, loopback-only default with an explicit `--host 0.0.0.0`
+   warning, request-size limits, per-session temp cleanup.
+2. **Step 4.2 — packaging & one-command launch.** `pip install .` + a `clann-web`
+   entry point that starts the server and opens the URL; **ideally a
+   universal/arm64 `libclann-server.so`** so the `arch -x86_64` worker prefix (now
+   in `worker_client._worker_command`) can go away. Document in `USER_MANUAL.md` /
+   a new `NOTES_web_client.md`.
+3. **Step 4.3 — command coverage & polish.** Schema + result handling for the
+   commands beyond the core set (`bootstrap`, `consensus`, `alltrees`, `usertrees`,
+   `rfdists`, `mlscores`, `excludetrees`/`includetrees`), surfacing output files
+   for download and showing `set` state.
+4. *(separate, flagged)* fix the core repeated-high-`nreps` `hs` hang in
+   `heuristic_search` — the web layer now contains it (killable worker), but the
+   underlying core bug remains.
 
-After those, the architecture is proven end-to-end (engine ↔ HTTP ↔ real
-multi-command session) and the remaining steps are incremental UI + robustness.
+After those, the tool is installable and usable by a non-developer.
