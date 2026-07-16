@@ -34,12 +34,29 @@ _CRITERION_NAMES = {
 }
 
 
+_LIB_NAMES = ("libclann-server.so", "libclann-server.dylib")
+
+
 def _default_lib_path() -> str:
+    """Locate the hardened server library.
+
+    Search order: ``$CLANN_LIB`` (explicit override) → next to the installed
+    package (bundled as package-data) → the source-repo root (editable install
+    or running from a checkout) → the current working directory. Returns the
+    first existing path, else the conventional repo-root ``.so`` so the caller's
+    'build it first' error still fires with a sensible path.
+    """
     env = os.environ.get("CLANN_LIB")
     if env:
         return env
-    repo = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    return os.path.join(repo, "libclann-server.so")
+    pkg = os.path.dirname(os.path.abspath(__file__))
+    repo = os.path.dirname(pkg)
+    for base in (pkg, repo, os.getcwd()):
+        for name in _LIB_NAMES:
+            cand = os.path.join(base, name)
+            if os.path.exists(cand):
+                return cand
+    return os.path.join(repo, _LIB_NAMES[0])
 
 
 _OUTPUT_FN = ctypes.CFUNCTYPE(None, ctypes.c_char_p, ctypes.c_void_p)

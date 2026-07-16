@@ -139,3 +139,15 @@ pyclann/__pycache__/
 pyclann/**/__pycache__/
 pyclann/*.egg-info/
 pyclann/**/*.pyc
+
+# -----------------------------------------------------------------------------
+# clann_web packaging artefacts
+# -----------------------------------------------------------------------------
+build/
+dist/
+*.egg-info/
+clann_web/__pycache__/
+clann_web/**/__pycache__/
+# the server library is copied in at build time (setup.py); never commit it
+clann_web/libclann-server.so
+clann_web/libclann-server.dylib

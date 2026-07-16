@@ -603,15 +603,32 @@ on a green predecessor. A single Claude instance should take one step.
   the session temp dir is cleaned up with no `/tmp/clannweb-*` leak. `PASS`.
 - *Done-when:* ✅ the security suite is green.
 
-**Step 4.2 — Packaging & one-command launch.** `[ ]`
+**Step 4.2 — Packaging & one-command launch.** `[x]`
 - *Goal:* `pip install` + `clann-web` opens the app.
-- *Work:* build/vendor the server lib per-platform (`.so`/`.dylib`), ship the
-  client bundle + schema, add a `clann-web` entry point that starts uvicorn and
-  prints/opens the URL. Document in `USER_MANUAL.md` and a new
-  `NOTES_web_client.md`.
-- *Verify:* in a clean venv, `pip install .` then `clann-web` serves the app;
-  smoke test drives one full analysis.
-- *Done-when:* a non-developer can install and use it.
+- *Work (DONE):* added `pyproject.toml` (setuptools build backend) + `setup.cfg`
+  (PEP 621 metadata lives in `setup.cfg` so pre-61 setuptools installs correctly)
+  declaring the **`clann-web` console entry point** (`clann_web.__main__:main`) and
+  packaging the client bundle (`static/*`), `command_schema.json`, and the server
+  lib as package-data. `setup.py` is a shim that **copies the built
+  `libclann-server.so` into the package at build time** so a non-editable
+  `pip install .` is self-contained; `engine._default_lib_path()` now searches
+  `$CLANN_LIB` → the installed package dir → the repo root → cwd, so editable and
+  wheel installs both find the lib. `__main__` gained `--no-browser` and now
+  **auto-opens the browser** after start. Zero third-party runtime deps (stdlib
+  only). `.gitignore` covers `build/`, `dist/`, egg-info, and the copied-in lib;
+  `clann_web/README.md` rewritten around the `pip install` + `clann-web` flow
+  (async job API table, worker/cancel notes, size caps).
+- *Verify (DONE):* in a **fresh x86_64 venv** — editable install: `clann-web`
+  script created, `--help` works, launched from an unrelated cwd it loaded the lib
+  and drove `set criterion=recon` → `hs` to score **17**. Non-editable **wheel**
+  build bundled `libclann-server.so` (748 KB) + schema + static; installed into a
+  clean venv, `_default_lib_path()` resolved to the **site-packages** copy, and a
+  full session (upload → load → `set` → `hs`) scored **17**. All 7 test suites
+  green.
+- *Done-when:* ✅ a non-developer can `pip install .` and run `clann-web`.
+  - *Deferred:* a native/universal-arm64 lib (to drop the `arch -x86_64` venv
+    requirement on Apple Silicon) and a dedicated `NOTES_web_client.md` remain
+    nice-to-haves; the packaging works today with an x86_64 venv.
 
 **Step 4.3 — Command coverage & polish.** `[ ]`
 - *Goal:* extend beyond the core four commands.
@@ -640,7 +657,7 @@ on a green predecessor. A single Claude instance should take one step.
 
 ## 8. Suggested next three sessions
 
-**Phases 0–3 and Step 4.1 are complete** (§6). The persistent engine is proven and
+**Phases 0–3 and Steps 4.1–4.2 are complete** (§6). The persistent engine is proven and
 deterministic across reset; the `CLANN_SERVER_MODE` build has provably no shell
 surface; a stdlib HTTP server drives real sessions over loopback; each session is
 confined to its own sandbox; `/api/run` is async (202 + `job_id`) with live SSE
@@ -649,21 +666,22 @@ client does the whole job visually including the embedded interactive viewer; an
 **each session now owns its own killable worker process (Model A)** giving
 isolation + cross-session parallelism, with a **Stop button** that cancels a run
 by killing and respawning that worker. The architecture is proven end-to-end.
-A green **security suite** (Step 4.1) now pins the safe defaults: no shell
+A green **security suite** (Step 4.1) pins the safe defaults (no shell
 reachability, sandbox-confined paths, request-size caps, loopback default, temp
-cleanup. Remaining work is packaging and coverage:
+cleanup), and **`pip install .` + `clann-web`** (Step 4.2) installs and launches
+the app self-contained. The tool is installable and usable by a non-developer
+today. Remaining work is coverage and polish:
 
-1. **Step 4.2 — packaging & one-command launch.** `pip install .` + a `clann-web`
-   entry point that starts the server and opens the URL; **ideally a
-   universal/arm64 `libclann-server.so`** so the `arch -x86_64` worker prefix (now
-   in `worker_client._worker_command`) can go away. Document in `USER_MANUAL.md` /
-   a new `NOTES_web_client.md`.
-2. **Step 4.3 — command coverage & polish.** Schema + result handling for the
+1. **Step 4.3 — command coverage & polish.** Schema + result handling for the
    commands beyond the core set (`bootstrap`, `consensus`, `alltrees`, `usertrees`,
    `rfdists`, `mlscores`, `excludetrees`/`includetrees`), surfacing output files
-   for download and showing `set` state.
+   (histograms, landscape TSV) for download, and showing `set` state. This is the
+   last planned step.
+2. **Native/universal-arm64 `libclann-server.so`** (deferred from 4.2) so the
+   `arch -x86_64` venv requirement on Apple Silicon can go away, plus an optional
+   `NOTES_web_client.md`.
 3. *(separate, flagged)* fix the core repeated-high-`nreps` `hs` hang in
    `heuristic_search` — the web layer now contains it (killable worker), but the
    underlying core bug remains.
 
-After those, the tool is installable and usable by a non-developer.
+After Step 4.3 the planned web-client scope is complete.
