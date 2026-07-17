@@ -395,12 +395,21 @@ async function loadCommands() {
   if (!ok) return;
   const sel = $("cmd");
   sel.innerHTML = "";
+  let group = null, container = sel;   // group commands under <optgroup> headers
   for (const c of data.commands) {
+    if (c.group && c.group !== group) {
+      group = c.group;
+      container = document.createElement("optgroup");
+      container.label = group;
+      sel.appendChild(container);
+    } else if (!c.group) {
+      container = sel;
+    }
     const o = document.createElement("option");
     o.value = c.name;
     o.textContent = c.blurb ? c.name + " — " + c.blurb : c.name;
     o.dataset.blurb = c.blurb || "";
-    sel.appendChild(o);
+    container.appendChild(o);
   }
   sel.onchange = () => {
     const o = sel.selectedOptions[0];
@@ -442,6 +451,11 @@ async function renderForm(cmd, containerId = "form") {
         input.appendChild(op);
       }
       input.value = "";
+    } else if (o.type === "bool") {
+      // bare command-line flag (e.g. singlecopy): emit just the name when checked
+      input = document.createElement("input");
+      input.type = "checkbox";
+      input.checked = false;
     } else if (o.type === "enum") {
       input = document.createElement("select");
       for (const v of o.values || []) {
@@ -459,6 +473,7 @@ async function renderForm(cmd, containerId = "form") {
     }
     input.dataset.name = o.name;
     input.dataset.default = o.default ?? "";
+    if (o.type === "bool") input.dataset.flag = "true";
     if (o.positional) input.dataset.positional = "true";
     if (o.required) input.dataset.required = "true";
     const defTxt = (o.default !== "" && o.default != null) ? "default: " + o.default
@@ -483,6 +498,10 @@ function buildOpts(containerId) {
   const parts = [];
   for (const input of $(containerId).querySelectorAll("[data-name]")) {
     if (input.dataset.positional === "true") continue;   // positional args placed separately
+    if (input.dataset.flag === "true") {                 // bare flag: emit just the name
+      if (input.checked) parts.push(input.dataset.name);
+      continue;
+    }
     const val = String(input.value).trim();
     const def = input.dataset.default ?? "";
     if (val !== "" && val !== def) parts.push(`${input.dataset.name}=${val}`);

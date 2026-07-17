@@ -120,7 +120,8 @@ def sanitize_command(command: str, sandbox: Sandbox) -> str:
     # Commands whose bare first argument is an input file path:
     #   `exe <file>` / `execute <file>`   — the gene-tree file to load
     #   `usertrees <file>`                — the candidate-topologies file to score
-    if tokens[0] in ("exe", "execute", "usertrees") and len(tokens) > 1 and "=" not in tokens[1]:
+    #   `recluster <file>`                — the landscape TSV to cluster
+    if tokens[0] in ("exe", "execute", "usertrees", "recluster") and len(tokens) > 1 and "=" not in tokens[1]:
         out.append(sandbox.confine_input(tokens[1]))
         i = 2
 

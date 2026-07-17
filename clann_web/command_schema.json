@@ -73,7 +73,9 @@
     "options": [
       {"name": "missing", "type": "enum", "default": "4point",
        "values": ["4point", "ultrametric"],
-       "help": "Estimate distances for taxon pairs not co-occurring in any source tree."}
+       "help": "Estimate distances for taxon pairs not co-occurring in any source tree."},
+      {"name": "savetrees", "type": "text", "default": "",
+       "help": "Output file for the neighbour-joining supertree."}
     ]
   },
 
@@ -137,6 +139,162 @@
        "help": "Output file for the consensus tree."},
       {"name": "guidetree", "type": "file", "default": "",
        "help": "Optional guide-tree file used to order the consensus (upload it first, then choose it here)."}
+    ]
+  },
+
+  "bootstrap": {
+    "summary": "Bootstrap supertree analysis: resample the source trees and repeat the search under the selected criterion.",
+    "options": [
+      {"name": "nreps", "type": "int", "default": "100",
+       "help": "Number of bootstrap replicates."},
+      {"name": "swap", "type": "enum", "default": "tbr", "values": ["tbr", "spr", "nni"],
+       "help": "Branch-swapping operator used in each replicate's search."},
+      {"name": "consensus", "type": "enum", "default": "majrule", "values": ["majrule", "strict", "minor"],
+       "help": "Consensus type summarising the bootstrap replicate trees."},
+      {"name": "missing", "type": "enum", "default": "4point", "values": ["4point", "ultrametric"],
+       "help": "How to estimate distances for taxa missing from a source tree."},
+      {"name": "consensusfile", "type": "text", "default": "",
+       "help": "Output file for the bootstrap consensus tree."},
+      {"name": "nthreads", "type": "int", "default": "",
+       "help": "OpenMP threads. Default: all CPUs."}
+    ]
+  },
+
+  "alltrees": {
+    "summary": "Exhaustively score every possible supertree under the selected criterion (feasible only for few taxa).",
+    "options": [
+      {"name": "nbest", "type": "int", "default": "",
+       "help": "How many equally-best trees to retain."},
+      {"name": "keep", "type": "int", "default": "",
+       "help": "Keep every tree scoring within this many steps of the best."},
+      {"name": "range", "type": "text", "default": "",
+       "help": "Only evaluate this range of tree numbers, e.g. 1-1000."},
+      {"name": "savetrees", "type": "text", "default": "",
+       "help": "Output file to save the evaluated trees."}
+    ]
+  },
+
+  "recluster": {
+    "summary": "Cluster a landscape TSV (written by hs visitedtrees=) into groups of similar supertrees at an RF threshold.",
+    "options": [
+      {"name": "file", "type": "file", "positional": true, "required": true, "default": "",
+       "help": "Landscape TSV file from a prior 'hs visitedtrees=' run (upload it first, then choose it here)."},
+      {"name": "clusterthreshold", "type": "float", "default": "0.2",
+       "help": "RF-distance threshold below which trees are placed in the same cluster."},
+      {"name": "clusterorderby", "type": "enum", "default": "score", "values": ["score", "visits"],
+       "help": "Order the reported clusters by best score or by number of visits."},
+      {"name": "clusteroutput", "type": "text", "default": "treeclusters.tsv",
+       "help": "Output file for the cluster assignments."}
+    ]
+  },
+
+  "savetrees": {
+    "summary": "Save source trees to a Phylip file. Subsets can be selected by number range or name.",
+    "options": [
+      {"name": "filename", "type": "text", "default": "",
+       "help": "Output file (Phylip format)."},
+      {"name": "range", "type": "text", "default": "",
+       "help": "Only save this range of tree numbers, e.g. 1-5."},
+      {"name": "namecontains", "type": "text", "default": "",
+       "help": "Only save trees whose name contains this string."},
+      {"name": "fullnames", "type": "bool", "default": "",
+       "help": "Write full gene-copy tip names rather than collapsed species names."}
+    ]
+  },
+
+  "excludetrees": {
+    "summary": "Exclude source trees from subsequent analyses, selected by a variety of criteria.",
+    "options": [
+      {"name": "range", "type": "text", "default": "",
+       "help": "Exclude trees in this number range, e.g. 1-5."},
+      {"name": "size", "type": "int", "default": "",
+       "help": "Select trees by number of taxa."},
+      {"name": "namecontains", "type": "text", "default": "",
+       "help": "Exclude trees whose name contains this string."},
+      {"name": "containstaxa", "type": "text", "default": "",
+       "help": "Exclude trees that contain these taxa (comma-separated)."},
+      {"name": "score", "type": "text", "default": "",
+       "help": "Exclude trees selected by score."},
+      {"name": "singlecopy", "type": "bool", "default": "",
+       "help": "Exclude single-copy trees."},
+      {"name": "multicopy", "type": "bool", "default": "",
+       "help": "Exclude multicopy trees."}
+    ]
+  },
+
+  "includetrees": {
+    "summary": "Restore previously excluded source trees, selected by a variety of criteria.",
+    "options": [
+      {"name": "range", "type": "text", "default": "",
+       "help": "Restore trees in this number range, e.g. 1-5."},
+      {"name": "size", "type": "int", "default": "",
+       "help": "Select trees by number of taxa."},
+      {"name": "namecontains", "type": "text", "default": "",
+       "help": "Restore trees whose name contains this string."},
+      {"name": "containstaxa", "type": "text", "default": "",
+       "help": "Restore trees that contain these taxa (comma-separated)."},
+      {"name": "score", "type": "text", "default": "",
+       "help": "Restore trees selected by score."}
+    ]
+  },
+
+  "deletetaxa": {
+    "summary": "Delete taxa from every source tree in memory (pruned, preserving branch lengths). Use restoretaxa to undo.",
+    "options": [
+      {"name": "taxa", "type": "text", "positional": true, "required": true, "default": "",
+       "help": "Taxa to delete from all trees, space-separated (e.g. Human Chimp)."},
+      {"name": "mintaxa", "type": "int", "default": "",
+       "help": "Drop any tree left with fewer than this many taxa after deletion."}
+    ]
+  },
+
+  "rfdists": {
+    "summary": "Compute Robinson-Foulds distances between all pairs of source trees.",
+    "options": [
+      {"name": "output", "type": "enum", "default": "matrix", "values": ["matrix", "vector"],
+       "help": "Report the distances as a full matrix or as a vector (pairwise list)."},
+      {"name": "missing", "type": "enum", "default": "4point", "values": ["4point", "ultrametric", "none"],
+       "help": "How to handle taxa missing from a tree when comparing."},
+      {"name": "filename", "type": "text", "default": "",
+       "help": "Output file for the distances."}
+    ]
+  },
+
+  "sprdists": {
+    "summary": "Estimate SPR distances of the real data versus ideal and randomised versions.",
+    "options": [
+      {"name": "supertree", "type": "enum", "default": "create", "values": ["create", "memory"],
+       "help": "Reference supertree: build one (nj) or use the tree currently in memory."},
+      {"name": "dorandomisation", "type": "enum", "default": "no", "values": ["no", "yes"],
+       "help": "Also compute SPR distances for randomised versions of the data (slower)."},
+      {"name": "outfile", "type": "text", "default": "",
+       "help": "Output file for the SPR distance results."}
+    ]
+  },
+
+  "yaptp": {
+    "summary": "'Yet another PTP' — a permutation-tail-probability randomisation test of phylogenetic signal.",
+    "options": [
+      {"name": "nreps", "type": "int", "default": "100",
+       "help": "Number of permutation replicates."},
+      {"name": "method", "type": "enum", "default": "equiprobable", "values": ["equiprobable", "markovian"],
+       "help": "Tree-randomisation model used to build the null distribution."}
+    ]
+  },
+
+  "generatetrees": {
+    "summary": "Generate random supertrees and score them against the source trees in memory (builds a null score distribution).",
+    "options": [
+      {"name": "ntrees", "type": "int", "default": "100",
+       "help": "Number of random supertrees to generate (or 'all' via the extra-options box)."},
+      {"name": "method", "type": "enum", "default": "equiprobable", "values": ["equiprobable", "markovian"],
+       "help": "Random-tree generation model."},
+      {"name": "sourcedata", "type": "enum", "default": "real", "values": ["real", "randomised", "ideal"],
+       "help": "Which source-tree data to score the generated trees against."},
+      {"name": "nbins", "type": "int", "default": "20",
+       "help": "Number of bins in the score histogram."},
+      {"name": "savescores", "type": "enum", "default": "no", "values": ["no", "yes"],
+       "help": "Write all generated-tree scores to file."}
     ]
   }
 }
