@@ -13,6 +13,7 @@ Run (lib is x86_64 on Apple Silicon):
 import json
 import os
 import threading
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -90,8 +91,23 @@ def run_checks():
         except urllib.error.HTTPError as e:
             assert e.code in (400, 404), e.code
 
+        # a second exe while a search is running must be rejected (409), not
+        # silently block behind the running job on the single engine thread.
+        _post(base, "/api/run", {"command": "set criterion=dfit"})
+        code, r = _post(base, "/api/run", {"command": "hs nreps=400 nthreads=1"})
+        assert code == 202, (code, r)
+        jid = r["job_id"]
+        end = time.time() + 20
+        while time.time() < end:            # wait until it's genuinely running
+            j = json.loads(_get(base, f"/api/jobs/{jid}")[1])
+            if j.get("log"):
+                break
+            time.sleep(0.05)
+        code, r = _post(base, "/api/load", {"file": "t.ph"})
+        assert code == 409, ("load during a running job should 409", code, r)
+        _post(base, f"/api/jobs/{jid}/cancel")   # clean up the run
         print("  exe schema served; load reports single/multi counts; "
-              "download works and rejects traversal")
+              "download works and rejects traversal; load during a run -> 409")
     finally:
         httpd.clann_app.engine.terminate()
         httpd.clann_app.sandbox.destroy()

@@ -113,6 +113,14 @@ class _App:
         file except the reserved result-JSON scratch file)."""
         return [f for f in self.sandbox.list() if f != RESULT_JSON]
 
+    def busy(self) -> bool:
+        """True if a command is still running on this session's engine. The
+        engine runs one thing at a time, so a load issued now would block behind
+        it — callers should reject instead of hanging."""
+        with self._job_lock:
+            return (self.current_job is not None
+                    and not self.current_job.done.is_set())
+
     def _respawn_engine(self) -> None:
         """Start a fresh worker on the same sandbox and kill the old one.
 
@@ -377,6 +385,11 @@ def make_handler(app: _App):
                     fname = body.get("file")
                     if not fname:
                         self._send(400, {"ok": False, "error": "missing 'file'"})
+                        return
+                    if app.busy():
+                        self._send(409, {"ok": False, "error": "a command is "
+                                         "still running in this session — wait "
+                                         "for it to finish (or Stop it) first"})
                         return
                     safe = app.sandbox.confine_input(fname)  # may raise UnsafePath
                     # optional `exe` options (name parsing, autoprune/decompose…);

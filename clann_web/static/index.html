@@ -427,13 +427,26 @@ $("upload").onclick = async () => {
   }
 };
 
+function clearResults() {
+  // a fresh dataset invalidates any previous analysis on screen
+  $("results-card").style.display = "none";
+  $("viewer").style.display = "none";
+  $("viewer").removeAttribute("src");
+  $("scores").textContent = "";
+  $("trees-wrap").innerHTML = "";
+  resetLog();
+  msg("run-msg", "");
+}
+
 $("load").onclick = async () => {
   const file = $("files").value;
   if (!file) { msg("data-msg", "Upload a file first.", "err"); return; }
   const options = buildOpts("exe-form");
   msg("data-msg", "Running exe " + file + "…");
-  const { ok, data } = await jpost("/api/load", { file, options });
+  const { ok, status, data } = await jpost("/api/load", { file, options });
+  if (status === 409) { msg("data-msg", data.error || "Busy.", "err"); return; }
   if (ok && data.ok) {
+    clearResults();                      // drop the previous file's results/viewer
     renderState(data.state);
     renderOutputs(data.output_files);
     const st = data.state;
