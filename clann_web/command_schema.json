@@ -104,5 +104,39 @@
       {"name": "range", "type": "text", "default": "",
        "help": "Tree-number range, e.g. 1-5."}
     ]
+  },
+
+  "usertrees": {
+    "summary": "Score/test user-supplied candidate supertrees against the loaded gene trees. Set the criterion first with the selector above (dfit, sfit, qfit, rf, or ml — not recon/avcon/mrp).",
+    "options": [
+      {"name": "file", "type": "file", "positional": true, "required": true, "default": "",
+       "help": "File of candidate supertree topologies to score (upload it first, then choose it here)."},
+      {"name": "tests", "type": "enum", "default": "no", "values": ["no", "yes"],
+       "help": "Run ML-based topology tests (KH/SH/AU) comparing the candidates. Only meaningful under criterion=ml."},
+      {"name": "nboot", "type": "int", "default": "1000",
+       "help": "Bootstrap replicates for the topology tests (tests=yes)."},
+      {"name": "testsfile", "type": "text", "default": "mltest_results.txt",
+       "help": "Output filename for the topology-test results."},
+      {"name": "printsourcescores", "type": "enum", "default": "no", "values": ["no", "yes"],
+       "help": "Write each candidate's per-source-tree scores to sourcetree_scores.txt."},
+      {"name": "savetrees", "type": "text", "default": "",
+       "help": "Output file to save the scored candidate trees."},
+      {"name": "nthreads", "type": "int", "default": "",
+       "help": "OpenMP threads for the topology tests. Default: all CPUs."}
+    ]
+  },
+
+  "consensus": {
+    "summary": "Build a consensus tree from the trees in memory (loaded source trees, a supertree search, or a bootstrap run).",
+    "options": [
+      {"name": "data", "type": "enum", "default": "source", "values": ["source", "supertrees", "bootstraps"],
+       "help": "Which trees to summarise: source = the loaded (universally distributed) gene trees; supertrees = results of a prior hs search in memory; bootstraps = trees from a prior bootstrap run."},
+      {"name": "method", "type": "enum", "default": "minor", "values": ["minor", "majrule", "strict"],
+       "help": "Consensus type: strict = splits present in every tree; majrule = splits in >50%; minor = majority-rule plus all compatible minor components. For a custom cut-off (0.5-1.0) use the extra-options box."},
+      {"name": "filename", "type": "text", "default": "consensus.ph",
+       "help": "Output file for the consensus tree."},
+      {"name": "guidetree", "type": "file", "default": "",
+       "help": "Optional guide-tree file used to order the consensus (upload it first, then choose it here)."}
+    ]
   }
 }

@@ -341,7 +341,9 @@ function renderOutputs(files) {
   ).join("");
 }
 
+let uploadedFiles = [];   // latest sandbox file list, for command file-pickers
 function renderFiles(files, selectName) {
+  uploadedFiles = files || [];
   const sel = $("files");
   sel.innerHTML = "";
   if (!files || !files.length) {
@@ -428,7 +430,19 @@ async function renderForm(cmd, containerId = "form") {
     const lab = document.createElement("label");
     lab.innerHTML = `<span class="name">${o.name}</span>`;
     let input;
-    if (o.type === "enum") {
+    if (o.type === "file") {
+      // pick an uploaded sandbox file (e.g. usertrees candidate topologies)
+      input = document.createElement("select");
+      const ph = document.createElement("option");
+      ph.value = ""; ph.textContent = uploadedFiles.length ? "— choose a file —" : "— upload a file first —";
+      input.appendChild(ph);
+      for (const f of uploadedFiles) {
+        const op = document.createElement("option");
+        op.value = op.textContent = f;
+        input.appendChild(op);
+      }
+      input.value = "";
+    } else if (o.type === "enum") {
       input = document.createElement("select");
       for (const v of o.values || []) {
         const op = document.createElement("option");
@@ -445,6 +459,8 @@ async function renderForm(cmd, containerId = "form") {
     }
     input.dataset.name = o.name;
     input.dataset.default = o.default ?? "";
+    if (o.positional) input.dataset.positional = "true";
+    if (o.required) input.dataset.required = "true";
     const defTxt = (o.default !== "" && o.default != null) ? "default: " + o.default
                  : "no default";
     // hover tooltip on the whole field: explanation + default
@@ -466,6 +482,7 @@ function buildOpts(containerId) {
   // include an option only when it has a value that differs from its default
   const parts = [];
   for (const input of $(containerId).querySelectorAll("[data-name]")) {
+    if (input.dataset.positional === "true") continue;   // positional args placed separately
     const val = String(input.value).trim();
     const def = input.dataset.default ?? "";
     if (val !== "" && val !== def) parts.push(`${input.dataset.name}=${val}`);
@@ -475,6 +492,12 @@ function buildOpts(containerId) {
 
 function buildCommand(cmd) {
   const parts = [cmd];
+  // positional arguments (e.g. the usertrees candidates file) come right after
+  // the command name as bare tokens, before any key=value options.
+  for (const input of $("form").querySelectorAll('[data-positional="true"]')) {
+    const val = String(input.value).trim();
+    if (val) parts.push(val);
+  }
   const opts = buildOpts("form");
   if (opts) parts.push(opts);
   const extra = $("opts").value.trim();
@@ -795,6 +818,13 @@ $("stop").onclick = async () => {
 };
 
 $("run").onclick = async () => {
+  // guard required inputs (e.g. the usertrees candidates file) before running
+  for (const input of $("form").querySelectorAll('[data-required="true"]')) {
+    if (!String(input.value).trim()) {
+      msg("run-msg", "Please choose a value for '" + input.dataset.name + "' first.", "err");
+      return;
+    }
+  }
   const command = buildCommand($("cmd").value);
   $("run-cmd").textContent = "clann> " + command;
   $("run").disabled = true;

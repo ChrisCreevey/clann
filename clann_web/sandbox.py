@@ -117,8 +117,10 @@ def sanitize_command(command: str, sandbox: Sandbox) -> str:
 
     out = [tokens[0]]
     i = 1
-    # `exe <file>` / `execute <file>` — the bare first arg is an input path.
-    if tokens[0] in ("exe", "execute") and len(tokens) > 1 and "=" not in tokens[1]:
+    # Commands whose bare first argument is an input file path:
+    #   `exe <file>` / `execute <file>`   — the gene-tree file to load
+    #   `usertrees <file>`                — the candidate-topologies file to score
+    if tokens[0] in ("exe", "execute", "usertrees") and len(tokens) > 1 and "=" not in tokens[1]:
         out.append(sandbox.confine_input(tokens[1]))
         i = 2
 
