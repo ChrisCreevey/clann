@@ -265,7 +265,7 @@
   <section class="card" data-domain="run">
     <h2>Run a command</h2>
 
-    <label class="fld">Optimality criterion <span class="muted" style="text-transform:none;letter-spacing:0">(used by hs / nj / alltrees / bootstrap)</span></label>
+    <label class="fld">Optimality criterion <span class="muted" style="text-transform:none;letter-spacing:0">(used by hs / bootstrap / alltrees / usertrees)</span></label>
     <div class="seg" id="crit-seg" role="group" aria-label="Optimality criterion"></div>
     <div class="msg" id="crit-msg" style="margin-top:6px"></div>
 
@@ -395,7 +395,9 @@ async function loadCommands() {
   sel.innerHTML = "";
   for (const c of data.commands) {
     const o = document.createElement("option");
-    o.value = c.name; o.textContent = c.name; o.dataset.blurb = c.blurb || "";
+    o.value = c.name;
+    o.textContent = c.blurb ? c.name + " — " + c.blurb : c.name;
+    o.dataset.blurb = c.blurb || "";
     sel.appendChild(o);
   }
   sel.onchange = () => {
