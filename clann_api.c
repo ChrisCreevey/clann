@@ -199,6 +199,31 @@ static int clann_library_dispatch(void)
         generatetrees();
         return 0;
         }
+    if(strcmp(cmd, "yaptp") == 0)
+        {
+        yaptp_search();
+        return 0;
+        }
+    if(strcmp(cmd, "randomisetrees") == 0)
+        {
+        int j;
+        for(j = 0; j < Total_fund_trees; j++)
+            randomise_tree(fundamentals[j]);   /* equiprobable, taxa composition preserved */
+        printf2("The source trees have now been randomised\n");
+        return 0;
+        }
+
+    /* ---------- gene-tree preprocessing (experimental) --------------- */
+    if(strcmp(cmd, "prunemonophylies") == 0)
+        {
+        prune_monophylies();
+        return 0;
+        }
+    if(strcmp(cmd, "decomposegenetrees") == 0)
+        {
+        decompose_gene_trees_cmd();
+        return 0;
+        }
 
     printf2("Error: command '%s' not supported in library mode\n", cmd);
     return 1;
