@@ -194,8 +194,14 @@ class _App:
         if os.path.exists(jpath):
             os.remove(jpath)
         run_cmd = job.command
+        toks = job.command.split()
+        # showtrees: default display=no in the web app — the ASCII trees are
+        # slow to write for large sets and the interactive viewer shows them
+        # anyway. Only inject when the user didn't specify display=.
+        if toks and toks[0] == "showtrees" and "display=" not in job.command:
+            run_cmd = f"{run_cmd} display=no"
         if is_tree_command(job.command) and "resultjson=" not in job.command:
-            run_cmd = f"{job.command} resultjson={RESULT_JSON}"
+            run_cmd = f"{run_cmd} resultjson={RESULT_JSON}"
         engine = self.engine          # bind now; a cancel may swap self.engine
         try:
             engine.run(run_cmd, on_line=job.append)        # blocks this thread
@@ -268,6 +274,21 @@ def make_handler(app: _App):
             self.end_headers()
             self.wfile.write(body)
 
+        def _send_manual(self) -> None:
+            """Serve USER_MANUAL.md (raw markdown) for the in-app help modal."""
+            repo = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+            path = os.path.join(repo, "USER_MANUAL.md")
+            try:
+                with open(path, "rb") as fh:
+                    body = fh.read()
+            except OSError:
+                body = b"The user manual could not be found."
+            self.send_response(200)
+            self.send_header("Content-Type", "text/markdown; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
         def _download(self, raw_name: str) -> None:
             """Serve a file from the session sandbox as a download."""
             try:
@@ -302,6 +323,8 @@ def make_handler(app: _App):
                                  "workdir": app.sandbox.dir})
             elif p.startswith("/api/download/"):
                 self._download(p[len("/api/download/"):])
+            elif p == "/api/manual":
+                self._send_manual()
             elif p == "/api/commands":
                 self._send(200, {"commands": list_commands()})
             elif p.startswith("/api/commands/") and p.endswith("/schema"):

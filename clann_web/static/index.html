@@ -140,7 +140,31 @@
     border:2px solid var(--line);border-top-color:var(--accent);border-radius:50%;
     animation:spin .7s linear infinite}
   @keyframes spin{to{transform:rotate(360deg)}}
-  #theme-btn{margin-left:auto;padding:6px 10px;line-height:1;font-size:15px}
+  #help-btn{margin-left:auto;padding:6px 11px;line-height:1;font-size:15px;font-weight:700}
+  #theme-btn{padding:6px 10px;line-height:1;font-size:15px}
+  /* segmented criterion control */
+  .seg{display:inline-flex;flex-wrap:wrap;gap:0;border:1px solid var(--line);
+    border-radius:var(--radius-md);overflow:hidden;background:var(--bg)}
+  .seg button{border:0;border-right:1px solid var(--line);background:transparent;color:var(--ink);
+    padding:7px 13px;cursor:pointer;font:inherit;font-size:13px;font-family:var(--font-mono);
+    transition:background 120ms var(--ease)}
+  .seg button:last-child{border-right:0}
+  .seg button:hover{background:color-mix(in srgb, var(--accent) 10%, transparent)}
+  .seg button[aria-pressed=true]{background:var(--accent);color:var(--accent-ink)}
+  .seg button:disabled{opacity:.5;cursor:default}
+  /* help modal */
+  .modal-bg{position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:50;display:none}
+  .modal-bg.open{display:flex}
+  .modal{background:var(--panel);color:var(--ink);border:1px solid var(--line);
+    border-radius:var(--radius-lg);box-shadow:var(--shadow-md);margin:auto;width:min(900px,92vw);
+    height:min(84vh,900px);display:flex;flex-direction:column;overflow:hidden}
+  .modal header{position:static;display:flex;align-items:center;gap:12px;padding:12px 16px}
+  .modal header h3{margin:0;font-size:14px;text-transform:uppercase;letter-spacing:.06em}
+  .modal .close{margin-left:auto;cursor:pointer;font-size:18px;background:none;border:0;color:var(--muted)}
+  .modal input.msearch{margin:0 16px;width:calc(100% - 32px)}
+  .modal .body{overflow:auto;padding:8px 16px 18px;font-family:var(--font-mono);font-size:12.5px;
+    line-height:1.55;white-space:pre-wrap}
+  .modal .body mark{background:var(--amber-400);color:#1A160F}
   .files{display:flex;flex-direction:column;gap:6px;margin-top:6px}
   .files a.dl{font-family:var(--font-mono);font-size:12.5px;color:var(--chip-ink);
     background:var(--chip);border:1px solid var(--line);border-radius:var(--radius-sm);
@@ -161,8 +185,20 @@
 <header>
   <h1>Clann</h1>
   <span class="sub">web client · <span id="conn" class="chip">connecting…</span></span>
+  <button class="btn" id="help-btn" title="Open the user manual" aria-label="Open the user manual">?</button>
   <button class="btn" id="theme-btn" title="Toggle light / dark" aria-label="Toggle light or dark theme">◐</button>
 </header>
+
+<div class="modal-bg" id="help-modal">
+  <div class="modal" role="dialog" aria-modal="true" aria-label="User manual">
+    <header>
+      <h3>Clann user manual</h3>
+      <button class="close" id="help-close" title="Close" aria-label="Close">✕</button>
+    </header>
+    <input type="search" class="msearch" id="help-search" placeholder="Search the manual…">
+    <div class="body" id="help-body">Loading…</div>
+  </div>
+</div>
 
 <main>
   <section class="card" data-domain="session">
@@ -174,7 +210,7 @@
       <dt>Single-copy</dt><dd id="s-single">—</dd>
       <dt>Multi-copy</dt><dd id="s-multi">—</dd>
       <dt>Criterion</dt><dd id="s-crit">—</dd>
-      <dt>In memory</dt><dd id="s-mem">—</dd>
+      <dt>Supertrees in memory</dt><dd id="s-mem">—</dd>
     </dl>
 
     <label class="fld">Upload a source-tree file</label>
@@ -206,6 +242,11 @@
 
   <section class="card" data-domain="run">
     <h2>Run a command</h2>
+
+    <label class="fld">Optimality criterion <span class="muted" style="text-transform:none;letter-spacing:0">(used by hs / nj / alltrees / bootstrap)</span></label>
+    <div class="seg" id="crit-seg" role="group" aria-label="Optimality criterion"></div>
+    <div class="msg" id="crit-msg" style="margin-top:6px"></div>
+
     <label class="fld">Command</label>
     <select id="cmd" aria-label="Command"></select>
     <div class="blurb" id="cmd-blurb"></div>
@@ -264,6 +305,7 @@ function renderState(state) {
   $("s-multi").textContent  = state.num_multicopy ?? "—";
   $("s-crit").textContent   = state.criterion || "—";
   $("s-mem").textContent    = state.trees_in_memory ?? "—";
+  markCrit(state.criterion);
 }
 
 function renderOutputs(files) {
@@ -379,12 +421,16 @@ async function renderForm(cmd, containerId = "form") {
     }
     input.dataset.name = o.name;
     input.dataset.default = o.default ?? "";
+    const defTxt = (o.default !== "" && o.default != null) ? "default: " + o.default
+                 : "no default";
+    // hover tooltip on the whole field: explanation + default
+    item.title = (o.help ? o.help + "  (" + defTxt + ")" : defTxt);
     item.appendChild(lab);
     item.appendChild(input);
-    if (o.help) {
+    if (o.help || defTxt) {
       const h = document.createElement("div");
       h.className = "hint";
-      h.textContent = o.help;
+      h.textContent = (o.help ? o.help + " " : "") + "(" + defTxt + ")";
       item.appendChild(h);
     }
     grid.appendChild(item);
@@ -411,6 +457,83 @@ function buildCommand(cmd) {
   if (extra) parts.push(extra);
   return parts.join(" ");
 }
+
+// --- criterion selector (runs `set criterion=…` immediately) --------------
+const CRITERIA = [
+  ["dfit", "Distance Fit — minimises squared path-length differences. Default."],
+  ["sfit", "Splits Fit — maximises source-tree splits present in the supertree."],
+  ["qfit", "Quartet Fit — maximises consistent source-tree quartets."],
+  ["recon", "Reconciliation (DL) — minimises total duplication + loss cost. Uses all source trees incl. multicopy."],
+  ["rf", "Robinson–Foulds — minimises normalised RF distance across source trees. (Under testing.)"],
+  ["ml", "Maximum Likelihood — exponential model of Steel & Rodrigo (2008). (Under testing.)"],
+];
+
+function buildCritSeg() {
+  const seg = $("crit-seg"); seg.innerHTML = "";
+  for (const [c, help] of CRITERIA) {
+    const b = document.createElement("button");
+    b.textContent = c; b.dataset.crit = c; b.title = help;
+    b.setAttribute("aria-pressed", "false");
+    b.onclick = () => setCriterion(c);
+    seg.appendChild(b);
+  }
+}
+function markCrit(c) {
+  const seg = $("crit-seg");
+  if (!seg) return;
+  for (const b of seg.children) b.setAttribute("aria-pressed", String(b.dataset.crit === c));
+}
+async function setCriterion(c) {
+  msg("crit-msg", "Setting criterion=" + c + "…");
+  for (const b of $("crit-seg").children) b.disabled = true;
+  const res = await runCommandSync("set criterion=" + c);
+  for (const b of $("crit-seg").children) b.disabled = false;
+  if (res.busy) { msg("crit-msg", res.error || "A command is still running.", "err"); return; }
+  await refreshSession();            // renderState updates s-crit + the pressed button
+  msg("crit-msg", res.ok ? "Criterion set to " + c + "." : (res.error || "Failed."),
+      res.ok ? "ok" : "err");
+}
+
+// Run a command and wait for it to finish (used for quick `set` commands).
+async function runCommandSync(command) {
+  const { status, data } = await jpost("/api/run", { command });
+  if (status === 409) return { ok: false, busy: true, error: data.error };
+  if (!data.job_id) return { ok: false, error: data.error || "Command failed." };
+  for (;;) {
+    await new Promise((r) => setTimeout(r, 120));
+    const { data: j } = await api("/api/jobs/" + data.job_id);
+    if (["done", "error", "cancelled"].includes(j.status))
+      return { ok: j.status === "done", data: j, error: j.error };
+  }
+}
+
+// --- help / manual modal --------------------------------------------------
+let manualRaw = null;
+async function openHelp() {
+  $("help-modal").classList.add("open");
+  if (manualRaw === null) {
+    try { const r = await fetch("/api/manual"); manualRaw = await r.text(); }
+    catch (e) { manualRaw = "Could not load the manual."; }
+  }
+  applyHelpSearch();
+  $("help-search").focus();
+}
+function closeHelp() { $("help-modal").classList.remove("open"); }
+function applyHelpSearch() {
+  const q = $("help-search").value.trim();
+  const body = $("help-body");
+  const safe = (s) => s.replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c]));
+  if (!q) { body.textContent = manualRaw || ""; return; }
+  const re = new RegExp(q.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "gi");
+  body.innerHTML = safe(manualRaw || "").replace(re, (m) => `<mark>${m}</mark>`);
+  const first = body.querySelector("mark");
+  if (first) first.scrollIntoView({ block: "center" });
+}
+$("help-btn").onclick = openHelp;
+$("help-close").onclick = closeHelp;
+$("help-modal").onclick = (e) => { if (e.target === $("help-modal")) closeHelp(); };
+$("help-search").oninput = applyHelpSearch;
+window.addEventListener("keydown", (e) => { if (e.key === "Escape") closeHelp(); });
 
 $("upload").onclick = async () => {
   const f = $("file").files[0];
@@ -600,6 +723,7 @@ $("theme-btn").onclick = () => {
 };
 
 (async () => {
+  buildCritSeg();
   await newSession();
   await loadCommands();
   await renderForm("exe", "exe-form");   // exe options form in the session card

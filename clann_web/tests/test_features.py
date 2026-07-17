@@ -93,7 +93,16 @@ def run_checks():
 
         # a second exe while a search is running must be rejected (409), not
         # silently block behind the running job on the single engine thread.
-        _post(base, "/api/run", {"command": "set criterion=dfit"})
+        # First set the criterion and WAIT for that (async) job to finish, or the
+        # hs below would itself 409 behind the still-running set.
+        _, sr = _post(base, "/api/run", {"command": "set criterion=dfit"})
+        sjid = sr["job_id"]
+        end = time.time() + 20
+        while time.time() < end:
+            sj = json.loads(_get(base, f"/api/jobs/{sjid}")[1])
+            if sj["status"] in ("done", "error", "cancelled"):
+                break
+            time.sleep(0.05)
         code, r = _post(base, "/api/run", {"command": "hs nreps=400 nthreads=1"})
         assert code == 202, (code, r)
         jid = r["job_id"]

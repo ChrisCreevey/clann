@@ -97,8 +97,8 @@
   "showtrees": {
     "summary": "Display the loaded input gene trees.",
     "options": [
-      {"name": "display", "type": "enum", "default": "yes", "values": ["yes", "no"],
-       "help": "Print the trees as ASCII to the log (the interactive viewer is shown regardless)."},
+      {"name": "display", "type": "enum", "default": "no", "values": ["yes", "no"],
+       "help": "Print the trees as ASCII to the log. Off by default in the web app — the viewer shows them regardless, and ASCII is slow for large sets."},
       {"name": "namecontains", "type": "text", "default": "",
        "help": "Only trees whose name contains this string."},
       {"name": "range", "type": "text", "default": "",
