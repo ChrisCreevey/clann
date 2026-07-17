@@ -7093,14 +7093,18 @@ void yaptp_search(void)
 
 void randomise_tree(char *tree)
     {
-    int i=0, j=0, k=0, l=0, x=0, y=0, treecount = 0, random=0, supers = 0, actual_num = 0;
+    int i=0, j=0, k=0, l=0, x=0, y=0, treecount = 0, random=0, supers = 0, actual_num = 0, nslots = 0;
     char **array = NULL, *temptree = malloc(TREE_LENGTH * sizeof(char)), *newtree = NULL, *tmp;
     if(!temptree) { printf2("Error: out of memory in randomise_tree\n"); return; }
-    /** allocate the array **/
-    array = malloc(number_of_taxa*sizeof(char *));
+    /** allocate the array. Size it by the number of TIPS on this tree (commas+1),
+     ** not number_of_taxa: a multicopy gene tree can have more tips than there are
+     ** distinct species, which would overflow a number_of_taxa-sized array. **/
+    nslots = 1;
+    for(i=0; tree[i] != '\0' && tree[i] != ';'; i++) if(tree[i] == ',') nslots++;
+    array = malloc(nslots*sizeof(char *));
     if(!array) memory_error(56);
-    
-    for(i=0; i<number_of_taxa; i++)
+
+    for(i=0; i<nslots; i++)
         {
         array[i] = malloc(100*sizeof(char));
         if(!array[i]) memory_error(57);
@@ -7195,7 +7199,7 @@ void randomise_tree(char *tree)
     number_of_taxa = actual_num;
     strcpy(tree, temptree);
 
-    for(i=0; i<number_of_taxa; i++)
+    for(i=0; i<nslots; i++)
         {
         free(array[i]);
         array[i] = NULL;
@@ -10192,6 +10196,13 @@ void generatetrees(void)
 			if(criterion == 2 || criterion == 3 || criterion == 6 || criterion == 7)
 				rf_precompute_fund_biparts();
 				
+			/* dfit scores compare_trees() against fund_scores[]; these are not
+			 * allocated at load and were only set up in the data!=1 branch above,
+			 * so with the default sourcedata=real (data==1) fund_scores stayed NULL
+			 * and compare_trees() dereferenced it. Ensure they exist for criterion 0. */
+			if(criterion == 0 && (fund_scores == NULL || !calculated_fund_scores))
+				cal_fund_scores(FALSE);
+
 			interval1 = time(NULL);
 			printf2("\nProgress Indicator:\n");
 			fflush(stdout);
