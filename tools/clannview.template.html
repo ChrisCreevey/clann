@@ -145,6 +145,7 @@
 
     <h4>Export</h4>
     <button class="act" id="expSvg">Download SVG</button>
+    <button class="act" id="expPdf">Download PDF</button>
     <button class="act" id="expNwk">Copy Newick (current rooting)</button>
     <div class="hint" style="margin-top:10px">Scroll to zoom · drag to pan · <kbd>R</kbd> reroot toggle</div>
   </aside>
@@ -786,7 +787,83 @@ document.getElementById('ladder').onclick=()=>{ (function lad(n){n.children.sort
 document.getElementById('expandAll').onclick=()=>{each(root,n=>n.collapsed=false);render();};
 document.getElementById('reset').onclick=()=>loadTree(curIdx);
 document.getElementById('themeBtn').onclick=()=>{const r=document.documentElement;r.dataset.theme=r.dataset.theme==='dark'?'light':'dark';};
-document.getElementById('expSvg').onclick=()=>{const s=new XMLSerializer().serializeToString(svg);const b=new Blob([s],{type:'image/svg+xml'});const a=document.createElement('a');a.href=URL.createObjectURL(b);a.download=(DATA.meta&&DATA.meta.title||'tree')+'.svg';a.click();};
+function exportTitle(){return (DATA.meta&&DATA.meta.title)||'tree';}
+// Self-contained copy of the current SVG view with computed styles inlined, so it
+// renders identically when detached from the page (the .branch/.leaflabel CSS and
+// its var(--...) colours live in the page <style>, not the SVG). Used by both the
+// SVG and PDF exports. Returns {svg, w, h} in CSS px.
+function serializeSvgInlined(){
+  const rect=svg.getBoundingClientRect();
+  const clone=svg.cloneNode(true);
+  const props=['fill','stroke','stroke-width','stroke-dasharray','stroke-linecap',
+    'stroke-linejoin','opacity','font-family','font-size','font-weight','text-anchor','dominant-baseline'];
+  const srcEls=svg.querySelectorAll('*'), clEls=clone.querySelectorAll('*');
+  for(let i=0;i<srcEls.length;i++){
+    const cs=getComputedStyle(srcEls[i]); let st='';
+    for(const p of props){const v=cs.getPropertyValue(p); if(v&&v!=='none'||p==='fill'||p==='stroke') st+=p+':'+v+';';}
+    clEls[i].setAttribute('style',st); clEls[i].removeAttribute('class');
+  }
+  clone.setAttribute('xmlns','http://www.w3.org/2000/svg');
+  clone.setAttribute('width',rect.width); clone.setAttribute('height',rect.height);
+  clone.setAttribute('viewBox','0 0 '+rect.width+' '+rect.height);
+  return {svg:new XMLSerializer().serializeToString(clone), w:rect.width, h:rect.height};
+}
+document.getElementById('expSvg').onclick=()=>{const s=serializeSvgInlined().svg;const b=new Blob([s],{type:'image/svg+xml'});const a=document.createElement('a');a.href=URL.createObjectURL(b);a.download=exportTitle()+'.svg';a.click();};
+// Build a minimal single-page PDF wrapping a JPEG (DCTDecode) of the current view.
+// No external libraries — assembled by hand so the viewer stays self-contained.
+function jpegToPdf(jpg,imgW,imgH,pageW,pageH){
+  const enc=s=>new TextEncoder().encode(s);
+  const chunks=[]; let len=0; const off=[];
+  const push=u8=>{chunks.push(u8); len+=u8.length;};
+  const put=s=>push(enc(s));
+  const pw=Math.round(pageW),ph=Math.round(pageH);
+  const content='q '+pw+' 0 0 '+ph+' 0 0 cm /Im0 Do Q';
+  put('%PDF-1.3\n');
+  const obj=(n,body)=>{off[n]=len; put(n+' 0 obj\n'+body+'\nendobj\n');};
+  obj(1,'<< /Type /Catalog /Pages 2 0 R >>');
+  obj(2,'<< /Type /Pages /Kids [3 0 R] /Count 1 >>');
+  obj(3,'<< /Type /Page /Parent 2 0 R /MediaBox [0 0 '+pw+' '+ph+'] '
+       +'/Resources << /XObject << /Im0 4 0 R >> >> /Contents 5 0 R >>');
+  off[4]=len;
+  put('4 0 obj\n<< /Type /XObject /Subtype /Image /Width '+imgW+' /Height '+imgH
+      +' /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /DCTDecode /Length '+jpg.length+' >>\nstream\n');
+  push(jpg); put('\nendstream\nendobj\n');
+  obj(5,'<< /Length '+content.length+' >>\nstream\n'+content+'\nendstream');
+  const xrefAt=len;
+  let xref='xref\n0 6\n0000000000 65535 f \n';
+  for(let i=1;i<=5;i++) xref+=String(off[i]).padStart(10,'0')+' 00000 n \n';
+  put(xref+'trailer\n<< /Size 6 /Root 1 0 R >>\nstartxref\n'+xrefAt+'\n%%EOF');
+  const out=new Uint8Array(len); let o=0; for(const c of chunks){out.set(c,o); o+=c.length;}
+  return out;
+}
+document.getElementById('expPdf').onclick=()=>{
+  const btn=document.getElementById('expPdf'), label=btn.textContent;
+  btn.textContent='Rendering…'; btn.disabled=true;
+  const done=ok=>{btn.disabled=false; btn.textContent=ok?label:'PDF failed — try SVG'; if(!ok)setTimeout(()=>btn.textContent=label,1800);};
+  try{
+    const {svg:s,w,h}=serializeSvgInlined();
+    const scale=Math.min(3,Math.max(2,window.devicePixelRatio||1)); // crisp raster
+    const img=new Image();
+    const url=URL.createObjectURL(new Blob([s],{type:'image/svg+xml;charset=utf-8'}));
+    img.onload=()=>{
+      try{
+        const cw=Math.max(1,Math.round(w*scale)),ch=Math.max(1,Math.round(h*scale));
+        const cv=document.createElement('canvas'); cv.width=cw; cv.height=ch;
+        const ctx=cv.getContext('2d'); ctx.fillStyle='#ffffff'; ctx.fillRect(0,0,cw,ch);
+        ctx.drawImage(img,0,0,cw,ch); URL.revokeObjectURL(url);
+        const b64=cv.toDataURL('image/jpeg',0.92).split(',')[1], bin=atob(b64);
+        const jpg=new Uint8Array(bin.length); for(let i=0;i<bin.length;i++) jpg[i]=bin.charCodeAt(i);
+        const pdf=jpegToPdf(jpg,cw,ch,w,h);
+        const a=document.createElement('a');
+        a.href=URL.createObjectURL(new Blob([pdf],{type:'application/pdf'}));
+        a.download=exportTitle()+'.pdf'; a.click();
+        done(true);
+      }catch(err){URL.revokeObjectURL(url); done(false);}
+    };
+    img.onerror=()=>{URL.revokeObjectURL(url); done(false);};
+    img.src=url;
+  }catch(err){done(false);}
+};
 document.getElementById('expNwk').onclick=()=>{const nwk=toNewick(root)+';';navigator.clipboard&&navigator.clipboard.writeText(nwk);document.getElementById('expNwk').textContent='Copied ✓';setTimeout(()=>document.getElementById('expNwk').textContent='Copy Newick (current rooting)',1200);};
 window.addEventListener('keydown',e=>{
   if(e.target.tagName==='INPUT'||e.target.tagName==='SELECT')return;
