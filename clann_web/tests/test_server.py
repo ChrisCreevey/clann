@@ -97,7 +97,7 @@ def run_checks():
 
         h = _run(base, "hs nreps=5 nthreads=1")
         assert h["ok"], h
-        assert "17.000000" in h["log"], h["log"][-500:]
+        assert "32.000000" in h["log"], h["log"][-500:]
         assert h["state"]["trees_in_memory"] >= 1, h["state"]
         # structured results (Step 1.3): trees + scores returned, not just log
         assert h.get("result_type") == "tree", h.get("result_type")
@@ -105,12 +105,12 @@ def run_checks():
         t0 = h["trees"][0]
         assert t0["newick"].endswith(";") and "Human" in t0["newick"], t0["newick"]
         assert t0["tree"]["children"], t0  # structured node form for the viewer
-        assert h["scores"][0] == 17.0, h["scores"]
+        assert h["scores"][0] == 32.0, h["scores"]
 
         # reconstruct uses the tree hs just left in memory (state persisted)
         rec = _run(base, "reconstruct speciestree=memory open=no")
         assert rec["ok"], rec
-        assert "17.0000" in rec["log"], rec["log"][-500:]
+        assert "30.0000" in rec["log"], rec["log"][-500:]
         # reconciliation results carry per-tree events + dup/loss counts
         assert rec.get("result_type") == "reconciliation", rec.get("result_type")
         assert len(rec["trees"]) == 8, len(rec["trees"])

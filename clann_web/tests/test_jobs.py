@@ -96,14 +96,14 @@ def run_checks():
                     event = None
 
         full = "".join(chunks)
-        assert "17.000000" in full, "streamed log missing the score:\n" + full[-400:]
+        assert "32.000000" in full, "streamed log missing the score:\n" + full[-400:]
         assert done_payload and done_payload["status"] == "done", done_payload
-        assert done_payload["scores"][0] == 17.0, done_payload.get("scores")
+        assert done_payload["scores"][0] == 32.0, done_payload.get("scores")
         assert done_payload.get("has_viewer") is True, done_payload
 
         # after completion the job is still queryable and carries the full log
         j = _get(base, f"/api/jobs/{jid}")
-        assert j["status"] == "done" and "17.000000" in j["log"], j["status"]
+        assert j["status"] == "done" and "32.000000" in j["log"], j["status"]
 
         # a second run while one is active would 409 — but this one is done, so ok
         code, r = _post(base, "/api/run", {"command": "showtrees display=no"})

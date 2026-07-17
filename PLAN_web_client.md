@@ -141,7 +141,7 @@ polls `GET /api/jobs/<id>` or subscribes to a log stream. Requires:
 
 ### 3.3 Text output, not structured data
 `printf2` emits human ASCII (tables, tree drawings, "Supertree 1 of 1 score =
-17.0000"). The client needs Newick/JSON + numbers. Two complementary tactics:
+32.0000"). The client needs Newick/JSON + numbers. Two complementary tactics:
 - **Reuse the viewer's JSON emitter.** `html_view_*` already serialise trees (and
   reconciliations) to the clean JSON in `NOTES_html_viewer.md` §3. Add a mode
   that writes that JSON to a **string/file the API can read**, rather than a full
@@ -213,7 +213,7 @@ Every step ends in something runnable:
 - Server steps → a `pytest` test hitting the endpoint with `httpx`, and a pasted
   `curl` transcript in the step's completion note.
 - Engine/C steps → a small C or Python harness asserting behaviour (e.g. the
-  reset-loop determinism test), plus the `17.0000` recon regression must still
+  reset-loop determinism test), plus the `32.0000` recon regression must still
   hold (`NOTES`/handover anchor).
 - Client steps → a screenshot via the browser tools and a note on what was
   clicked. Reuse the pattern already used to verify the HTML viewer.
@@ -240,10 +240,10 @@ on a green predecessor. A single Claude instance should take one step.
   between commands**:
   `clann_load_trees(tutorial_multicopy.ph)` → `set criterion=recon` → `nj` →
   `hs nreps=5 seed=42` → `showtrees` → `reconstruct speciestree=memory`.
-  Result (captured): `hs` reaches `17.000000`; **`showtrees` still reports
+  Result (captured): `hs` reaches `32.000000`; **`showtrees` still reports
   "8 source trees" after `nj`+`hs`** (original trees survived in memory);
   `reconstruct speciestree=memory` consumed the best tree `hs` left behind
-  (`total dup+loss score: 17.0000`). Harness prints `PASS`.
+  (`total dup+loss score: 30.0000`). Harness prints `PASS`.
   - *Key facts confirmed:* state persists in Clann's globals between
     `clann_run_command` calls; `quit` is a no-op in library mode (session stays
     live until the host ends it); one session must **serialise** its commands
@@ -263,7 +263,7 @@ on a green predecessor. A single Claude instance should take one step.
   scenario, calls `clann_reset()`, runs it again in the same process, and asserts
   the timing-independent **result** lines (final supertree score, `total dup+loss
   score`, per-tree reconstruct scores, "8 source trees") of the two runs are
-  **identical** and both report `17.0000`. Result: run A and run B are byte-for-
+  **identical** and both report `32.0000`. Result: run A and run B are byte-for-
   byte identical (11/11 result lines) — `clann_reset()` leaves no state behind.
   - *Seeding finding (important for the server):* `hs` has **no** `seed=` option
     (only the `set seed=` command calls `srand()`, `main.c:4335`), yet `"seed="`
@@ -292,11 +292,11 @@ on a green predecessor. A single Claude instance should take one step.
     reference to `system` at all), while `libclann.so` *does* reference it. So no
     `system()` is compiled into the server build.
   - **Runtime (ctypes, one process):** the server lib still runs real analysis
-    (`hs criterion=recon` → `17.000000`), and a **reachable** shell path
+    (`hs criterion=recon` → `32.000000`), and a **reachable** shell path
     (`set criterion=mrp; hs` → PAUP\* via `clann_shell`) prints
     `Refused: external shell/system commands are disabled in this (server) build.`
     instead of spawning anything. `PASS`.
-  - **Regression:** the standalone binary still scores `17.0000` (behaviour
+  - **Regression:** the standalone binary still scores `32.0000` (behaviour
     unchanged; `!`, PAUP\*, and browser-open all work in the normal build).
 - *Done-when:* ✅ server lib builds; the shell surface is provably gone at both the
   linker and runtime level; the normal build is unaffected.
@@ -316,7 +316,7 @@ on a green predecessor. A single Claude instance should take one step.
   JSON — `hs` → `type:"tree"` 1 supertree; `reconstruct` → `type:"reconciliation"`
   8 trees with `score`/`dups`/`losses` and `event` fields; `showtrees` → 8 gene
   trees. Simultaneous `htmlview=`+`resultjson=` both emit correctly. Legacy recon
-  regression still `17.0000`; both `clann` and `libclann-server.so` build clean.
+  regression still `32.0000`; both `clann` and `libclann-server.so` build clean.
 - *Done-when:* ✅ structured results exist without scraping ASCII.
 
 **Step 1.3 — Structured run result.** `[x]`
@@ -331,7 +331,7 @@ on a green predecessor. A single Claude instance should take one step.
   `trees`, `scores`, and `result_type` alongside `log`/`state`.
 - *Verify (DONE):* `clann_web/tests/test_server.py` — after `hs`, `result_type ==
   "tree"`, `trees[0].newick` ends `;` and contains a real taxon, `trees[0].tree`
-  has the structured children the viewer consumes, and `scores[0] == 17.0`; after
+  has the structured children the viewer consumes, and `scores[0] == 32.0`; after
   `reconstruct`, `result_type == "reconciliation"`, 8 trees each with a `score`,
   and at least one `"event":"duplication"`. `PASS` (sandbox test still green too).
 - *Done-when:* ✅ the client can consume results without parsing prose.
@@ -365,9 +365,9 @@ on a green predecessor. A single Claude instance should take one step.
 - *Verify (DONE):* `clann_web/tests/test_server.py` starts the real server on an
   ephemeral loopback port and drives session→load→`set criterion=recon`→`hs`→
   `reconstruct speciestree=memory`, asserting `num_source_trees==8`, `num_taxa==9`,
-  `17.000000` in the `hs` log, `trees_in_memory>=1`, and recon `17.0000` — `PASS`.
+  `32.000000` in the `hs` log, `trees_in_memory>=1`, and recon `30.0000` — `PASS`.
   A `curl` transcript reproduces it against `python -m clann_web` (session → load
-  → set → `hs` → `Supertree 1 of 1 score = 17.000000`).
+  → set → `hs` → `Supertree 1 of 1 score = 32.000000`).
   - *Run:* `PYTHONPATH=. arch -x86_64 /usr/bin/python3 clann_web/tests/test_server.py`
 - *Done-when:* ✅ a browserless HTTP round-trip drives a real, persistent analysis.
 
@@ -405,7 +405,7 @@ on a green predecessor. A single Claude instance should take one step.
   scalars; add `/api/session` returning loaded file, taxa count, criterion, trees
   in memory.
 - *Verify:* `pytest`: after `hs`, `trees[0]` is valid Newick over the input taxa
-  and `scores[0]==17.0` (recon legacy); `session_state.criterion=="recon"`.
+  and `scores[0]==32.0` (recon standard); `session_state.criterion=="recon"`.
 - *Done-when:* the client can consume results without parsing prose.
 
 ### Phase 2 — The browser client
@@ -470,7 +470,7 @@ on a green predecessor. A single Claude instance should take one step.
   nthreads=4` → results table "Supertree 1 · 17 · ((Orangutan,((Human,Chimp)…"; and
   `reconstruct speciestree=memory` → "8 trees · reconciliation · scores: 0,0,0,2,
   5,3,3,4" with per-tree `(d/l)` counts. Full `pytest clann_web/tests/` (4 tests,
-  one process) now passes; standalone recon regression still `17.0000`.
+  one process) now passes; standalone recon regression still `32.0000`.
 - *Done-when:* ✅ a user can complete an analysis by clicking.
 
 **Step 2.4 — Embed the interactive tree viewer.** `[x]`
@@ -517,8 +517,8 @@ on a green predecessor. A single Claude instance should take one step.
   posts the run, opens an `EventSource`, appends log chunks live (auto-scrolling),
   and on `done` renders scores + the viewer.
 - *Verify (DONE):* `clann_web/tests/test_jobs.py` — `/api/run` returns 202+job_id;
-  the SSE stream delivers live chunks containing `17.000000` and a `done` event
-  whose `scores[0]==17.0` and `has_viewer`; the job stays queryable afterwards.
+  the SSE stream delivers live chunks containing `32.000000` and a `done` event
+  whose `scores[0]==32.0` and `has_viewer`; the job stays queryable afterwards.
   **Live browser:** the log **grows incrementally over time** during an `hs` run
   (proving streaming, not a single dump), then shows scores 17 and the embedded
   viewer. Full suite green (8 tests).

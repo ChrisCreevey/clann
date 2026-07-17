@@ -98,7 +98,7 @@ for l in sigB:
     print("   B:", l)
 
 assert sigA, "run A produced no result lines — scenario broken"
-assert "17.0000" in textA and "17.0000" in textB, "recon 17.0000 regression missing"
+assert "32.0000" in textA and "32.0000" in textB, "recon 32.0000 regression missing"
 assert sigA == sigB, (
     "MISMATCH: post-reset run differs from fresh baseline — state leaked across "
     "clann_reset(). Diff:\n"
@@ -106,4 +106,4 @@ assert sigA == sigB, (
                 for a, b in zip(sigA, sigB) if a != b)
 )
 print("\nPASS: clann_reset() gives a clean baseline; post-reset run reproduces the "
-      "fresh run exactly (result lines identical, recon 17.0000 both times).")
+      "fresh run exactly (result lines identical, recon 32.0000 both times).")

@@ -124,7 +124,7 @@ a fine starting point to elevate.
 - **Results shapes.** A run returns `scores` and `trees`. Example realistic data:
   - session `state`: `{input_file:"tutorial_multicopy.ph", num_taxa:9,
     num_source_trees:8, criterion:"recon", trees_in_memory:1}`
-  - a supertree result: `scores:[17.0]`, one tree row with a Newick string.
+  - a supertree result: `scores:[32.0]`, one tree row with a Newick string.
   - a reconciliation result: 8 trees, each with a `score` and duplication/loss
     counts shown as `(d2/l5)`.
 - **The tree viewer is in scope.** It is a separate self-contained HTML document

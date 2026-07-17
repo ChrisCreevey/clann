@@ -2255,6 +2255,23 @@ static void std_edge(struct taxon *g, struct taxon *c, int T, int Mc, int is_dup
 		if(head == NULL) { head = tail = rep; } else { tail->next_sibling = rep; rep->prev_sibling = tail; tail = rep; }
 		}
 	if(head == NULL) head = tail = c;   /* nothing skipped/added: keep c */
+	/* Duplication copy: g is the duplication node (maps to T) and this copy is one
+	 * whole T-lineage descending from it. When the copy's gene node maps strictly
+	 * below T, the reconstructed T-split (surviving path + lost siblings) must hang
+	 * off an intermediate node that itself maps to T -- otherwise the pieces are
+	 * spliced flat as siblings of the OTHER copy, producing a multifurcation at the
+	 * duplication node with the loss lineage attached directly (see NOTES §6b). A
+	 * speciation edge needs no wrapper: g already maps to T and its children map to
+	 * T's distinct species children. The wrapper is a speciation node (loss=0), so
+	 * dup marks and loss counts are unchanged. */
+	if(is_dup && !(head == tail && ((head->name != -1 ? head->name : head->tag) == T)))
+		{
+		struct taxon *w = make_taxon(), *ch;
+		w->tag = T; w->name = Tnode->name; w->loss = 0;
+		w->daughter = head;
+		for(ch = head; ch != NULL; ch = ch->next_sibling) ch->parent = w;
+		head = tail = w;
+		}
 	if(pv != NULL) { pv->next_sibling = head; head->prev_sibling = pv; }
 	else g->daughter = head;
 	head->parent = g;
@@ -3740,7 +3757,11 @@ void reconstruct(int print_settings)  /* Carry out gene-tree reconciliation of s
 		if(strcmp(parsed_command[i], "lossmodel") == 0)
 			{
 			if(strcmp(parsed_command[i+1], "standard") == 0) loss_model = 1;
-			else if(strcmp(parsed_command[i+1], "legacy") == 0) loss_model = 0;
+			else if(strcmp(parsed_command[i+1], "legacy") == 0)
+				{
+				printf2("Warning: lossmodel=legacy is deprecated and no longer supported; using the standard model.\n");
+				loss_model = 1;
+				}
 			else { printf2("Error: lossmodel must be 'standard' or 'legacy'\n"); error = TRUE; }
 			}
 		}

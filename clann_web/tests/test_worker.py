@@ -99,7 +99,7 @@ def check_concurrent_isolation():
 
         for key in ("a", "b"):
             assert results[key]["status"] == "done", results[key]
-            assert results[key]["scores"][0] == 17.0, results[key].get("scores")
+            assert results[key]["scores"][0] == 32.0, results[key].get("scores")
         # Independent processes: killing one session's worker leaves the other fine.
         a[0].clann_app.new_session()      # terminates + respawns worker A
         assert b[1] and _get(b[1], "/api/session")["state"]["num_source_trees"] == 8

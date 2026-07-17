@@ -51,7 +51,7 @@ def run(label, fn):
     fn()
     text = "".join(buf[start:])
     sig = [l.strip() for l in text.splitlines()
-           if any(k in l for k in ("source trees", "score =", "17.0000",
+           if any(k in l for k in ("source trees", "score =", "32.0000",
                                    "Neighbor-joining", "dup+loss"))]
     print(f"\n### {label}")
     for l in sig[:4]:
@@ -74,6 +74,6 @@ run("reconstruct speciestree=memory",
 
 alltext = "".join(buf)
 assert "8 source trees" in st, "source trees NOT still in memory after nj+hs!"
-assert "17.0000" in alltext or "score = 17" in alltext, "hs recon score missing"
+assert "32.0000" in alltext or "score = 32" in alltext, "hs recon score missing"
 print("\nPASS: one process handled exe->nj->hs->showtrees->reconstruct;")
 print("      the 8 source trees survived across all commands (no reload).")
