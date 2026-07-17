@@ -586,11 +586,29 @@ $("load").onclick = async () => {
 let currentES = null;
 let currentJob = null;
 
+// A wall-clock "still running" ticker: Clann only prints per-replicate lines (and
+// nothing within a long replicate), so this gives a continuous sign of life and
+// how long the search has been going, independent of the log stream.
+let runTimer = null, runStart = 0;
+function fmtElapsed(s) {
+  const m = Math.floor(s / 60);
+  return m + ":" + String(s % 60).padStart(2, "0");
+}
+function startRunTimer() {
+  runStart = Date.now();
+  stopRunTimer();
+  runTimer = setInterval(() => {
+    msg("run-msg", "Running… (" + fmtElapsed(Math.floor((Date.now() - runStart) / 1000)) + ")");
+  }, 1000);
+}
+function stopRunTimer() { if (runTimer) { clearInterval(runTimer); runTimer = null; } }
+
 function runFinished() {
   $("run").disabled = false;
   $("stop").style.display = "none";
   $("stop").disabled = false;
   $("spin").style.display = "none";
+  stopRunTimer();
   currentJob = null;
 }
 
@@ -624,6 +642,7 @@ $("run").onclick = async () => {
   $("stop").style.display = "";
   $("spin").style.display = "";
   msg("run-msg", "Running…");
+  startRunTimer();
 
   // show the results card with a live log while the job runs
   $("results-card").style.display = "";
@@ -647,6 +666,7 @@ $("run").onclick = async () => {
   };
   es.addEventListener("done", (ev) => {
     es.close(); currentES = null;
+    stopRunTimer();
     const d = JSON.parse(ev.data);
     if (d.status === "cancelled") {
       msg("run-msg", "Stopped — the session was reset; reload your file to continue.", "err");
