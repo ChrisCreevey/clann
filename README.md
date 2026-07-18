@@ -74,6 +74,14 @@ A tutorial walking through the new features in clann is provided in **[TUTORIAL.
 
 Clann can also be used from **Python** via the `pyclann` package — see [Python API](#python-api-pyclann) below and the full reference in **[pyclann/README.md](pyclann/README.md)**.
 
+# Visualising trees
+
+Trees produced by Clann — plain Newick (e.g. from `nj`, `hs`, `savetrees`) and the NHX reconciliation files written by `reconstruct` (`nhxfile=`), which carry duplication, loss, and species-mapping annotations — can be explored interactively in the standalone **Clann tree viewer**:
+
+**https://chriscreevey.github.io/clann-tree-viewer/**
+
+It runs entirely in your browser (nothing is uploaded to a server): open a tree file to reroot, collapse clades, switch between cladogram and phylogram layouts, and export to SVG/PDF. It can be used online at the link above or hosted yourself — see the [clann-tree-viewer repository](https://github.com/ChrisCreevey/clann-tree-viewer).
+
 # Usage
 
 ## Direct command-line (recommended)
