@@ -33,9 +33,10 @@ def node_to_newick(node: dict) -> str:
     if children:
         inner = ",".join(node_to_newick(c) for c in children)
         s = "(" + inner + ")"
-        name = node.get("name")
-        if name:  # internal label, if any
-            s += _escape(name)
+        # internal label: an explicit name, else a support value (bootstrap/consensus)
+        label = node.get("name") or node.get("support")
+        if label is not None and label != "":
+            s += _escape(str(label))
     else:
         # leaf: a normal tip has a name; a reconciliation loss node may not.
         s = _escape(node.get("name") or node.get("species") or "LOST")

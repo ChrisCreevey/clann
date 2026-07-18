@@ -3229,6 +3229,31 @@ static const char *hv_leaf_species(struct taxon *n)
 	if(n->tag  >= 0 && n->tag  < number_of_taxa) return taxa_names[n->tag];
 	return NULL;
 	}
+/* basic_tree_build() stores an internal-node label and/or branch length together
+ * in ->weight as "<support>", "<support>:<length>", or ":<length>"; in-memory
+ * trees instead carry the length in ->length. Emit whichever are present as the
+ * viewer's "support" and "length" fields (so support values and branch lengths
+ * survive into the visualisation instead of being mashed together or dropped). */
+static void hv_json_weight_length(struct taxon *n, FILE *f)
+	{
+	const char *w = n->weight, *colon = strchr(w, ':');
+	double len = 0; int have_len = 0;
+	if(colon == NULL)
+		{ if(w[0] != '\0') { fputs(",\"support\":", f); hv_json_str(f, w); } }
+	else
+		{
+		if(colon != w)
+			{
+			char sup[100]; size_t sl = (size_t)(colon - w);
+			if(sl >= sizeof sup) sl = sizeof sup - 1;
+			memcpy(sup, w, sl); sup[sl] = '\0';
+			fputs(",\"support\":", f); hv_json_str(f, sup);
+			}
+		if(colon[1] != '\0') { len = atof(colon + 1); have_len = 1; }
+		}
+	if(!have_len && n->length != 0) { len = n->length; have_len = 1; }
+	if(have_len && len != 0) fprintf(f, ",\"length\":%g", len);
+	}
 static void hv_json_node(struct taxon *n, FILE *f, int recon)
 	{
 	fputc('{', f);
@@ -3240,6 +3265,10 @@ static void hv_json_node(struct taxon *n, FILE *f, int recon)
 		fputs("\"children\":[", f);
 		for(c = n->daughter; c != NULL; c = c->next_sibling) { if(!first) fputc(',', f); first = 0; hv_json_node(c, f, recon); }
 		fputc(']', f);
+		/* Plain trees (bootstrap/consensus/showtrees): emit the internal-node
+		 * support label and branch length. recon trees use event/species glyphs
+		 * instead, so leave them untouched. */
+		if(!recon) hv_json_weight_length(n, f);
 		}
 	else if(recon && n->loss == -1)
 		{
@@ -3251,8 +3280,12 @@ static void hv_json_node(struct taxon *n, FILE *f, int recon)
 		{
 		const char *nm = n->fullname ? n->fullname : ((n->name >= 0 && n->name < number_of_taxa) ? taxa_names[n->name] : "?");
 		fputs("\"name\":", f); hv_json_str(f, nm);
-		if(recon) { const char *sp = hv_leaf_species(n); if(sp != NULL) { fputs(",\"species\":", f); hv_json_str(f, sp); } }
-		if(n->length != 0) fprintf(f, ",\"length\":%g", (double)n->length);
+		if(recon)
+			{
+			const char *sp = hv_leaf_species(n); if(sp != NULL) { fputs(",\"species\":", f); hv_json_str(f, sp); }
+			if(n->length != 0) fprintf(f, ",\"length\":%g", (double)n->length);
+			}
+		else hv_json_weight_length(n, f);   /* leaf support (usually none) + branch length */
 		}
 	fputc('}', f);
 	}
