@@ -72,7 +72,7 @@ static const char *vals_summary[]      = { "short", "full", NULL };
 
 static const char *opts_hs[] = {
     "nreps=", "nbest=", "keep=", "savetrees=", "start=", "swap=",
-    "nsteps=", "criterion=", "missing=", "mlbeta=", "mleta=", "mlscale=",
+    "nsteps=", "criterion=", "weight=", "missing=", "mlbeta=", "mleta=", "mlscale=",
     "strategy=", "sample=", "progress=", "seed=", "nthreads=", "bsweight=",
     "scan", "scanmin=", "scanmax=", "escan", "eta=", "etamax=", "fixbeta=",
     "visitedtrees=", "clusterlandscape=", "clusteroutput=",
