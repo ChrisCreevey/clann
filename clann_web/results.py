@@ -53,6 +53,133 @@ def _escape(name: str) -> str:
     return name
 
 
+# --- Newick -> viewer node (for viewing arbitrary tree files from outputs) -----
+
+def _parse_newick_node(s: str, i: int):
+    """Recursive-descent parse of one Newick clade starting at s[i].
+    Returns (node, next_index) or raises ValueError. Produces the same
+    {name|children, support, length} shape the browser viewer consumes."""
+    node: dict = {}
+    n = len(s)
+    if i < n and s[i] == "(":
+        i += 1
+        children = []
+        while True:
+            child, i = _parse_newick_node(s, i)
+            children.append(child)
+            if i < n and s[i] == ",":
+                i += 1
+                continue
+            if i < n and s[i] == ")":
+                i += 1
+                break
+            raise ValueError("malformed clade")
+        node["children"] = children
+        label, i = _read_label(s, i)      # internal label = support value
+        if label:
+            node["support"] = label
+    else:
+        name, i = _read_label(s, i)        # leaf name (may be quoted)
+        if name == "":
+            raise ValueError("empty leaf name")
+        node["name"] = name
+    if i < n and s[i] == ":":              # :branch_length
+        i += 1
+        start = i
+        while i < n and s[i] not in ",():;":
+            i += 1
+        try:
+            node["length"] = float(s[start:i])
+        except ValueError:
+            pass
+    return node, i
+
+
+def _read_label(s: str, i: int):
+    n = len(s)
+    if i < n and s[i] == "'":              # quoted name: '...''...'
+        i += 1
+        out = []
+        while i < n:
+            if s[i] == "'":
+                if i + 1 < n and s[i + 1] == "'":
+                    out.append("'")
+                    i += 2
+                    continue
+                i += 1
+                break
+            out.append(s[i])
+            i += 1
+        return "".join(out), i
+    start = i
+    while i < n and s[i] not in ",():;":
+        i += 1
+    return s[start:i].strip(), i
+
+
+_NAME_BRACKET = re.compile(r"\[([^\]]*)\]")
+
+
+def _name_from_brackets(text: str):
+    """The last non-numeric [..] annotation (a tree name; numeric ones are weights)."""
+    name = None
+    for b in _NAME_BRACKET.findall(text):
+        b = b.strip()
+        if b and not _is_number(b):
+            name = b
+    return name
+
+
+def parse_tree_file(text: str):
+    """Parse a Clann/Phylip Newick tree file into [{name, tree}], or None if the
+    text doesn't look like Newick trees. Handles one or more ;-terminated trees.
+    Clann writes annotations AFTER the ';' (`<tree>;[weight][name]`), so the
+    leading annotations of each split segment name the PRECEDING tree."""
+    if "(" not in text:
+        return None
+    trees = []
+    for part in text.split(";"):
+        paren = part.find("(")
+        # leading [..] before this segment's '(' annotate the previous tree
+        lead = part[:paren] if paren >= 0 else part
+        if trees and trees[-1]["name"].startswith("tree_"):
+            nm = _name_from_brackets(lead)
+            if nm:
+                trees[-1]["name"] = nm
+        if paren < 0:
+            continue
+        try:
+            node, _ = _parse_newick_node(part[paren:], 0)
+        except (ValueError, IndexError):
+            return None
+        trees.append({"name": f"tree_{len(trees) + 1}", "tree": node})
+    return trees or None
+
+
+def build_tree_view_document(trees: list, title: str) -> str:
+    """A viewer result-JSON document ({type, meta, trees}) for parsed trees."""
+    return json.dumps({"type": "tree", "meta": {"title": title}, "trees": trees})
+
+
+def _is_number(s: str) -> bool:
+    try:
+        float(s)
+        return True
+    except ValueError:
+        return False
+
+
+def looks_like_tree_file(text: str) -> bool:
+    """Cheap classification: the first non-blank, non-comment content starts a
+    Newick tree. Used to route an output file to the tree viewer vs text viewer."""
+    for line in text.splitlines():
+        t = line.strip()
+        if not t or t.startswith("#"):
+            continue
+        return t.startswith("(") or t.lower().startswith("tree ") and "(" in t
+    return False
+
+
 _SINGLE_COPY = re.compile(r"single copy trees:\s*(\d+)", re.IGNORECASE)
 _MULTI_COPY = re.compile(r"multicopy trees:\s*(\d+)", re.IGNORECASE)
 

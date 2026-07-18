@@ -193,6 +193,16 @@
     padding:5px 9px;text-decoration:none;display:flex;align-items:center;gap:8px}
   .files a.dl:hover{border-color:var(--accent);color:var(--accent)}
   .files a.dl::before{content:"↓";opacity:.7}
+  .ofile{display:flex;align-items:center;gap:6px}
+  .ofile .dl{flex:1;min-width:0}
+  .viewbtn{font-family:var(--font-mono);font-size:11.5px;color:var(--chip-ink);flex:none;
+    background:var(--chip);border:1px solid var(--line);border-radius:var(--radius-sm);
+    padding:5px 10px;cursor:pointer}
+  .viewbtn:hover{border-color:var(--accent);color:var(--accent)}
+  .fileview-body{flex:1;display:flex;min-height:0;overflow:hidden}
+  .fileview-frame{flex:1;width:100%;border:0}
+  .fileview-text{flex:1;margin:0;padding:14px 18px;overflow:auto;white-space:pre-wrap;
+    word-break:break-word;font-family:var(--font-mono);font-size:12.5px;line-height:1.5;color:var(--ink)}
   .path{font-family:var(--font-mono);font-size:11px;color:var(--muted);
     word-break:break-all;margin-top:8px}
   @media (max-width:760px){ main{grid-template-columns:1fr} }
@@ -219,6 +229,16 @@
     </header>
     <input type="search" class="msearch" id="help-search" placeholder="Search the manual…">
     <div class="body" id="help-body">Loading…</div>
+  </div>
+</div>
+
+<div class="modal-bg" id="fileview-modal">
+  <div class="modal" role="dialog" aria-modal="true" aria-label="Output file view">
+    <header>
+      <h3 id="fileview-title">Output file</h3>
+      <button class="close" id="fileview-close" title="Close" aria-label="Close">✕</button>
+    </header>
+    <div class="fileview-body" id="fileview-body"></div>
   </div>
 </div>
 
@@ -332,14 +352,50 @@ function renderState(state) {
 
 function renderOutputs(files) {
   const el = $("outputs");
+  el.innerHTML = "";
   if (!files || !files.length) {
     el.innerHTML = '<span class="muted">No output files yet.</span>';
     return;
   }
-  el.innerHTML = files.map((f) =>
-    `<a class="dl" href="/api/download/${encodeURIComponent(f)}" download>${esc(f)}</a>`
-  ).join("");
+  for (const f of files) {
+    const row = document.createElement("div");
+    row.className = "ofile";
+    const vb = document.createElement("button");
+    vb.className = "viewbtn"; vb.textContent = "view"; vb.title = "View this file";
+    vb.onclick = () => viewOutputFile(f);
+    const a = document.createElement("a");
+    a.className = "dl"; a.href = "/api/download/" + encodeURIComponent(f);
+    a.setAttribute("download", ""); a.textContent = f;
+    row.appendChild(vb); row.appendChild(a); el.appendChild(row);
+  }
 }
+
+// View an output file: tree files open the interactive viewer, everything else a
+// scrollable text panel — both in a modal, so the command results stay put.
+async function viewOutputFile(name) {
+  const body = $("fileview-body");
+  $("fileview-title").textContent = name;
+  body.innerHTML = '<pre class="fileview-text">Loading…</pre>';
+  $("fileview-modal").classList.add("open");
+  let data;
+  try { data = await (await fetch("/api/viewfile?name=" + encodeURIComponent(name))).json(); }
+  catch (e) { body.innerHTML = '<pre class="fileview-text">Could not load the file.</pre>'; return; }
+  body.innerHTML = "";
+  if (data.kind === "tree") {
+    const fr = document.createElement("iframe");
+    fr.className = "fileview-frame"; fr.title = "Tree viewer";
+    fr.src = "/api/viewtree?name=" + encodeURIComponent(name) + "&t=" + Date.now();
+    body.appendChild(fr);
+  } else {
+    const pre = document.createElement("pre");
+    pre.className = "fileview-text";
+    pre.textContent = data.text && data.text.length ? data.text : "(empty file)";
+    body.appendChild(pre);
+  }
+}
+function closeFileView() { $("fileview-modal").classList.remove("open"); $("fileview-body").innerHTML = ""; }
+$("fileview-close").onclick = closeFileView;
+$("fileview-modal").onclick = (e) => { if (e.target === $("fileview-modal")) closeFileView(); };
 
 let uploadedFiles = [];   // latest sandbox file list, for command file-pickers
 function renderFiles(files, selectName) {
@@ -734,7 +790,7 @@ $("help-btn").onclick = openHelp;
 $("help-close").onclick = closeHelp;
 $("help-modal").onclick = (e) => { if (e.target === $("help-modal")) closeHelp(); };
 $("help-search").oninput = applyHelpSearch;
-window.addEventListener("keydown", (e) => { if (e.key === "Escape") closeHelp(); });
+window.addEventListener("keydown", (e) => { if (e.key === "Escape") { closeHelp(); closeFileView(); } });
 
 $("upload").onclick = async () => {
   const f = $("file").files[0];

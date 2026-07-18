@@ -31,7 +31,8 @@ from .engine import ClannError
 from .worker_client import WorkerEngine
 from .sandbox import (Sandbox, UnsafePath, safe_basename,
                       sanitize_command, sanitize_options)
-from .results import RESULT_JSON, is_tree_command, build_results, parse_tree_counts
+from .results import (RESULT_JSON, is_tree_command, build_results, parse_tree_counts,
+                      parse_tree_file, looks_like_tree_file, build_tree_view_document)
 from .commands import list_commands, command_schema
 from .viewer import build_viewer_html, placeholder_html
 
@@ -310,6 +311,48 @@ def make_handler(app: _App):
             self.end_headers()
             self.wfile.write(body)
 
+        def _sandbox_text(self, raw_name: str):
+            """Read a sandbox output file as text, or (None, error-status)."""
+            try:
+                base = safe_basename(unquote(raw_name))
+            except UnsafePath:
+                return None, 400
+            full = os.path.join(app.sandbox.dir, base)
+            if not os.path.isfile(full):
+                return None, 404
+            with open(full, "r", encoding="utf-8", errors="replace") as fh:
+                return fh.read(), base
+
+        def _view_file(self, raw_name: str) -> None:
+            """Classify an output file: tree files go to the tree viewer, everything
+            else to the text viewer. Returns {kind, [text]}."""
+            text, base = self._sandbox_text(raw_name)
+            if text is None:
+                self._send(base, {"ok": False, "error": "no such file"})
+                return
+            if looks_like_tree_file(text) and parse_tree_file(text):
+                self._send(200, {"kind": "tree", "name": base})
+            else:
+                self._send(200, {"kind": "text", "name": base, "text": text})
+
+        def _view_tree(self, raw_name: str) -> None:
+            """Serve the interactive viewer for a tree file from the sandbox."""
+            text, base = self._sandbox_text(raw_name)
+            if text is None:
+                self._send(base, {"ok": False, "error": "no such file"})
+                return
+            trees = parse_tree_file(text)
+            if not trees:
+                self._send(415, {"ok": False, "error": "not a tree file"})
+                return
+            html = build_viewer_html(build_tree_view_document(trees, base))
+            body = html.encode()
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
         # -- routes --------------------------------------------------------
         def do_GET(self):
             p = urlparse(self.path).path
@@ -323,6 +366,10 @@ def make_handler(app: _App):
                                  "workdir": app.sandbox.dir})
             elif p.startswith("/api/download/"):
                 self._download(p[len("/api/download/"):])
+            elif p == "/api/viewfile":
+                self._view_file(parse_qs(urlparse(self.path).query).get("name", [""])[0])
+            elif p == "/api/viewtree":
+                self._view_tree(parse_qs(urlparse(self.path).query).get("name", [""])[0])
             elif p == "/api/manual":
                 self._send_manual()
             elif p == "/api/commands":
