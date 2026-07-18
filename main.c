@@ -1583,18 +1583,18 @@ void print_commands(int num)
         printf2("\tdeletetaxa\t- Specify taxa to delete from all source trees in memory (i.e. prune from the trees while preserving branch lengths)\n");
         printf2("\trestoretaxa\t- Restore the original trees before the last deletetaxa operation\n");
         printf2("\trandomisetrees\t- Randomises the source trees in memory, while preserving taxa composition in each tree\n");
+        printf2("\tprunemonophylies - Prunes clades which consist of multiple sequences from the same species, to a single representative\n");
+        printf2("\tdecomposegenetrees - Decomposes multi-copy gene family trees into single-copy-ish ortholog subtrees (non-destructive; writes files)\n");
 
         printf2("\nMiscellaneous calculations:\n");
         printf2("\trfdists\t\t- Calculate Robinson-Foulds distances between all source trees\n");
         printf2("\tgeneratetrees\t- Generate random supertrees & assess  against source trees in memory\n");
         printf2("\tyaptp\t\t- \"Yet another permutation-tail-probability\" test - performs a randomisation test\n");
+        printf2("\treconstruct\t- Carry out a gene-tree reconciliation (source trees against a species tree)\n");
 
 
 
         printf2("\nExperimental Options:\n");
-        printf2("\treconstruct\t- Carry out a gene-tree reconciliation (source trees against a species tree)\n");
-        printf2("\tprunemonophylies - Prunes clades which consist of multiple sequences from the same species, to a single representative\n");
-        printf2("\tdecomposegenetrees - Decomposes multi-copy gene family trees into single-copy-ish ortholog subtrees (non-destructive; writes files)\n");
         printf2("\tsprdists\t- Carry out estimation of SPR distances of real data versus ideal and randomised versions of the data\n");
 
         printf2("\n\n\nType a command followed by '?' in interactive mode to get information on the options available i.e.: \"exe ?\"\n");

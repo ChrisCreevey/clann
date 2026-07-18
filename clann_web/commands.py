@@ -53,14 +53,14 @@ COMMANDS = [
     {"group": "Source tree selection & modification", "name": "deletetaxa",     "blurb": "Delete taxa from all source trees in memory (prune, preserving branch lengths)"},
     {"group": "Source tree selection & modification", "name": "restoretaxa",    "blurb": "Restore the original trees from before the last deletetaxa"},
     {"group": "Source tree selection & modification", "name": "randomisetrees", "blurb": "Randomise the source trees in memory (preserving each tree's taxa)"},
+    {"group": "Source tree selection & modification", "name": "prunemonophylies",   "blurb": "Prune same-species clades to a single representative"},
+    {"group": "Source tree selection & modification", "name": "decomposegenetrees", "blurb": "Decompose multi-copy gene trees into ortholog subtrees (non-destructive; writes files)"},
     # -- Miscellaneous calculations --
     {"group": "Miscellaneous calculations", "name": "rfdists",       "blurb": "Robinson–Foulds distances between all source trees"},
     {"group": "Miscellaneous calculations", "name": "generatetrees", "blurb": "Generate random supertrees & assess against the source trees in memory"},
     {"group": "Miscellaneous calculations", "name": "yaptp",         "blurb": "'Yet another PTP' — a randomisation (permutation-tail-probability) test"},
+    {"group": "Miscellaneous calculations", "name": "reconstruct",   "blurb": "Gene-tree reconciliation (source trees against a species tree)"},
     # -- Experimental --
-    {"group": "Experimental", "name": "reconstruct",        "blurb": "Gene-tree reconciliation (source trees against a species tree)"},
-    {"group": "Experimental", "name": "prunemonophylies",   "blurb": "Prune same-species clades to a single representative"},
-    {"group": "Experimental", "name": "decomposegenetrees", "blurb": "Decompose multi-copy gene trees into ortholog subtrees (non-destructive; writes files)"},
     {"group": "Experimental", "name": "sprdists",           "blurb": "Estimate SPR distances of real data vs ideal & randomised versions"},
     # -- Settings --
     {"group": "Settings", "name": "set", "blurb": "Set global options (criterion, seed, ML parameters, …)"},
