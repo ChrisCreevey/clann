@@ -200,6 +200,7 @@ class ClannEngine:
             "num_source_trees": self._int_global("Total_fund_trees", 0),
             "criterion": _CRITERION_NAMES.get(crit, str(crit)),
             "trees_in_memory": self._int_global("trees_in_memory", 0),
+            "seed": self._int_global("seed", 0),
         }
 
     # -- public API (marshalled onto the worker thread) --------------------

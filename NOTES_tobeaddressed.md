@@ -81,6 +81,15 @@ does not fully work. This blocks reproducibility for users and makes
 paired/deterministic testing of search changes impossible (had to fall back to
 statistical comparison over many runs).
 
+**Partial mitigation (2026-07-18):** the web client now records every command
+sent in a session and captures the session's initial `seed` value, exposing a
+downloadable `clann -c` reproducibility script (`/api/session-commands`) with
+`set seed=<n>` injected. This makes **single-threaded** runs fully reproducible
+from the script. The underlying multi-threaded `rand()` non-determinism above is
+still unfixed — the script's header tells users to run with `nthreads=1` for full
+determinism. The real fix (route all `rand()` through per-thread `rand_r()` seeded
+deterministically from `seed=` + thread id) is still outstanding.
+
 ---
 
 ## 3. Search-time scoring is slow on large trees (incremental cache is dead)

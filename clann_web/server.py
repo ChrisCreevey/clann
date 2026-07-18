@@ -101,6 +101,39 @@ class _App:
         self.current_job: Job | None = None
         self._job_lock = threading.Lock()
         self.session_id = uuid.uuid4().hex
+        self.command_log: list[str] = []   # commands sent, for a reproducible script
+        self.initial_seed: int | None = None
+
+    def record(self, cmd: str) -> None:
+        """Append a command to the reproducibility log. The first call snapshots
+        the session's seed (before any `set seed=` has run) so the generated
+        script can re-seed the RNG identically on replay."""
+        if self.initial_seed is None:
+            try:
+                self.initial_seed = self.engine.state().get("seed")
+            except Exception:      # noqa: BLE001
+                self.initial_seed = None
+        self.command_log.append(cmd.strip())
+
+    def commands_script(self) -> str:
+        """Assemble a replayable Clann command script for the session."""
+        import datetime
+        out = [
+            "# Clann session commands — generated "
+            + datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "# Replay:  clann -c <this-file>",
+            "#   (put the uploaded input tree file(s) in the same directory).",
+            "# Reproducibility: the seed below reproduces single-threaded runs;",
+            "#   multi-threaded random-start searches may still vary "
+            "(known issue — run with nthreads=1 for full determinism).",
+            "",
+        ]
+        if self.initial_seed is not None:
+            out.append(f"set seed={self.initial_seed}")
+        out.extend(self.command_log)
+        if not self.command_log or self.command_log[-1].split()[:1] not in (["quit"], ["exit"]):
+            out.append("quit")
+        return "\n".join(out) + "\n"
 
     def state(self) -> dict:
         """Engine state augmented with the single-/multi-copy counts Clann
@@ -149,6 +182,8 @@ class _App:
         old_sandbox.destroy()
         self.last_result_json = None
         self.tree_counts = {}
+        self.command_log = []
+        self.initial_seed = None
         with self._job_lock:
             self.jobs.clear()
             self.current_job = None
@@ -366,6 +401,17 @@ def make_handler(app: _App):
                                  "workdir": app.sandbox.dir})
             elif p.startswith("/api/download/"):
                 self._download(p[len("/api/download/"):])
+            elif p == "/api/session-commands":
+                body = app.commands_script().encode()
+                disp = ("attachment" if parse_qs(urlparse(self.path).query).get("download")
+                        else "inline")
+                self.send_response(200)
+                self.send_header("Content-Type", "text/plain; charset=utf-8")
+                self.send_header("Content-Disposition",
+                                 f'{disp}; filename="clann_session_commands.txt"')
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
             elif p == "/api/viewfile":
                 self._view_file(parse_qs(urlparse(self.path).query).get("name", [""])[0])
             elif p == "/api/viewtree":
@@ -466,6 +512,7 @@ def make_handler(app: _App):
                     # file paths within them are confined to the sandbox.
                     opts = sanitize_options(body.get("options", ""), app.sandbox)
                     log = app.engine.load(safe, opts)
+                    app.record("exe " + fname + ((" " + opts) if opts else ""))
                     app.tree_counts = parse_tree_counts(log)  # single/multi copy
                     self._send(200, {"ok": True, "log": log,
                                      "state": app.state(),
@@ -495,6 +542,7 @@ def make_handler(app: _App):
                         self._send(409, {"ok": False, "error": "a command is "
                                          "already running in this session"})
                         return
+                    app.record(cmd)   # log the user's command for reproducibility
                     self._send(202, {"ok": True, "job_id": job.id,
                                      "command": safe_cmd, "status": "running"})
 

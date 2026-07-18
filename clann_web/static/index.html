@@ -280,6 +280,13 @@
     <label class="fld">Session output files</label>
     <div class="files" id="outputs"><span class="muted">No output files yet.</span></div>
     <div class="path" id="workdir" title="All command outputs are written here"></div>
+
+    <label class="fld">Session commands</label>
+    <div class="row" style="gap:8px">
+      <button class="btn" id="cmds-view" title="View the replayable command script for this session">View</button>
+      <a class="btn" id="cmds-download" href="/api/session-commands?download=1" download title="Download a Clann script (clann -c) that replays this session, with its seed">Download</a>
+    </div>
+    <div class="path">A reproducible <code>clann -c</code> script of every command sent, seed included.</div>
   </section>
 
   <section class="card" data-domain="run">
@@ -396,6 +403,23 @@ async function viewOutputFile(name) {
 function closeFileView() { $("fileview-modal").classList.remove("open"); $("fileview-body").innerHTML = ""; }
 $("fileview-close").onclick = closeFileView;
 $("fileview-modal").onclick = (e) => { if (e.target === $("fileview-modal")) closeFileView(); };
+
+// Show the reproducible command script for this session in the text panel.
+async function viewSessionCommands() {
+  const body = $("fileview-body");
+  $("fileview-title").textContent = "Session commands (reproducibility script)";
+  body.innerHTML = '<pre class="fileview-text">Loading…</pre>';
+  $("fileview-modal").classList.add("open");
+  let text;
+  try { text = await (await fetch("/api/session-commands")).text(); }
+  catch (e) { body.innerHTML = '<pre class="fileview-text">Could not load.</pre>'; return; }
+  body.innerHTML = "";
+  const pre = document.createElement("pre");
+  pre.className = "fileview-text";
+  pre.textContent = text;
+  body.appendChild(pre);
+}
+$("cmds-view").onclick = viewSessionCommands;
 
 let uploadedFiles = [];   // latest sandbox file list, for command file-pickers
 function renderFiles(files, selectName) {
