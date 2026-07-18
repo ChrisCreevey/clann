@@ -60,11 +60,14 @@ def _escape(name: str) -> str:
 # --- Newick -> viewer node (for viewing arbitrary tree files from outputs) -----
 
 def _parse_newick_node(s: str, i: int):
-    """Recursive-descent parse of one Newick clade starting at s[i].
+    """Recursive-descent parse of one Newick/NHX clade starting at s[i].
     Returns (node, next_index) or raises ValueError. Produces the same
-    {name|children, support, length} shape the browser viewer consumes."""
+    {name|children, support, length, event, species} shape the browser viewer
+    consumes; NHX `[&&NHX:S=..:D=Y/N]` tags and `*LOST` leaves are interpreted
+    into event/species (see _apply_nhx)."""
     node: dict = {}
     n = len(s)
+    comment = None
     if i < n and s[i] == "(":
         i += 1
         children = []
@@ -87,16 +90,33 @@ def _parse_newick_node(s: str, i: int):
         if name == "":
             raise ValueError("empty leaf name")
         node["name"] = name
-    if i < n and s[i] == ":":              # :branch_length
-        i += 1
-        start = i
-        while i < n and s[i] not in ",():;":
+    # NHX `[...]` comments and `:branch_length` may appear in either order.
+    while i < n:
+        if s[i] == "[":
+            body, i = _read_comment(s, i)
+            comment = body if comment is None else comment + body
+            continue
+        if s[i] == ":":
             i += 1
-        try:
-            node["length"] = float(s[start:i])
-        except ValueError:
-            pass
+            start = i
+            while i < n and s[i] not in ",():;[":
+                i += 1
+            try:
+                node["length"] = float(s[start:i])
+            except ValueError:
+                pass
+            continue
+        break
+    _apply_nhx(node, comment)
     return node, i
+
+
+def _read_comment(s: str, i: int):
+    """Consume a `[...]` comment starting at s[i]=='['. Returns (inner, next)."""
+    j = s.find("]", i)
+    if j < 0:
+        raise ValueError("unterminated '['")
+    return s[i + 1:j], j + 1
 
 
 def _read_label(s: str, i: int):
@@ -116,9 +136,45 @@ def _read_label(s: str, i: int):
             i += 1
         return "".join(out), i
     start = i
-    while i < n and s[i] not in ",():;":
+    while i < n and s[i] not in ",():;[":   # stop before an NHX comment too
         i += 1
     return s[start:i].strip(), i
+
+
+def _parse_nhx_tags(comment):
+    """Parse an NHX comment body (`&&NHX:S=Foo:D=Y`) into a {key: value} map."""
+    tags: dict = {}
+    if not comment:
+        return tags
+    body = comment.strip()
+    if body.startswith("&&NHX"):
+        body = body[len("&&NHX"):]
+    for part in body.split(":"):
+        if "=" in part:
+            k, v = part.split("=", 1)
+            tags[k] = v
+    return tags
+
+
+def _apply_nhx(node: dict, comment):
+    """Fold NHX annotations into a parsed node (event / species), matching Clann's
+    conventions: D=Y duplication, D=N speciation, S= species, `*LOST` leaf loss."""
+    name = node.get("name")
+    is_loss = False
+    if name and name.endswith("*LOST"):
+        node["name"] = name[:-len("*LOST")]
+        is_loss = True
+    tags = _parse_nhx_tags(comment)
+    if "S" in tags:
+        node["species"] = tags["S"]
+    if is_loss:
+        node["event"] = "loss"
+    elif "children" in node:
+        d = tags.get("D")
+        if d == "Y":
+            node["event"] = "duplication"
+        elif d == "N":
+            node["event"] = "speciation"
 
 
 _NAME_BRACKET = re.compile(r"\[([^\]]*)\]")
@@ -134,15 +190,23 @@ def _name_from_brackets(text: str):
     return name
 
 
+_NHX_HEADER = re.compile(r"#\s*(\S+)[^\n]*?\(score=([-+0-9.eE]+)\)")
+
+
 def parse_tree_file(text: str):
-    """Parse a Clann/Phylip Newick tree file into [{name, tree}], or None if the
-    text doesn't look like Newick trees. Handles one or more ;-terminated trees.
-    Clann writes annotations AFTER the ';' (`<tree>;[weight][name]`), so the
-    leading annotations of each split segment name the PRECEDING tree."""
+    """Parse a Clann/Phylip Newick or NHX tree file into [{name, tree, ...}], or
+    None if the text doesn't look like Newick trees. Handles one or more
+    ;-terminated trees. Clann writes annotations AFTER the ';'
+    (`<tree>;[weight][name]`), so the leading annotations of each split segment
+    name the PRECEDING tree. NHX files instead carry `# name (score=..)` header
+    comment lines, which are captured here and dropped before parsing."""
     if "(" not in text:
         return None
+    # NHX header comments name/score the trees in order; capture then strip them.
+    headers = _NHX_HEADER.findall(text)
+    body = "\n".join(ln for ln in text.splitlines() if not ln.lstrip().startswith("#"))
     trees = []
-    for part in text.split(";"):
+    for part in body.split(";"):
         paren = part.find("(")
         # leading [..] before this segment's '(' annotate the previous tree
         lead = part[:paren] if paren >= 0 else part
@@ -156,13 +220,47 @@ def parse_tree_file(text: str):
             node, _ = _parse_newick_node(part[paren:], 0)
         except (ValueError, IndexError):
             return None
-        trees.append({"name": f"tree_{len(trees) + 1}", "tree": node})
+        entry = {"name": f"tree_{len(trees) + 1}", "tree": node}
+        dups, losses = _count_events(node)
+        if dups or losses or _has_event(node):
+            entry["dups"], entry["losses"] = dups, losses
+        trees.append(entry)
+    # apply NHX headers (name + score) positionally when present
+    for entry, (name, score) in zip(trees, headers):
+        entry["name"] = name
+        try:
+            entry["score"] = float(score)
+        except ValueError:
+            pass
     return trees or None
 
 
+def _count_events(node: dict):
+    """(duplications, losses) among this node and its descendants."""
+    dups = 1 if node.get("event") == "duplication" else 0
+    losses = 1 if node.get("event") == "loss" else 0
+    for c in node.get("children", ()):
+        d, l = _count_events(c)
+        dups += d
+        losses += l
+    return dups, losses
+
+
+def _has_event(node: dict) -> bool:
+    if node.get("event"):
+        return True
+    return any(_has_event(c) for c in node.get("children", ()))
+
+
 def build_tree_view_document(trees: list, title: str) -> str:
-    """A viewer result-JSON document ({type, meta, trees}) for parsed trees."""
-    return json.dumps({"type": "tree", "meta": {"title": title}, "trees": trees})
+    """A viewer result-JSON document ({type, meta, trees}) for parsed trees.
+    Emits `reconciliation` (so duplication/loss glyphs render) when any tree
+    carries NHX events, otherwise a plain `tree`."""
+    kind = "reconciliation" if any(_has_event(t["tree"]) for t in trees) else "tree"
+    meta = {"title": title}
+    if kind == "reconciliation":
+        meta["criterion"] = "recon"
+    return json.dumps({"type": kind, "meta": meta, "trees": trees})
 
 
 def _is_number(s: str) -> bool:
