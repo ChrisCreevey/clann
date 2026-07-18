@@ -1,5 +1,5 @@
 {
-  "_note": "Typed option schema for the web client's dynamic forms (Step 2.2). Each option: name, type (enum|int|float|text|bool), default, help, and (for enum) values. Option names must match what the C command actually parses (verified against heuristic_search / set_parameters / reconstruct / nj / showtrees). Notably `hs` does NOT parse criterion= or seed= (they are set via the `set` command), so they are deliberately absent from the hs form. htmlview/open/resultjson are handled by the server and omitted.",
+  "_note": "Typed option schema for the web client's dynamic forms (Step 2.2). Each option: name, type (enum|int|float|text|bool), default, help, and (for enum) values. Option names must match what the C command actually parses (verified against heuristic_search / set_parameters / reconstruct / nj / showtrees). Notably `hs` does NOT parse criterion= or seed= (they are set via the `set` command), so they are deliberately absent from the hs form. htmlview/open/resultjson are handled by the server and omitted; reconstruct's nhxfile is injected by the server by default (unless the user passes their own) and so is also omitted.",
 
   "exe": {
     "summary": "Load source-tree files (options control name parsing and multicopy-tree handling at load time).",
@@ -110,7 +110,11 @@
       {"name": "dups", "type": "float", "default": "1.0",
        "help": "Weight per duplication."},
       {"name": "losses", "type": "float", "default": "1.0",
-       "help": "Weight per loss."}
+       "help": "Weight per loss."},
+      {"name": "basescore", "type": "float", "default": "1.0",
+       "help": "Base score added per reconciled gene tree."},
+      {"name": "printfiles", "type": "enum", "default": "yes", "values": ["yes", "no"],
+       "help": "Write the per-tree reconciliation output files (.recon, descendants, gene-births)."}
     ]
   },
 

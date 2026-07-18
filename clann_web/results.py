@@ -17,6 +17,10 @@ import re
 # The reserved sandbox filename the server injects as resultjson=.
 RESULT_JSON = "__clann_result__.json"
 
+# Default NHX filename the server injects for `reconstruct` (a real output the
+# user can download and re-open), unless they pass their own nhxfile=.
+RECON_NHX = "reconstructions.nhx"
+
 # Commands that produce trees we can serialise.
 TREE_COMMANDS = {"hs", "hsearch", "nj", "showtrees", "reconstruct", "alltrees",
                  "consensus", "bootstrap", "boot"}

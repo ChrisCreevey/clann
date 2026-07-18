@@ -31,7 +31,7 @@ from .engine import ClannError
 from .worker_client import WorkerEngine
 from .sandbox import (Sandbox, UnsafePath, safe_basename,
                       sanitize_command, sanitize_options)
-from .results import (RESULT_JSON, is_tree_command, build_results, parse_tree_counts,
+from .results import (RESULT_JSON, RECON_NHX, is_tree_command, build_results, parse_tree_counts,
                       parse_tree_file, looks_like_tree_file, build_tree_view_document)
 from .commands import list_commands, command_schema
 from .viewer import build_viewer_html, placeholder_html
@@ -236,6 +236,11 @@ class _App:
         # anyway. Only inject when the user didn't specify display=.
         if toks and toks[0] == "showtrees" and "display=" not in job.command:
             run_cmd = f"{run_cmd} display=no"
+        # reconstruct: always write an NHX reconciliation file (with duplication/
+        # loss annotations) unless the user asked for a specific one, so it's
+        # available to download and re-view. Controlled bare name.
+        if toks and toks[0] == "reconstruct" and "nhxfile=" not in job.command:
+            run_cmd = f"{run_cmd} nhxfile={RECON_NHX}"
         if is_tree_command(job.command) and "resultjson=" not in job.command:
             run_cmd = f"{run_cmd} resultjson={RESULT_JSON}"
         engine = self.engine          # bind now; a cancel may swap self.engine
