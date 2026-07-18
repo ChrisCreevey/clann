@@ -546,7 +546,7 @@ function computeLayout(){
 const svg=document.getElementById('svg'), scene=document.getElementById('scene'), tip=document.getElementById('tip');
 function el(t,a){const e=document.createElementNS('http://www.w3.org/2000/svg',t);for(const k in a)e.setAttribute(k,a[k]);return e;}
 function render(){
-  const {ls}=computeLayout();
+  const {ls,W,maxLen}=computeLayout();
   scene.innerHTML='';
   const tipX = Math.max(...leaves(root).map(n=>n._x));
   // edges
@@ -628,11 +628,30 @@ function render(){
     }
   });
   // branch length labels
-  if(opt.len && layout==="phylo"){
+  if(opt.len){
     each(root,n=>{ if(n.parent && n.length && !n.isLoss){ const t=el('text',{x:(n.parent._x+n._x)/2,y:n._y-3,class:'support','text-anchor':'middle'}); t.textContent=(+n.length).toFixed(3); scene.appendChild(t);} });
+  }
+  // scale bar (phylogram only — branch x-positions are proportional there)
+  if(opt.scale && layout==="phylo" && maxLen>0){
+    const pxPerUnit=(W-10)/maxLen;
+    const dist=niceNumber((W-10)*0.2/pxPerUnit);
+    const barW=dist*pxPerUnit;
+    const ys=leaves(root).map(n=>n._y);
+    const yb=(ys.length?Math.max(...ys):0)+vspace*1.25, x0=4;
+    scene.appendChild(el('path',{d:`M${x0},${yb} H${x0+barW}`,class:'branch'}));
+    scene.appendChild(el('path',{d:`M${x0},${yb-4} V${yb+4}`,class:'branch'}));
+    scene.appendChild(el('path',{d:`M${x0+barW},${yb-4} V${yb+4}`,class:'branch'}));
+    const t=el('text',{x:x0+barW/2,y:yb+15,class:'support','text-anchor':'middle'}); t.textContent=String(dist); scene.appendChild(t);
   }
   applyView();
   drawLegend();
+}
+// round to the nearest 1/2/5 × 10ⁿ, for a tidy scale-bar distance
+function niceNumber(x){
+  if(!(x>0)) return x;
+  const e=Math.floor(Math.log10(x)), f=x/Math.pow(10,e);
+  const nf = f<1.5?1 : f<3?2 : f<7?5 : 10;
+  return nf*Math.pow(10,e);
 }
 function selectBranch(n){ document.querySelectorAll('.branch.sel').forEach(e=>e.classList.remove('sel')); }
 function matchHL(n){ const s=(n.name||'')+' '+(n.species||''); return [...hlSet].some(q=>s.toLowerCase().includes(q)); }
@@ -875,6 +894,13 @@ window.addEventListener('resize',render);
 
 // init
 if(!isRecon){document.getElementById('rowLoss').style.display='none';document.getElementById('legend').style.display='none';}
+// Open in phylogram when the tree carries branch lengths, so a length-bearing
+// tree (e.g. NJ) shows its branches to scale rather than looking like a cladogram.
+(function(){
+  let hasLen=false; each(root,n=>{ if(n.parent && n.length!=null && n.length>0) hasLen=true; });
+  layout = hasLen ? "phylo" : "clado";
+  [...document.getElementById('segLayout').children].forEach(b=>b.classList.toggle('on', b.dataset.v===layout));
+})();
 document.getElementById('rowScale').style.display=layout==='phylo'?'flex':'none';
 setupNav(); updateMeta(); render();
 </script>
