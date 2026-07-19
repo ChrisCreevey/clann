@@ -27,6 +27,7 @@ See COPYING.txt for full licence terms.
    - [alltrees](#alltrees)
    - [bootstrap](#bootstrap--boot)
    - [usertrees](#usertrees)
+   - [mlscores](#mlscores)
    - [consensus](#consensus)
    - [reconstruct](#reconstruct)
    - [savetrees](#savetrees)
@@ -689,6 +690,40 @@ usertrees candidates.ph outfile=scores.txt printsourcescores=yes
 usertrees candidates.ph scorematrix=yes                 # per-source-tree score matrix
 usertrees candidates.ph tests=yes nboot=1000
 usertrees candidates.ph tests=yes normcorrect          # correct absolute lnL
+```
+
+---
+
+### mlscores
+
+Estimate the maximum-likelihood parameters of the Steel & Rodrigo (2008) model for the supertree **currently in memory** (e.g. the result of a preceding `hs` or `nj` run). The global slope β is estimated in closed form as β̂ = W / WD, where W is the sum of source-tree weights and WD is the weighted sum of (scaled) RF distances. The estimated value updates the global `mlbeta`, so subsequent `hs` / `bootstrap` runs under `criterion=ml` use it automatically. See the [ML Parameter Estimation technical note](NOTES_ml_parameter_estimation.md) for the derivation.
+
+```
+mlscores [options]
+```
+
+| Option | Values | Default | Description |
+|--------|--------|---------|-------------|
+| `outfile` | `<filename>` | *(none)* | Write the β (and, with `eta=auto`, η) log-likelihood profile to a file. |
+| `scan` | `<integer>` | `100` | Number of points in the β profile. |
+| `scanmin` | `<float>` | `β/100` | Lower bound of the β scan. |
+| `scanmax` | `<float>` | `β×10` | Upper bound of the β scan. |
+| `eta` | `auto` | *(off)* | **[Experimental]** Jointly estimate the tree-size scaling exponent η by 1-D grid search (β profiles analytically at each fixed η). Updates the global `mleta` after estimation. See the `mleta` discussion under [hs](#hs--hsearch). |
+| `escan` | `<integer>` | `50` | Number of points in the η grid (with `eta=auto`). |
+| `etamax` | `<float>` | `3.0` | Upper bound of the η grid (with `eta=auto`). |
+| `fixbeta` | *(flag)* | off | Hold β fixed at the current `mlbeta` instead of recomputing it. With `eta=auto`, grid-search η with β held fixed. |
+| `sourcescores` | `<filename>` | *(none)* | Write each source tree's lnL contribution to a TSV file (columns: name, weight, lnL). |
+
+The scoring convention of any reported log-likelihoods follows the global `mlbeta` / `mleta` / `mlscale` settings (see [set](#set)).
+
+**Examples:**
+```
+hs                              # build a supertree first
+mlscores                        # estimate beta for it
+mlscores outfile=beta_profile.txt scan=200
+mlscores eta=auto               # jointly estimate beta and eta
+mlscores eta=auto fixbeta       # estimate eta with beta held fixed
+mlscores sourcescores=per_tree_lnL.tsv
 ```
 
 ---
