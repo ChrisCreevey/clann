@@ -21,17 +21,20 @@
   <style>
     /* ── CSS Custom Properties ─────────────────────────────────── */
     :root {
-      --brand:       #1a6b4a;
-      --brand-dark:  #124d35;
-      --brand-light: #e8f5ee;
-      --brand-mid:   #2d9164;
-      --accent:      #f0a500;
-      --text:        #1e2530;
-      --text-muted:  #5a6473;
-      --border:      #d8e0e8;
-      --bg:          #f7f9fc;
+      /* Palette shared with the Clann web client (stone / clay / moss / compute-teal) */
+      --brand:       #0b7268;   /* compute-500 — links, headings, active states */
+      --brand-dark:  #085951;   /* compute-600 — top nav, dark headings */
+      --brand-light: #e2f4f1;   /* compute-50  — tints, blockquotes */
+      --brand-mid:   #149589;   /* compute-400 */
+      --accent:      #a94b2e;   /* clay-500 — primary buttons, badges */
+      --accent-hover:#8c3a22;   /* clay-600 */
+      --moss:        #5f6e33;   /* moss-500 — session accents */
+      --text:        #1a160f;   /* stone-900 */
+      --text-muted:  #6a5a43;   /* stone-600 */
+      --border:      #d5c4a6;   /* stone-300 */
+      --bg:          #faf6ee;   /* stone-50 */
       --surface:     #ffffff;
-      --code-bg:     #f4f6f8;
+      --code-bg:     #f3ecdf;   /* stone-100 */
       --nav-h:       60px;
       --sidebar-w:   260px;
       --toc-w:       220px;
@@ -121,7 +124,7 @@
     }
     .nav-badge {
       font-size: 0.72rem; font-weight: 700;
-      background: var(--accent); color: #1e2530;
+      background: var(--accent); color: #fff;
       padding: 0.15rem 0.55rem; border-radius: 20px;
     }
     .nav-gh-btn {
@@ -257,8 +260,8 @@
       transition: all var(--transition); cursor: pointer;
       white-space: nowrap;
     }
-    .btn-primary { background: var(--accent); color: #1e2530; }
-    .btn-primary:hover { background: #fdb81e; text-decoration: none; color: #1e2530; }
+    .btn-primary { background: var(--accent); color: #fff; }
+    .btn-primary:hover { background: var(--accent-hover); text-decoration: none; color: #fff; }
     .btn-outline {
       background: rgba(255,255,255,0.12); color: #fff;
       border: 1px solid rgba(255,255,255,0.3);
@@ -307,13 +310,34 @@
 
     /* Quick install */
     .install-block {
-      background: #1e2530; border-radius: var(--radius);
+      background: #1a160f; border-radius: var(--radius);
       padding: 1.25rem 1.5rem; margin: 1rem 0;
       font-family: 'JetBrains Mono', monospace; font-size: 0.85rem;
       color: #e8eff7; overflow-x: auto; line-height: 1.8;
+      white-space: pre-wrap; word-break: break-word;
     }
-    .install-block .comment { color: #7cb88a; }
-    .install-block .cmd { color: #79b8ff; }
+    .install-block .comment { color: #8fbf7c; }
+    .install-block .cmd { color: #7fcfc4; }
+
+    /* Web-client showcase */
+    .shot-grid {
+      display: grid; grid-template-columns: 1fr 1fr;
+      gap: 1rem; margin: 1.25rem 0 1rem;
+    }
+    .shot {
+      background: var(--surface); border: 1px solid var(--border);
+      border-radius: var(--radius); overflow: hidden;
+      box-shadow: var(--shadow); transition: transform var(--transition), box-shadow var(--transition);
+    }
+    .shot:hover { transform: translateY(-2px); box-shadow: var(--shadow-lg); }
+    .shot img { display: block; width: 100%; border-radius: 0; box-shadow: none; }
+    .shot figcaption {
+      font-size: 0.78rem; color: var(--text-muted);
+      padding: 0.55rem 0.85rem; border-top: 1px solid var(--border);
+      background: var(--bg);
+    }
+    .cta-row { display: flex; gap: 0.75rem; flex-wrap: wrap; margin: 1.25rem 0 0.5rem; }
+    @media (max-width: 640px) { .shot-grid { grid-template-columns: 1fr; } }
 
     /* Section headings on home/download */
     .section-heading {
@@ -351,9 +375,9 @@
       border-radius: 4px; border: 1px solid var(--border);
     }
     .md-body pre {
-      background: #1e2530; border-radius: var(--radius);
+      background: #1a160f; border-radius: var(--radius);
       padding: 1.25rem; overflow-x: auto; margin: 1rem 0;
-      border: 1px solid #2d3748;
+      border: 1px solid #2e2820;
     }
     .md-body pre code {
       background: none; border: none; padding: 0;
@@ -454,6 +478,7 @@
 
   <ul id="nav-links">
     <li><a href="#home" onclick="showPage('home')" id="nav-home" class="active">Home</a></li>
+    <li><a href="#webclient" onclick="showPage('webclient')" id="nav-webclient">Web Client</a></li>
     <li><a href="#manual" onclick="showDoc('manual')" id="nav-manual">Manual</a></li>
     <li><a href="#tutorial" onclick="showDoc('tutorial')" id="nav-tutorial">Tutorial</a></li>
     <li class="has-dropdown">
@@ -469,7 +494,7 @@
   </ul>
 
   <div id="nav-right">
-    <span class="nav-badge">v5</span>
+    <span class="nav-badge">v5.1</span>
     <a href="https://github.com/ChrisCreevey/clann" target="_blank" class="nav-gh-btn">
       <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>
       GitHub
@@ -489,6 +514,9 @@
       </a>
       <a href="#download" onclick="showPage('download')" id="sb-download">
         <span class="icon">⬇️</span> Download &amp; Install
+      </a>
+      <a href="#webclient" onclick="showPage('webclient')" id="sb-webclient">
+        <span class="icon">🖥️</span> Web Client
       </a>
     </div>
     <div class="sidebar-section">
@@ -516,6 +544,9 @@
       <div class="sidebar-title">External Links</div>
       <a href="https://github.com/ChrisCreevey/clann" target="_blank">
         <span class="icon">🐙</span> GitHub Repository
+      </a>
+      <a href="https://chriscreevey.github.io/clann-tree-viewer/" target="_blank">
+        <span class="icon">🌳</span> Clann Tree Viewer
       </a>
       <a href="https://scholar.google.co.uk/citations?view_op=view_citation&hl=en&user=7JkjEd4AAAAJ&citation_for_view=7JkjEd4AAAAJ:UeHWp8X0CEIC" target="_blank">
         <span class="icon">📄</span> Google Scholar
@@ -608,13 +639,14 @@ function buildTOC() {
 function homeHTML() {
   return `
 <div class="hero">
-  <h1>Clann <span class="version">v5</span></h1>
+  <h1>Clann <span class="version">v5.1</span></h1>
   <p class="tagline">Investigating phylogenetic information through supertree analyses —
-     a free, open-source tool for phylogenomics, from single-copy to multi-copy gene families.</p>
+     a free, open-source tool for phylogenomics, from single-copy to multi-copy gene families.
+     Now with a browser-based web client and an interactive tree viewer.</p>
   <div class="hero-btns">
     <a href="#download" onclick="showPage('download')" class="btn btn-primary">⬇️ Download</a>
+    <a href="#webclient" onclick="showPage('webclient')" class="btn btn-outline">🖥️ Web Client</a>
     <a href="#tutorial" onclick="showDoc('tutorial')" class="btn btn-outline">🎓 Tutorial</a>
-    <a href="#manual" onclick="showDoc('manual')" class="btn btn-outline">📖 Manual</a>
     <a href="https://github.com/ChrisCreevey/clann" target="_blank" class="btn btn-outline">🐙 GitHub</a>
   </div>
 </div>
@@ -625,6 +657,13 @@ function homeHTML() {
   <a href="http://mcinerneylab.com/">James McInerney</a>.
   It constructs supertrees and allows deep exploration of the phylogenomic signal in collections of gene trees.
   Clann has been continually developed since 2003 and is used across hundreds of published studies.</p>
+
+<h2 class="section-heading">New in v5.1</h2>
+<div class="card-grid">
+  <div class="card"><div class="card-icon">🖥️</div><h3>Web Client</h3><p>Run Clann entirely from your browser — upload trees, pick commands from menus, watch a live log and explore the result in an embedded viewer. <a href="#webclient" onclick="showPage('webclient')">See it →</a></p></div>
+  <div class="card"><div class="card-icon">🌳</div><h3>Interactive Tree Viewer</h3><p>A standalone, in-browser viewer for Newick and NHX reconciliation trees: reroot, collapse clades, switch cladogram/phylogram, export SVG/PDF. <a href="https://chriscreevey.github.io/clann-tree-viewer/" target="_blank">Open ↗</a></p></div>
+  <div class="card"><div class="card-icon">✂️</div><h3>Gene-Tree Decomposition</h3><p>Break multi-copy gene family trees into maximal single-copy ortholog subtrees by collapsing in-paralogues and cutting at reconciled duplication nodes.</p></div>
+</div>
 
 <h2 class="section-heading">What's New in v5</h2>
 <div class="card-grid">
@@ -783,6 +822,70 @@ function downloadHTML() {
 </p>`;
 }
 
+/* ── Web-client page HTML ─────────────────────────────────────── */
+function webclientHTML() {
+  return `
+<div class="hero">
+  <h1>Clann Web Client</h1>
+  <p class="tagline">Drive Clann from your browser — no terminal required. A local, single-user
+    app that runs entirely on your own machine and works offline.</p>
+  <div class="hero-btns">
+    <a href="https://github.com/ChrisCreevey/clann/tree/master/clann_web" target="_blank" class="btn btn-primary">🖥️ Get the web client</a>
+    <a href="https://chriscreevey.github.io/clann-tree-viewer/" target="_blank" class="btn btn-outline">🌳 Tree Viewer</a>
+  </div>
+</div>
+
+<p>New in <strong>v5.1</strong>, <code>clann-web</code> lets researchers run Clann without touching a
+  command line. It starts a small local server bound to <code>127.0.0.1</code> (loopback only, no login,
+  nothing leaves your machine) and drives a hardened, shell-free build of Clann through a per-session
+  worker process. The browser <em>is</em> the whole interface.</p>
+
+<h2 class="section-heading">Screenshots</h2>
+<div class="shot-grid">
+  <figure class="shot">
+    <img src="images/webclient-light.png" alt="Clann web client in light mode: session panel, run form and results with an interactive supertree viewer" loading="lazy">
+    <figcaption>The full flow — load data, configure a run, and explore the resulting supertree (light theme).</figcaption>
+  </figure>
+  <figure class="shot">
+    <img src="images/webclient-dark.png" alt="Clann web client in dark mode showing the same session, run form and tree viewer" loading="lazy">
+    <figcaption>A considered dark theme for long analysis sessions — same layout, same tree viewer.</figcaption>
+  </figure>
+</div>
+
+<h2 class="section-heading">What you can do</h2>
+<div class="card-grid">
+  <div class="card"><div class="card-icon">📤</div><h3>Upload &amp; load</h3><p>Drop in a source-tree file (<code>.ph</code>); the session panel reports taxa and source-tree counts.</p></div>
+  <div class="card"><div class="card-icon">🎛️</div><h3>Typed option forms</h3><p>Pick a command (<code>hs</code>, <code>bootstrap</code>, <code>reconstruct</code>…) and set every option through validated forms with inline help.</p></div>
+  <div class="card"><div class="card-icon">📡</div><h3>Live streaming log</h3><p>Watch progress in real time with a running log and a <strong>Stop</strong> button to cancel long searches.</p></div>
+  <div class="card"><div class="card-icon">🌳</div><h3>Interactive results</h3><p>Explore the supertree or NHX reconciliation in an embedded viewer — reroot, collapse, cladogram/phylogram, Newick export.</p></div>
+</div>
+
+<h2 class="section-heading">Run it locally</h2>
+<div class="install-block">
+<span class="comment"># From a Clann checkout — build the shell-free server library</span>
+<span class="cmd">make libclann-server.so</span>
+
+<span class="comment"># Install the web client (plain-stdlib, no third-party deps) and launch</span>
+<span class="cmd">pip install ./clann_web</span>
+<span class="cmd">clann-web</span>
+</div>
+<p style="font-size:0.875rem;color:var(--text-muted);margin-top:0.5rem">
+  <code>clann-web</code> prints <code>serving on http://127.0.0.1:8765</code> and opens a browser tab.
+  Full instructions (including the Apple-Silicon note) are in
+  <a href="https://github.com/ChrisCreevey/clann/blob/master/clann_web/README.md" target="_blank">clann_web/README.md</a>.
+</p>
+
+<h2 class="section-heading">Standalone Tree Viewer</h2>
+<p>The interactive viewer used for results is also available as a <strong>standalone web app</strong>. Open any
+  Clann output — plain Newick (from <code>nj</code>, <code>hs</code>, <code>savetrees</code>) or the NHX
+  reconciliation files from <code>reconstruct</code> (which carry duplication, loss and species-mapping
+  annotations) — and explore it interactively. It runs entirely in your browser; nothing is uploaded.</p>
+<div class="cta-row">
+  <a href="https://chriscreevey.github.io/clann-tree-viewer/" target="_blank" class="btn btn-green">🌳 Open the Tree Viewer ↗</a>
+  <a href="https://github.com/ChrisCreevey/clann-tree-viewer" target="_blank" class="btn btn-outline" style="color:var(--text);border-color:var(--border)">🐙 Source on GitHub ↗</a>
+</div>`;
+}
+
 /* ── Fetch and render a markdown doc ─────────────────────────── */
 async function showDoc(id) {
   const doc = DOCS[id];
@@ -849,7 +952,9 @@ function showPage(id) {
   document.getElementById('loading').style.display = 'none';
   const area = document.getElementById('content-area');
   area.style.display = '';
-  area.innerHTML = id === 'download' ? downloadHTML() : homeHTML();
+  area.innerHTML = id === 'download' ? downloadHTML()
+                 : id === 'webclient' ? webclientHTML()
+                 : homeHTML();
 }
 
 /* ── Helpers ─────────────────────────────────────────────────── */
@@ -864,6 +969,7 @@ function route() {
   const h = location.hash.replace('#','');
   if (DOCS[h])          showDoc(h);
   else if (h==='download') showPage('download');
+  else if (h==='webclient') showPage('webclient');
   else                  showPage('home');
 }
 
