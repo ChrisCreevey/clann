@@ -630,7 +630,31 @@ function setActive(id) {
 }
 
 /* ── TOC ──────────────────────────────────────────────────────── */
+/* GitHub-compatible heading slug: lowercase, drop punctuation (keep spaces &
+   hyphens), then map each whitespace char to a hyphen (no collapsing, so
+   "hs / hsearch" → "hs--hsearch", matching the in-document TOC anchors). */
+function slugify(text) {
+  return text.toLowerCase().trim()
+    .replace(/[^\w\s-]/g, '')
+    .replace(/\s/g, '-');
+}
+
+/* Give every rendered heading a real anchor id so the in-document Tables of
+   Contents and cross-references resolve. De-duplicates like GitHub does. */
+function assignHeadingIds() {
+  const seen = {};
+  document.querySelectorAll('#content-area h1, #content-area h2, #content-area h3, #content-area h4')
+    .forEach(h => {
+      let base = slugify(h.textContent) || 'section';
+      let id = base;
+      if (seen[base] != null) { seen[base]++; id = base + '-' + seen[base]; }
+      else seen[base] = 0;
+      h.id = id;
+    });
+}
+
 function buildTOC() {
+  assignHeadingIds();
   const toc = document.getElementById('toc-nav');
   const tocSide = document.getElementById('toc-sidebar');
   toc.innerHTML = '';
@@ -1030,6 +1054,20 @@ document.addEventListener('click', e => {
   if (e.target.closest('#nav-links a, #nav-links button')) {
     document.getElementById('nav-links').classList.remove('open');
     document.getElementById('sidebar').classList.remove('open');
+  }
+});
+
+// In-document anchor links (a doc's own Table of Contents and cross-references)
+// scroll to the target heading instead of hitting the hash router.
+document.addEventListener('click', e => {
+  const a = e.target.closest('#content-area a[href^="#"]');
+  if (!a) return;
+  const id = decodeURIComponent(a.getAttribute('href').slice(1));
+  if (!id) return;
+  const target = document.getElementById(id);
+  if (target) {
+    e.preventDefault();
+    target.scrollIntoView({ behavior: 'smooth', block: 'start' });
   }
 });
 </script>
