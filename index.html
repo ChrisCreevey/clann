@@ -485,9 +485,14 @@
       <button id="nav-notes">Notes <span class="nav-arrow">▼</span></button>
       <div class="dropdown-menu">
         <span class="menu-label">Technical Notes</span>
+        <a href="#notes-hs" onclick="showDoc('notes-hs')">🔍 Heuristic Search Options</a>
+        <a href="#notes-recon" onclick="showDoc('notes-recon')">🔀 Species/Gene-Tree Reconciliation</a>
+        <a href="#notes-decomp" onclick="showDoc('notes-decomp')">✂️ Gene-Tree Decomposition</a>
         <a href="#notes-ml" onclick="showDoc('notes-ml')">📐 ML Parameter Estimation</a>
         <a href="#notes-rf" onclick="showDoc('notes-rf')">🔢 RF Hash Method</a>
         <a href="#notes-ts" onclick="showDoc('notes-ts')">🗺️ Tree-Space Landscape</a>
+        <a href="#notes-cluster" onclick="showDoc('notes-cluster')">🧩 Tree-Space Clustering</a>
+        <a href="#notes-viewer" onclick="showDoc('notes-viewer')">🌳 Interactive HTML Viewer</a>
       </div>
     </li>
     <li><a href="#download" onclick="showPage('download')" id="nav-download">Download</a></li>
@@ -530,6 +535,15 @@
     </div>
     <div class="sidebar-section">
       <div class="sidebar-title">Technical Notes</div>
+      <a href="#notes-hs" onclick="showDoc('notes-hs')" id="sb-notes-hs">
+        <span class="icon">🔍</span> Heuristic Search Options
+      </a>
+      <a href="#notes-recon" onclick="showDoc('notes-recon')" id="sb-notes-recon">
+        <span class="icon">🔀</span> Species/Gene-Tree Reconciliation
+      </a>
+      <a href="#notes-decomp" onclick="showDoc('notes-decomp')" id="sb-notes-decomp">
+        <span class="icon">✂️</span> Gene-Tree Decomposition
+      </a>
       <a href="#notes-ml" onclick="showDoc('notes-ml')" id="sb-notes-ml">
         <span class="icon">📐</span> ML Parameter Estimation
       </a>
@@ -538,6 +552,12 @@
       </a>
       <a href="#notes-ts" onclick="showDoc('notes-ts')" id="sb-notes-ts">
         <span class="icon">🗺️</span> Tree-Space Landscape
+      </a>
+      <a href="#notes-cluster" onclick="showDoc('notes-cluster')" id="sb-notes-cluster">
+        <span class="icon">🧩</span> Tree-Space Clustering
+      </a>
+      <a href="#notes-viewer" onclick="showDoc('notes-viewer')" id="sb-notes-viewer">
+        <span class="icon">🌳</span> Interactive HTML Viewer
       </a>
     </div>
     <div class="sidebar-section">
@@ -585,9 +605,14 @@
 const DOCS = {
   manual:     { file:'USER_MANUAL.md',                    icon:'📖', title:'User Manual',               desc:'Complete reference for all commands and options' },
   tutorial:   { file:'TUTORIAL.md',                       icon:'🎓', title:'Tutorial',                   desc:'Hands-on guide with worked examples across seven parts' },
-  'notes-ml': { file:'NOTES_ml_parameter_estimation.md',  icon:'📐', title:'ML Parameter Estimation',   desc:'Statistical model, closed-form MLE for β and the η scaling exponent' },
-  'notes-rf': { file:'NOTES_rf_hash_method.md',           icon:'🔢', title:'RF Hash Method',             desc:'Robinson-Foulds distances via 64-bit integer hashing' },
-  'notes-ts': { file:'NOTES_treespace_landscape.md',      icon:'🗺️', title:'Tree-Space Landscape',       desc:'Visualising and analysing the heuristic search landscape' }
+  'notes-hs':      { file:'NOTES_heuristic_search_options.md',        icon:'🔍', title:'Heuristic Search Options',       desc:'A guide to the options that control the hs search — what each does and when to change it' },
+  'notes-recon':   { file:'NOTES_species-gene-tree-reconciliation.md',icon:'🔀', title:'Species/Gene-Tree Reconciliation', desc:'How the recon criterion reconciles source trees against a candidate supertree, and rooting' },
+  'notes-decomp':  { file:'NOTES_gene_tree_decomposition.md',         icon:'✂️', title:'Gene-Tree Decomposition',        desc:'Splitting multi-copy gene family trees into maximal single-copy ortholog subtrees' },
+  'notes-ml':      { file:'NOTES_ml_parameter_estimation.md',         icon:'📐', title:'ML Parameter Estimation',        desc:'Statistical model, closed-form MLE for β and the η scaling exponent' },
+  'notes-rf':      { file:'NOTES_rf_hash_method.md',                  icon:'🔢', title:'RF Hash Method',                 desc:'Robinson-Foulds distances via 64-bit integer hashing' },
+  'notes-ts':      { file:'NOTES_treespace_landscape.md',             icon:'🗺️', title:'Tree-Space Landscape',           desc:'Visualising and analysing the heuristic search landscape' },
+  'notes-cluster': { file:'NOTES_treespace_clustering.md',            icon:'🧩', title:'Tree-Space Clustering',          desc:'Clustering visited topologies with clusterlandscape and the recluster command' },
+  'notes-viewer':  { file:'NOTES_html_viewer.md',                     icon:'🌳', title:'Interactive HTML Viewer',        desc:'The self-contained interactive HTML tree/reconciliation viewer Clann can emit' }
 };
 const RAW = 'https://raw.githubusercontent.com/ChrisCreevey/clann/master/';
 const cache = {};
@@ -687,6 +712,18 @@ function homeHTML() {
     <div class="doc-icon">🎓</div>
     <div class="doc-info"><h3>Tutorial</h3><p>Seven-part hands-on guide: basic HS search, OpenMP parallelism, ML vs RF comparison, topology tests, multi-copy gene trees, tree-space landscape, and Snakemake pipeline integration.</p></div>
   </li>
+  <li onclick="showDoc('notes-hs')">
+    <div class="doc-icon">🔍</div>
+    <div class="doc-info"><h3>Technical Note — Heuristic Search Options</h3><p>A practical guide to every option that steers the <code>hs</code> search — what it does, how it interacts with the others, and when to change it.</p></div>
+  </li>
+  <li onclick="showDoc('notes-recon')">
+    <div class="doc-icon">🔀</div>
+    <div class="doc-info"><h3>Technical Note — Species/Gene-Tree Reconciliation</h3><p>How the <code>recon</code> criterion reconciles each source tree against a candidate supertree to score duplications and losses, and how rooting is handled.</p></div>
+  </li>
+  <li onclick="showDoc('notes-decomp')">
+    <div class="doc-icon">✂️</div>
+    <div class="doc-info"><h3>Technical Note — Gene-Tree Decomposition</h3><p>Splitting multi-copy gene family trees into maximal single-copy ortholog subtrees by collapsing in-paralogues and cutting at reconciled duplication nodes.</p></div>
+  </li>
   <li onclick="showDoc('notes-ml')">
     <div class="doc-icon">📐</div>
     <div class="doc-info"><h3>Technical Note — ML Parameter Estimation</h3><p>Statistical foundations: the Steel &amp; Rodrigo model, closed-form MLE for β, the η scaling exponent, and the Bryant &amp; Steel normalising constant Z<sub>T</sub>.</p></div>
@@ -698,6 +735,14 @@ function homeHTML() {
   <li onclick="showDoc('notes-ts')">
     <div class="doc-icon">🗺️</div>
     <div class="doc-info"><h3>Technical Note — Tree-Space Landscape</h3><p>Visualising the search landscape: MDS scatter plots, score histograms, SPR neighbour graphs and 3-D score surfaces, with complete Python code examples.</p></div>
+  </li>
+  <li onclick="showDoc('notes-cluster')">
+    <div class="doc-icon">🧩</div>
+    <div class="doc-info"><h3>Technical Note — Tree-Space Clustering</h3><p>Clustering the topologies visited during a search with <code>clusterlandscape</code> and the standalone <code>recluster</code> command.</p></div>
+  </li>
+  <li onclick="showDoc('notes-viewer')">
+    <div class="doc-icon">🌳</div>
+    <div class="doc-info"><h3>Technical Note — Interactive HTML Viewer</h3><p>The self-contained interactive HTML tree/reconciliation viewer Clann can emit — pan, zoom, reroot and export, all in a single offline file.</p></div>
   </li>
   <li onclick="window.open('McInerney-chapter.pdf','_blank')">
     <div class="doc-icon">📑</div>
@@ -843,14 +888,18 @@ function webclientHTML() {
 <h2 class="section-heading">Screenshots</h2>
 <div class="shot-grid">
   <figure class="shot">
-    <img src="images/webclient-light.png" alt="Clann web client in light mode: session panel, run form and results with an interactive supertree viewer" loading="lazy">
-    <figcaption>The full flow — load data, configure a run, and explore the resulting supertree (light theme).</figcaption>
+    <img src="images/webclient-light.png" alt="Clann web client in light mode: session panel with taxa and gene-family counts, output files, and the run panel with the optimality-criterion selector and typed hs option form" loading="lazy">
+    <figcaption>Session &amp; data on the left, a typed command form on the right — pick an optimality criterion, set every option, and run (light theme).</figcaption>
   </figure>
   <figure class="shot">
-    <img src="images/webclient-dark.png" alt="Clann web client in dark mode showing the same session, run form and tree viewer" loading="lazy">
-    <figcaption>A considered dark theme for long analysis sessions — same layout, same tree viewer.</figcaption>
+    <img src="images/webclient-dark.png" alt="Clann web client in dark mode showing the same session panel, output files and run form" loading="lazy">
+    <figcaption>A considered dark theme for long analysis sessions — same layout, same controls.</figcaption>
   </figure>
 </div>
+<figure class="shot" style="margin:1rem 0">
+  <img src="images/webclient-viewer.png" alt="The interactive tree viewer: a supertree rendered as a cladogram with a controls panel for layout, row spacing, font size, reroot, ladderize and SVG/PDF export" loading="lazy">
+  <figcaption>Results open in the interactive viewer — reroot, collapse clades, switch cladogram/phylogram, highlight taxa, and export to SVG/PDF or copy the current Newick.</figcaption>
+</figure>
 
 <h2 class="section-heading">What you can do</h2>
 <div class="card-grid">
