@@ -42,6 +42,7 @@ For a list of papers that have cited Clann in their work see the [Clann google s
 
 # What's new in v5.1
 
+- **Web client** — run Clann entirely from your browser, no terminal required. `clann-web` starts a local, single-user server (bound to `127.0.0.1`) that lets you upload source-tree files, pick commands from menus, set options through typed forms, watch a live streaming log, and explore the resulting supertree/reconciliation in an embedded interactive viewer. It runs offline against a hardened, shell-free build of Clann. See [clann_web/README.md](clann_web/README.md).
 - **Decompose gene trees** - Decomposes multi-copy gene family trees into maximal single-copy-ish ortholog subtrees, by collapsing in-paralogs and cutting at well-supported duplication nodes against a guide (species) tree. Duplication nodes are determined using the built-in gene-tree/species-tree reconciliation algoirithm.
 
 # What's new in v5
