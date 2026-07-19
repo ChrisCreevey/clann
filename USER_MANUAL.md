@@ -696,7 +696,7 @@ usertrees candidates.ph tests=yes normcorrect          # correct absolute lnL
 
 ### mlscores
 
-Estimate the maximum-likelihood parameters of the Steel & Rodrigo (2008) model for the supertree **currently in memory** (e.g. the result of a preceding `hs` or `nj` run). The global slope β is estimated in closed form as β̂ = W / WD, where W is the sum of source-tree weights and WD is the weighted sum of (scaled) RF distances. The estimated value updates the global `mlbeta`, so subsequent `hs` / `bootstrap` runs under `criterion=ml` use it automatically. See the [ML Parameter Estimation technical note](NOTES_ml_parameter_estimation.md) for the derivation.
+Estimate the maximum-likelihood parameters of the Steel & Rodrigo (2008) model for the supertree **currently in memory** (e.g. the result of a preceding `hs` or `nj` run). The global slope β is estimated in closed form as β̂ = W / WD, where W is the sum of source-tree weights and WD is the weighted sum of (scaled) RF distances. The estimated value updates the global `mlbeta`, so subsequent `hs` / `bootstrap` runs under `criterion=ml` use it automatically. See the [ML Parameter Estimation technical note](https://github.com/ChrisCreevey/clann/blob/master/NOTES_ml_parameter_estimation.md) for the derivation.
 
 ```
 mlscores [options]
