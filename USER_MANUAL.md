@@ -311,6 +311,8 @@ exe <filename> [options]
 | `summary` | `short`, `long` | `long` | Controls how much detail is printed about loaded trees. |
 | `autoprunemono` | `yes`, `no` | `no` | At load time, prune monophyletic same-species clades from multicopy trees. Trees that become single-copy after pruning are promoted into the supertree search pool. Trees that remain multicopy after pruning (genuine deep paralogs) stay in the multicopy pool for `reconstruct`. Original unpruned trees are preserved for `reconstruct`. See [Autoprunemono](#autoprunemono) below. |
 | `autodecompose` | `yes`, `no` | `no` | At load time, decompose multicopy gene family trees into maximal single-copy-ish ortholog subtree fragments (cutting at well-supported duplication nodes, collapsing pure in-paralogs, dropping/merging fragments below the informativeness floor), and commit the resulting fragments into the supertree search pool in place of the original multicopy trees. The original pristine gene trees are preserved in memory for `reconstruct`. See [Autodecompose](#autodecompose) below. |
+| `autoweight` | `clan`, `splitviol`, `bootstrap` | *(off)* | At load time, automatically assign a weight to each source tree (overriding any weights read from the input file). See [Source-tree weighting](#source-tree-weighting-autoweight) below. |
+| `clanfile` | `<filename>` | *(none)* | Clan definition file required by `autoweight=clan` and `autoweight=splitviol`: one clan per line, taxon names separated by spaces or commas; lines beginning with `#` are comments. |
 
 **Examples:**
 ```
@@ -319,7 +321,21 @@ exe trees.ph maxnamelen=full
 exe trees.ph delimiter_char=_ summary=short
 exe mydata.ph autoprunemono=yes
 exe mydata.ph autodecompose=yes
+exe mydata.ph autoweight=bootstrap
+exe mydata.ph autoweight=clan clanfile=clans.txt
 ```
+
+#### Source-tree weighting (`autoweight`)
+
+Every source tree carries a weight that scales its contribution to the total score under all criteria (for `criterion=ml` the weight acts as a per-tree β; see [Section 4.1](#41-optimality-criteria)). Weights normally come from the input file (defaulting to `1.0`), but `autoweight` derives them automatically at load time:
+
+| Mode | Weight assigned | Needs `clanfile`? |
+|------|-----------------|-------------------|
+| `bootstrap` | Mean bootstrap support across the tree's bipartitions. Internal-node labels > 1 are treated as percentages and divided by 100; trees with no support labels are assigned weight `1.0`. | No |
+| `clan` | `compatible_clans / testable_clans` — the fraction of user-defined clans the tree is compatible with (a per-clan metric). | Yes |
+| `splitviol` | `1 − violated_splits / total_splits` — a per-split compatibility metric. A split is "violated" only when non-clan taxa appear on both sides (internal clan splits are not counted). | Yes |
+
+`autoweight` can also be set on an already-loaded dataset with `set autoweight=<mode>` (with `set clanfile=<file>` for the `clan`/`splitviol` modes). The per-tree weights are reported by `showtrees`.
 
 ---
 
@@ -337,6 +353,8 @@ set <parameter>=<value>
 | `seed` | `<integer>` | Random number seed for reproducibility. Default is based on system time and process ID. |
 | `mlbeta` | `<float > 0>` | Global slope parameter β for the ML exponential model (Steel & Rodrigo 2008). Controls how steeply the likelihood decays with increasing RF distance — larger β penalises disagreement more strongly and implies higher confidence in the gene trees. Default: `1.0`. If per-tree weights are supplied in the input file, the effective per-tree slope is β × w_i, so weights are a natural way to encode differential confidence across gene trees. Only relevant when `criterion=ml`. |
 | `mlscale` | `paper`, `lust`, `lnl` | Scoring convention for the ML criterion. `lnl` (default) reports lnL = −β·Σd_i, matching the sign convention of standard ML tools (negative, higher is better). `paper` reports β·Σd_i directly as in Steel & Rodrigo (2008) (positive, lower is better). `lust` applies an additional log₁₀(e) factor to match the original L.U.st Python tool of Akanni *et al.* (2014) exactly. |
+| `autoweight` | `clan`, `splitviol`, `bootstrap` | Re-weight the source trees currently in memory. Equivalent to the `exe` option of the same name — see [Source-tree weighting](#source-tree-weighting-autoweight). |
+| `clanfile` | `<filename>` | Clan definition file used by `autoweight=clan` / `autoweight=splitviol`. |
 
 **Examples:**
 ```
@@ -346,6 +364,7 @@ set criterion=ml
 set mlbeta=2.0
 set mlscale=lnl
 set seed=12345
+set autoweight=bootstrap
 ```
 
 ---
@@ -577,8 +596,11 @@ usertrees <filename> [options]
 |--------|--------|---------|-------------|
 | `outfile` | `<filename>` | `Usertrees_result.txt` | Output file for scores. |
 | `printsourcescores` | `yes`, `no` | `no` | Also print the score of each individual source tree against the best user tree. |
+| `scorematrix` | `yes`, `no` | `no` | Write a tab-delimited matrix of every source tree's score against every candidate topology (rows = source trees, columns = candidates), including each source tree's size and weight. Useful for identifying which source trees are decisive between competing supertrees. |
+| `scorematrixfile` | `<filename>` | `usertrees_scorematrix.txt` | Output file for the `scorematrix=yes` table. |
 | `tests` | `yes`, `no` | `no` | Run ML topology tests after scoring. Only valid with `criterion=ml`. |
 | `nboot` | `<integer>` | `1000` | Bootstrap replicates for the SH test. |
+| `nthreads` | `<integer>` | all CPUs | Number of OpenMP threads used for the SH-test bootstrap resampling (only relevant with `tests=yes`). |
 | `testsfile` | `<filename>` | `mltest_results.txt` | File for per-gene-tree δ breakdown table. |
 | `normcorrect` | *(flag)* | off | Apply the Bryant & Steel (2008) normalising constant correction to all reported lnL values. Only active with `criterion=ml` and `mlscale=lnl`. See below. |
 
@@ -664,6 +686,7 @@ usertrees candidates.ph tests=yes normcorrect
 ```
 usertrees mytopology.ph
 usertrees candidates.ph outfile=scores.txt printsourcescores=yes
+usertrees candidates.ph scorematrix=yes                 # per-source-tree score matrix
 usertrees candidates.ph tests=yes nboot=1000
 usertrees candidates.ph tests=yes normcorrect          # correct absolute lnL
 ```
@@ -786,6 +809,7 @@ showtrees [filter options]
 | `savetrees` | `yes`, `no` | `no` | Whether to save the displayed trees to a file. |
 | `filename` | `<filename>` | `showtrees.txt` | Output file (when `savetrees=yes`). |
 | `htmlview` | `<filename>`, `yes` | *(none)* | Also write the displayed gene tree(s) as one self-contained interactive HTML viewer (`yes` names it `<input>.trees.html`). Honours the same filter options. See [Interactive HTML tree viewer](#interactive-html-tree-viewer). |
+| `fullnames` | *(flag)* | off | Show the full, undelimited taxon names rather than the delimiter-trimmed species names. |
 
 Filter options are the same as `savetrees` (`range`, `size`, `namecontains`, `containstaxa`, `score`).
 
