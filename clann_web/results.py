@@ -236,14 +236,44 @@ def parse_tree_file(text: str):
 
 
 def _count_events(node: dict):
-    """(duplications, losses) among this node and its descendants."""
+    """(duplications, losses) among this node and its descendants.
+
+    Losses are counted per *maximal* fully-lost subtree, not per lost leaf: a
+    whole clade lost together is a single loss event. A subtree is fully lost
+    when every leaf at or below it is a loss; the loss is tallied on the top
+    edge of that clade (i.e. once its parent is not itself fully lost)."""
+    dups, losses, _ = _count_events_rec(node)
+    # Degenerate case: the entire tree is a lost clade — count it once.
+    if _fully_lost(node):
+        losses += 1
+    return dups, losses
+
+
+def _fully_lost(node: dict) -> bool:
+    children = node.get("children")
+    if not children:
+        return node.get("event") == "loss"
+    return all(_fully_lost(c) for c in children)
+
+
+def _count_events_rec(node: dict):
+    """Returns (dups, losses, fully_lost) for the subtree at `node`."""
     dups = 1 if node.get("event") == "duplication" else 0
-    losses = 1 if node.get("event") == "loss" else 0
-    for c in node.get("children", ()):
-        d, l = _count_events(c)
+    losses = 0
+    children = node.get("children", ())
+    if not children:
+        return dups, losses, node.get("event") == "loss"
+    child_fully_lost = []
+    for c in children:
+        d, l, fl = _count_events_rec(c)
         dups += d
         losses += l
-    return dups, losses
+        child_fully_lost.append(fl)
+    fully_lost = all(child_fully_lost)
+    if not fully_lost:
+        # Each fully-lost child under this surviving node is one loss event.
+        losses += sum(1 for fl in child_fully_lost if fl)
+    return dups, losses, fully_lost
 
 
 def _has_event(node: dict) -> bool:

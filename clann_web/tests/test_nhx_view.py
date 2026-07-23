@@ -46,6 +46,27 @@ def test_nhx_events_and_counts():
     assert loss["event"] == "loss" and loss["name"] == "Gorilla"
 
 
+# A whole clade lost together is ONE loss, not one per lost leaf. This tree has
+# a single duplication; copy A loses Macaque (1 loss); copy B loses the
+# (Human,Chimp,Gorilla) clade together (1 loss) and Orangutan (1 loss) → 3.
+CLADE_LOSS = (
+    "# tree_0  (score=4.0000)\n"
+    "((Cat[&&NHX:S=Cat:D=N],((Mouse[&&NHX:S=Mouse:D=N],Rat[&&NHX:S=Rat:D=N])[&&NHX:D=N],"
+    "(((((Human[&&NHX:S=Human:D=N],Chimp[&&NHX:S=Chimp:D=N])[&&NHX:D=N],"
+    "Gorilla[&&NHX:S=Gorilla:D=N])[&&NHX:D=N],Macaque*LOST[&&NHX:S=Macaque])[&&NHX:D=N],"
+    "Orangutan[&&NHX:S=Orangutan:D=N])[&&NHX:D=N],"
+    "((((Human*LOST[&&NHX:S=Human],Chimp*LOST[&&NHX:S=Chimp])[&&NHX:D=N],"
+    "Gorilla*LOST[&&NHX:S=Gorilla])[&&NHX:D=N],Macaque[&&NHX:S=Macaque:D=N])[&&NHX:D=N],"
+    "Orangutan*LOST[&&NHX:S=Orangutan])[&&NHX:D=N])[&&NHX:D=Y])[&&NHX:D=N])[&&NHX:D=N],"
+    "Dog[&&NHX:S=Dog:D=N]);\n"
+)
+
+
+def test_clade_loss_counted_once():
+    t = parse_tree_file(CLADE_LOSS)[0]
+    assert (t["dups"], t["losses"]) == (1, 3)
+
+
 def test_nhx_document_is_reconciliation():
     doc = json.loads(build_tree_view_document(parse_tree_file(NHX), "reconstructions.nhx"))
     assert doc["type"] == "reconciliation"
