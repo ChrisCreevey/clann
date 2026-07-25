@@ -77,11 +77,11 @@ Clann can also be used from **Python** via the `pyclann` package — see [Python
 
 # Visualising trees
 
-Trees produced by Clann — plain Newick (e.g. from `nj`, `hs`, `savetrees`) and the NHX reconciliation files written by `reconstruct` (`nhxfile=`), which carry duplication, loss, and species-mapping annotations — can be explored interactively in the standalone **Clann tree viewer**:
+Trees produced by Clann — plain Newick (e.g. from `nj`, `hs`, `savetrees`) and the NHX reconciliation files written by `reconstruct` (`nhxfile=`), which carry duplication, loss, and species-mapping annotations — can be explored interactively in the standalone **Clann Tree Viewer**:
 
 **https://chriscreevey.github.io/clann-tree-viewer/**
 
-It runs entirely in your browser (nothing is uploaded to a server): open a tree file to reroot, collapse clades, switch between cladogram and phylogram layouts, and export to SVG/PDF. It can be used online at the link above or hosted yourself — see the [clann-tree-viewer repository](https://github.com/ChrisCreevey/clann-tree-viewer).
+It runs entirely in your browser (nothing is uploaded to a server). Open Newick, NEXUS, or NHX files — or paste a tree straight in — then reroot (interactively or at the midpoint), collapse clades, colour and rename taxa, and switch between **cladogram, phylogram, and radial** layouts. Reconciliations show duplications, speciations, and losses, and can be exported to **SVG, PNG, PDF, Newick, or annotated NHX**. Use it online at the link above, or host it yourself — see the [clann-tree-viewer repository](https://github.com/ChrisCreevey/clann-tree-viewer).
 
 # Usage
 
